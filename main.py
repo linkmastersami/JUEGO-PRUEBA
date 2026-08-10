@@ -265,17 +265,21 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     await websocket.accept()
     room = rooms.setdefault(room_code, Room(room_code))
 
-    # Buscamos si ya existe un jugador con el mismo nombre en esta sala
-    player = next((p for p in room.players if p.name == player_name), None)
+    # Limpiamos espacios en blanco por si acaso
+    clean_name = player_name.strip()
+
+    # Buscamos si ya existe un jugador con el mismo nombre (ignorando mayúsculas/minúsculas)
+    player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower()), None)
 
     if player:
-        # --- RECONEXIÓN ---
+        # --- RECONEXIÓN EXITOSA ---
         player.ws = websocket
         player.connected = True
         room.log.append(f"{player.name} se reconectó a la partida.")
         await broadcast(room)
     else:
         # --- NUEVO JUGADOR ---
+        # Solo bloqueamos si la sala ya empezó Y NO es una reconexión
         if room.status != "waiting" or len(room.players) >= MAX_PLAYERS:
             await websocket.send_text(json.dumps(
                 {"type": "error", "message": "La sala ya está llena o la partida ya empezó."}
@@ -283,10 +287,10 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
             await websocket.close()
             return
 
-        pid = f"{player_name}-{random.randint(1000, 9999)}"
-        player = Player(pid, player_name, websocket)
+        pid = f"{clean_name}-{random.randint(1000, 9999)}"
+        player = Player(pid, clean_name, websocket)
         room.players.append(player)
-        room.log.append(f"{player_name} se unió a la sala.")
+        room.log.append(f"{clean_name} se unió a la sala.")
         await broadcast(room)
 
     try:
