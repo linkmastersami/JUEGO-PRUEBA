@@ -265,19 +265,29 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     await websocket.accept()
     room = rooms.setdefault(room_code, Room(room_code))
 
-    if room.status != "waiting" or len(room.players) >= MAX_PLAYERS:
-        await websocket.send_text(json.dumps(
-            {"type": "error", "message": "La sala ya está llena o la partida ya empezó."}
-        ))
-        await websocket.close()
-        return
+    # Buscamos si ya existe un jugador con el mismo nombre en esta sala
+    player = next((p for p in room.players if p.name == player_name), None)
 
-    pid = f"{player_name}-{random.randint(1000, 9999)}"
-    player = Player(pid, player_name, websocket)
-    room.players.append(player)
-    room.log.append(f"{player_name} se unió a la sala.")
+    if player:
+        # --- RECONEXIÓN ---
+        player.ws = websocket
+        player.connected = True
+        room.log.append(f"{player.name} se reconectó a la partida.")
+        await broadcast(room)
+    else:
+        # --- NUEVO JUGADOR ---
+        if room.status != "waiting" or len(room.players) >= MAX_PLAYERS:
+            await websocket.send_text(json.dumps(
+                {"type": "error", "message": "La sala ya está llena o la partida ya empezó."}
+            ))
+            await websocket.close()
+            return
 
-    await broadcast(room)
+        pid = f"{player_name}-{random.randint(1000, 9999)}"
+        player = Player(pid, player_name, websocket)
+        room.players.append(player)
+        room.log.append(f"{player_name} se unió a la sala.")
+        await broadcast(room)
 
     try:
         while True:
@@ -291,13 +301,13 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                     await broadcast(room)
 
             elif mtype == "reveal" and room.status == "playing" and room.phase == "reveal":
-                if room.current_player().id == pid:
+                if room.current_player().id == player.id:
                     color = msg.get("color")
                     if room.reveal_tile(color) is not None:
                         await broadcast(room)
 
             elif mtype == "clue" and room.status == "playing" and room.phase == "clue":
-                if room.current_player().id == pid:
+                if room.current_player().id == player.id:
                     action = msg.get("action")
                     faceup_index = msg.get("faceup_index")
                     ok = False
@@ -310,12 +320,12 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
 
             elif mtype == "guess" and room.status == "playing":
                 numbers = msg.get("numbers", [])
-                room.guess(pid, numbers)
+                room.guess(player.id, numbers)
                 await broadcast(room)
 
     except WebSocketDisconnect:
         player.connected = False
-        room.log.append(f"{player.name} se desconectó.")
+        room.log.append(f"{player.name} se desconectó temporalmente.")
         try:
             await broadcast(room)
         except Exception:
