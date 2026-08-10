@@ -228,6 +228,11 @@ const gameScreen = document.getElementById('game-screen');
 
 // --- Conexión -------------------------------------------------------------
 document.getElementById('join-btn').onclick = () => {
+
+  soundTachar.play().catch(()=>{}); soundTachar.pause(); soundTachar.currentTime = 0;
+  soundCarta.play().catch(()=>{}); soundCarta.pause(); soundCarta.currentTime = 0;
+  soundTurno.play().catch(()=>{}); soundTurno.pause(); soundTurno.currentTime = 0;
+  
   const room = document.getElementById('room-input').value.trim().toUpperCase();
   const name = document.getElementById('name-input').value.trim();
   const errEl = document.getElementById('join-error');
