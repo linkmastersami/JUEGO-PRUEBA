@@ -264,8 +264,16 @@ document.getElementById('join-btn').onclick = () => {
       handleState(msg);
     }
   };
+
   ws.onclose = () => {
-    document.getElementById('status-line').textContent = 'Conexión cerrada.';
+    // Si se cae la red o entra una llamada, regresamos a la pantalla de entrada amigablemente
+    document.getElementById('status-line').textContent = 'Conexión perdida. Vuelve a entrar.';
+    setTimeout(() => {
+      gameScreen.classList.add('hidden');
+      waitScreen.classList.add('hidden');
+      joinScreen.classList.remove('hidden');
+      errEl.textContent = 'La conexión se interrumpió. Presiona "Entrar a la sala" para retomar tu lugar.';
+    }, 1000);
   };
 };
 
