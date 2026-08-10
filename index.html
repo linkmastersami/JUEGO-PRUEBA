@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Got Five!</title>
+<style>
+  :root {
+    --bg: #12141c;
+    --card: #1c1f2b;
+    --accent: #ffb703;
+    --accent2: #219ebc;
+    --text: #f1f1f1;
+    --muted: #8a8f9c;
+    --good: #4caf50;
+    --bad: #e53935;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+  h1 { text-align: center; font-size: 1.6rem; margin: 8px 0 4px; }
+  .subtitle { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+  .card {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #0e1017;
+    color: var(--text);
+    font-size: 1rem;
+    margin-bottom: 10px;
+  }
+  button {
+    width: 100%;
+    padding: 13px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #1a1a1a;
+    font-weight: 700;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button:disabled { background: #444; color: #999; cursor: not-allowed; }
+  button.secondary { background: var(--accent2); color: #fff; }
+  .row { display: flex; gap: 10px; }
+  .hidden { display: none !important; }
+  .board-title { font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+  .badge { font-size: 0.7rem; background: #333; padding: 3px 8px; border-radius: 20px; color: var(--muted); }
+  .badge.turn { background: var(--good); color: #fff; }
+  .tiles { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tile {
+    width: 46px; height: 46px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .tile.secret-hidden { background: #2a2e3d; border: 2px dashed #555; color: var(--muted); }
+  .tile.secret-known { background: #33415c; border: 2px solid var(--accent2); color: #fff; }
+  .tile.clue { background: var(--accent); color: #1a1a1a; }
+  .status-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
+  .log { max-height: 130px; overflow-y: auto; font-size: 0.8rem; color: var(--muted); }
+  .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
+  .guess-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
+  .guess-grid input { margin-bottom: 0; padding: 10px 4px; text-align: center; }
+  .result-banner { text-align: center; font-size: 1.1rem; font-weight: 700; padding: 14px; border-radius: 10px; margin-bottom: 14px; }
+  .result-banner.win { background: var(--good); }
+  .result-banner.lose { background: var(--bad); }
+  .error { color: var(--bad); font-size: 0.85rem; text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎯 Got Five!</h1>
+  <div class="subtitle">Prototipo — 2 jugadores en línea</div>
+
+  <!-- PANTALLA DE UNIÓN -->
+  <div id="join-screen" class="card">
+    <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
+    <input id="name-input" placeholder="Tu nombre" maxlength="16">
+    <button id="join-btn">Entrar a la sala</button>
+    <div id="join-error" class="error"></div>
+  </div>
+
+  <!-- PANTALLA DE JUEGO -->
+  <div id="game-screen" class="hidden">
+    <div class="status-line" id="status-line">Conectando...</div>
+
+    <div class="card" id="result-card" class="hidden"></div>
+
+    <div class="card">
+      <div class="board-title">
+        <span>Tu atril <span class="badge" id="turn-badge-you"></span></span>
+        <span class="badge">Baraja: <span id="pile-count">-</span></span>
+      </div>
+      <div class="tiles" id="your-board"></div>
+    </div>
+
+    <div class="card">
+      <div class="board-title">
+        <span id="opp-name">Oponente</span>
+        <span class="badge" id="turn-badge-opp"></span>
+      </div>
+      <div class="tiles" id="opp-board"></div>
+    </div>
+
+    <div class="card">
+      <button id="draw-btn">🎴 Robar ficha</button>
+    </div>
+
+    <div class="card">
+      <div class="board-title">¡GOT FIVE! — adivina tus 5 números (menor a mayor)</div>
+      <div class="guess-grid">
+        <input type="number" class="g-input" placeholder="#1">
+        <input type="number" class="g-input" placeholder="#2">
+        <input type="number" class="g-input" placeholder="#3">
+        <input type="number" class="g-input" placeholder="#4">
+        <input type="number" class="g-input" placeholder="#5">
+      </div>
+      <button id="guess-btn" class="secondary">¡GOT FIVE!</button>
+    </div>
+
+    <div class="card">
+      <div class="board-title">Historial</div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+let myId = null;
+
+const joinScreen = document.getElementById('join-screen');
+const gameScreen = document.getElementById('game-screen');
+
+document.getElementById('join-btn').onclick = () => {
+  const room = document.getElementById('room-input').value.trim().toUpperCase();
+  const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = '';
+  if (!room || !name) {
+    errEl.textContent = 'Escribe un código de sala y tu nombre.';
+    return;
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'error') {
+      errEl.textContent = msg.message;
+      ws.close();
+      return;
+    }
+    if (msg.type === 'state') {
+      joinScreen.classList.add('hidden');
+      gameScreen.classList.remove('hidden');
+      renderState(msg);
+    }
+  };
+  ws.onclose = () => {
+    document.getElementById('status-line').textContent = 'Conexión cerrada.';
+  };
+};
+
+document.getElementById('draw-btn').onclick = () => {
+  ws.send(JSON.stringify({type: 'draw'}));
+};
+
+document.getElementById('guess-btn').onclick = () => {
+  const inputs = document.querySelectorAll('.g-input');
+  const numbers = Array.from(inputs).map(i => parseInt(i.value, 10));
+  if (numbers.some(n => isNaN(n))) {
+    alert('Completa los 5 números.');
+    return;
+  }
+  ws.send(JSON.stringify({type: 'guess', numbers}));
+};
+
+function tileHtml(entry) {
+  if (entry.kind === 'clue') {
+    return `<div class="tile clue">${entry.value}</div>`;
+  }
+  if (entry.value === null) {
+    return `<div class="tile secret-hidden">?</div>`;
+  }
+  return `<div class="tile secret-known">${entry.value}</div>`;
+}
+
+function renderState(state) {
+  myId = state.your_id;
+  const you = state.players.find(p => p.is_you);
+  const opp = state.players.find(p => !p.is_you);
+
+  document.getElementById('pile-count').textContent = state.draw_pile_count;
+  document.getElementById('your-board').innerHTML = you ? you.board.map(tileHtml).join('') : '';
+  document.getElementById('opp-board').innerHTML = opp ? opp.board.map(tileHtml).join('') : '';
+  document.getElementById('opp-name').textContent = opp ? `Atril de ${opp.name}` : 'Esperando oponente...';
+
+  const isYourTurn = state.current_turn === myId;
+  document.getElementById('turn-badge-you').textContent = isYourTurn ? 'TU TURNO' : '';
+  document.getElementById('turn-badge-you').className = 'badge' + (isYourTurn ? ' turn' : '');
+  document.getElementById('turn-badge-opp').textContent = (!isYourTurn && state.status === 'playing') ? 'SU TURNO' : '';
+  document.getElementById('turn-badge-opp').className = 'badge' + (!isYourTurn && state.status === 'playing' ? ' turn' : '');
+
+  const drawBtn = document.getElementById('draw-btn');
+  const guessBtn = document.getElementById('guess-btn');
+  const youEliminated = you && you.eliminated;
+
+  if (state.status === 'waiting') {
+    document.getElementById('status-line').textContent = 'Esperando al segundo jugador...';
+    drawBtn.disabled = true;
+    guessBtn.disabled = true;
+  } else if (state.status === 'playing') {
+    document.getElementById('status-line').textContent = isYourTurn ? '¡Es tu turno!' : `Turno de ${state.current_turn_name}`;
+    drawBtn.disabled = !isYourTurn || youEliminated;
+    guessBtn.disabled = youEliminated;
+  } else if (state.status === 'finished') {
+    const won = state.winner === myId;
+    document.getElementById('status-line').textContent = 'Partida terminada.';
+    drawBtn.disabled = true;
+    guessBtn.disabled = true;
+    const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
+    const card = document.getElementById('result-card');
+    card.classList.remove('hidden');
+    card.className = 'card result-banner ' + (won ? 'win' : 'lose');
+    card.textContent = won ? '🎉 ¡Ganaste! GOT FIVE!' : `😞 Ganó ${winnerName}`;
+  }
+
+  const logEl = document.getElementById('log');
+  logEl.innerHTML = state.log.map(l => `<div>${l}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+</script>
+</body>
+</html>
