@@ -303,6 +303,16 @@ function dotsStr(n) { return '●'.repeat(n); }
 function buildRefGrid() {
   const grid = document.getElementById('ref-grid');
   grid.innerHTML = '';
+
+  // Recuperar las fichas tachadas guardadas en este navegador (usando el código de sala como llave para separarlas)
+  const roomCode = document.getElementById('room-input').value.trim().toUpperCase() || 'default';
+  const savedCrossed = localStorage.getItem(`crossed_${roomCode}`);
+  if (savedCrossed) {
+    try {
+      JSON.parse(savedCrossed).forEach(n => crossedOut.add(n));
+    } catch (e) {}
+  }
+
   for (const color of COLORS) {
     const row = document.createElement('div');
     row.className = 'ref-row';
@@ -313,14 +323,27 @@ function buildRefGrid() {
       el.className = 'ref-tile';
       el.style.background = COLOR_HEX[color];
       el.dataset.n = n;
+      
+      // Aplicar la clase 'crossed' si ya estaba guardada previamente
+      if (crossedOut.has(n)) {
+        el.classList.add('crossed');
+      }
+
       el.innerHTML = `${n}<span class="rt-dots">${dotsStr(info.dots)}</span>`;
       el.onclick = () => {
         // Reproducir sonido al tachar
-        soundTachar.currentTime = 0; // Reinicia el audio por si tocas varios rápido
+        soundTachar.currentTime = 0;
         soundTachar.play().catch(e => console.log("Audio bloqueado:", e));
         
-        if (crossedOut.has(n)) crossedOut.delete(n); else crossedOut.add(n);
+        if (crossedOut.has(n)) {
+          crossedOut.delete(n);
+        } else {
+          crossedOut.add(n);
+        }
         el.classList.toggle('crossed', crossedOut.has(n));
+
+        // Guardar automáticamente en el navegador
+        localStorage.setItem(`crossed_${roomCode}`, JSON.stringify(Array.from(crossedOut)));
       };
       row.appendChild(el);
     }
