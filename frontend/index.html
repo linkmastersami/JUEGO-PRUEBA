@@ -210,6 +210,10 @@ let selectedFaceupIndex = null;
 let compareMode = false;
 const crossedOut = new Set();
 
+const soundTachar = new Audio('tachar.mp3');
+const soundCarta = new Audio('carta.mp3');
+const soundTurno = new Audio('turno.mp3');
+
 const COLORS = ["green", "pink", "blue", "red", "orange"];
 const COLOR_HEX = {
   green: "#3f9142", pink: "#d17fae", blue: "#3f97a6", red: "#d1453f", orange: "#e8933f"
@@ -290,6 +294,10 @@ function buildRefGrid() {
       el.dataset.n = n;
       el.innerHTML = `${n}<span class="rt-dots">${dotsStr(info.dots)}</span>`;
       el.onclick = () => {
+        // Reproducir sonido al tachar
+        soundTachar.currentTime = 0; // Reinicia el audio por si tocas varios rápido
+        soundTachar.play().catch(e => console.log("Audio bloqueado:", e));
+        
         if (crossedOut.has(n)) crossedOut.delete(n); else crossedOut.add(n);
         el.classList.toggle('crossed', crossedOut.has(n));
       };
@@ -302,6 +310,23 @@ buildRefGrid();
 
 // --- Render principal ------------------------------------------------------
 function handleState(state) {
+  
+  // --- NUEVO: Detección de eventos para sonidos ---
+  if (lastState) {
+    // 1. ¿Cambió el turno a otro jugador?
+    if (lastState.current_turn !== state.current_turn && state.status === 'playing') {
+      soundTurno.currentTime = 0;
+      soundTurno.play().catch(() => {});
+    }
+    // 2. ¿Alguien reveló una carta nueva en la reserva?
+    if (state.faceup && lastState.faceup && state.faceup.length > lastState.faceup.length) {
+      soundCarta.currentTime = 0;
+      soundCarta.play().catch(() => {});
+    }
+  }
+  // ------------------------------------------------
+
+  // Actualizamos el historial después de revisar los sonidos
   lastState = state;
   myId = state.your_id;
 
