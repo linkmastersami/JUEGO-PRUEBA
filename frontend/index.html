@@ -104,7 +104,6 @@
   .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
 
   /* --- Reference table --- */
-  .ref-toggle { width: 100%; text-align: left; background: #2a2e3d; color: var(--text); margin-bottom: 0; }
   .ref-table { margin-top: 10px; }
   .ref-notes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
   .ref-notes input { margin-bottom: 0; padding: 8px 4px; text-align: center; font-size: 0.85rem; }
@@ -144,6 +143,22 @@
 
     <div id="result-card" class="card hidden"></div>
 
+    <!-- Tabla de referencia SIEMPRE VISIBLE Y HASTA ARRIBA -->
+    <div class="card">
+      <div class="board-title">📋 Tabla de las 60 fichas (tacha las que descartes)</div>
+      <div id="ref-table-wrap" class="ref-table">
+        <div class="ref-notes">
+          <input class="note-input" placeholder="#1">
+          <input class="note-input" placeholder="#2">
+          <input class="note-input" placeholder="#3">
+          <input class="note-input" placeholder="#4">
+          <input class="note-input" placeholder="#5">
+        </div>
+        <div id="ref-grid"></div>
+        <div class="action-hint">Toca una ficha para tacharla. Solo tú la ves — no se comparte con nadie.</div>
+      </div>
+    </div>
+
     <!-- Tu atril -->
     <div class="card">
       <div class="board-title">
@@ -177,22 +192,6 @@
         <input type="number" class="g-input" placeholder="#5">
       </div>
       <button class="secondary full" id="guess-btn">¡GOT FIVE!</button>
-    </div>
-
-    <!-- Tabla de referencia -->
-    <div class="card">
-      <button class="ref-toggle full" id="ref-toggle-btn">📋 Ver tabla de las 60 fichas (tacha las que descartes)</button>
-      <div id="ref-table-wrap" class="ref-table hidden">
-        <div class="ref-notes">
-          <input class="note-input" placeholder="#1">
-          <input class="note-input" placeholder="#2">
-          <input class="note-input" placeholder="#3">
-          <input class="note-input" placeholder="#4">
-          <input class="note-input" placeholder="#5">
-        </div>
-        <div id="ref-grid"></div>
-        <div class="action-hint">Toca una ficha para tacharla. Solo tú la ves — no se comparte con nadie.</div>
-      </div>
     </div>
 
     <!-- Historial -->
@@ -265,10 +264,6 @@ document.getElementById('guess-btn').onclick = () => {
     return;
   }
   ws.send(JSON.stringify({type: 'guess', numbers}));
-};
-
-document.getElementById('ref-toggle-btn').onclick = () => {
-  document.getElementById('ref-table-wrap').classList.toggle('hidden');
 };
 
 // --- Utilidades de fichas ---------------------------------------------------
@@ -398,8 +393,14 @@ function renderGame(state) {
     </div>
   `).join('');
 
-  // Fila de fichas boca arriba
   const canPickClue = isYourTurn && state.status === 'playing' && state.phase === 'clue' && !youEliminated;
+
+  // NUEVO: Auto-seleccionar la ficha que se acaba de revelar (la última de la lista)
+  if (canPickClue && selectedFaceupIndex === null && state.faceup.length > 0) {
+    selectedFaceupIndex = state.faceup.length - 1;
+  }
+
+  // Fila de fichas boca arriba
   const faceupRow = document.getElementById('faceup-row');
   faceupRow.innerHTML = state.faceup.map((t, idx) => `
     <div class="faceup-tile ${canPickClue ? 'selectable' : ''} ${selectedFaceupIndex === idx ? 'selected' : ''}"
@@ -407,6 +408,7 @@ function renderGame(state) {
       ${t.number}<span class="dots">${dotsStr(t.dots)}</span>
     </div>
   `).join('');
+  
   if (canPickClue) {
     faceupRow.querySelectorAll('.faceup-tile').forEach(el => {
       el.onclick = () => {
@@ -476,6 +478,7 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
 
   // phase === 'clue'
   document.querySelector('#action-card .board-title').textContent = '2. Pide una pista';
+  
   if (selectedFaceupIndex === null) {
     content.innerHTML = `<div class="action-hint">Toca 1 ficha de la reserva (arriba) para elegirla.</div>`;
     return;
