@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Got Five!</title>
+<style>
+  :root {
+    --bg: #12141c;
+    --card: #1c1f2b;
+    --accent: #ffb703;
+    --accent2: #219ebc;
+    --text: #f1f1f1;
+    --muted: #8a8f9c;
+    --good: #4caf50;
+    --bad: #e53935;
+    --green: #3f9142;
+    --pink: #d17fae;
+    --blue: #3f97a6;
+    --red: #d1453f;
+    --orange: #e8933f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+  h1 { text-align: center; font-size: 1.6rem; margin: 8px 0 4px; }
+  .subtitle { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
+  .card {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  input {
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #0e1017;
+    color: var(--text);
+    font-size: 1rem;
+    margin-bottom: 10px;
+  }
+  button {
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #1a1a1a;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button.full { width: 100%; }
+  button:disabled { background: #444; color: #999; cursor: not-allowed; opacity: 0.6; }
+  button.secondary { background: var(--accent2); color: #fff; }
+  button.ghost { background: #2a2e3d; color: var(--text); border: 1px solid #3a3f52; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .hidden { display: none !important; }
+  .board-title { font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;}
+  .badge { font-size: 0.7rem; background: #333; padding: 3px 8px; border-radius: 20px; color: var(--muted); }
+  .badge.turn { background: var(--good); color: #fff; }
+  .badge.you { background: var(--accent2); color: #fff; }
+  .status-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
+
+  /* --- Atril / stand --- */
+  .stand { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; padding: 6px 2px 10px; }
+  .notch { min-width: 20px; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .notch-tile { width: 34px; height: 34px; border-radius: 6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size: 0.75rem; font-weight: 700; color: #1a1a1a; }
+  .slot-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .secret-tile { width: 52px; height: 52px; border-radius: 10px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight: 800; font-size: 1.1rem; color: #fff; flex-shrink:0; }
+  .secret-tile.hidden-tile { background: #2a2e3d; border: 2px dashed #555; color: var(--muted); font-size: 1.3rem; }
+  .dots { font-size: 0.6rem; letter-spacing: 1px; margin-top: 1px; }
+  .compare-stack { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .compare-tile { width: 30px; height: 30px; border-radius: 6px; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:700; color:#1a1a1a; position: relative; }
+  .compare-tile .mark { position:absolute; bottom:-6px; right:-4px; font-size: 0.8rem; }
+  .slot-num { font-size: 0.65rem; color: var(--muted); }
+
+  /* --- Faceup row --- */
+  .faceup-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .faceup-tile { width: 54px; height: 54px; border-radius: 10px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:800; color:#fff; cursor: default; border: 3px solid transparent; }
+  .faceup-tile.selectable { cursor: pointer; }
+  .faceup-tile.selected { border-color: var(--accent); transform: scale(1.05); }
+
+  .color-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .color-btn { width: 54px; height: 54px; border-radius: 10px; border: none; font-weight: 800; color: #fff; font-size: 0.75rem; }
+
+  .action-hint { text-align:center; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
+
+  .guess-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
+  .guess-grid input { margin-bottom: 0; padding: 10px 4px; text-align: center; }
+  .result-banner { text-align: center; font-size: 1.1rem; font-weight: 700; padding: 14px; border-radius: 10px; margin-bottom: 14px; }
+  .result-banner.win { background: var(--good); }
+  .result-banner.lose { background: var(--bad); }
+  .error { color: var(--bad); font-size: 0.85rem; text-align: center; margin-top: 6px; }
+  .log { max-height: 130px; overflow-y: auto; font-size: 0.8rem; color: var(--muted); }
+  .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
+
+  /* --- Reference table --- */
+  .ref-toggle { width: 100%; text-align: left; background: #2a2e3d; color: var(--text); margin-bottom: 0; }
+  .ref-table { margin-top: 10px; }
+  .ref-notes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
+  .ref-notes input { margin-bottom: 0; padding: 8px 4px; text-align: center; font-size: 0.85rem; }
+  .ref-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-bottom: 3px; }
+  .ref-tile { border-radius: 6px; padding: 4px 0; text-align: center; font-weight: 700; font-size: 0.72rem; color: #fff; cursor: pointer; user-select: none; }
+  .ref-tile .rt-dots { font-size: 0.5rem; display:block; }
+  .ref-tile.crossed { opacity: 0.25; text-decoration: line-through; }
+
+  .players-list { font-size: 0.9rem; color: var(--muted); margin-bottom: 10px; }
+  .players-list div { padding: 2px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎯 Got Five!</h1>
+  <div class="subtitle">2-4 jugadores en línea · fiel al reglamento</div>
+
+  <!-- PANTALLA DE UNIÓN -->
+  <div id="join-screen" class="card">
+    <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
+    <input id="name-input" placeholder="Tu nombre" maxlength="16">
+    <button class="full" id="join-btn">Entrar a la sala</button>
+    <div id="join-error" class="error"></div>
+  </div>
+
+  <!-- PANTALLA DE ESPERA -->
+  <div id="wait-screen" class="card hidden">
+    <div class="board-title">Sala <span class="badge" id="wait-room-code"></span></div>
+    <div class="players-list" id="wait-players"></div>
+    <button class="full" id="start-btn">Iniciar partida</button>
+    <div class="action-hint" id="wait-hint"></div>
+  </div>
+
+  <!-- PANTALLA DE JUEGO -->
+  <div id="game-screen" class="hidden">
+    <div class="status-line" id="status-line">Conectando...</div>
+
+    <div id="result-card" class="card hidden"></div>
+
+    <!-- Tu atril -->
+    <div class="card">
+      <div class="board-title">
+        <span>Tu atril <span class="badge you">TÚ</span> <span class="badge" id="turn-badge-you"></span></span>
+      </div>
+      <div class="stand" id="your-stand"></div>
+    </div>
+
+    <!-- Atriles de oponentes -->
+    <div id="opponents-container"></div>
+
+    <!-- Ficha boca arriba / acciones de turno -->
+    <div class="card">
+      <div class="board-title">Fichas junto a la reserva</div>
+      <div class="faceup-row" id="faceup-row"></div>
+    </div>
+
+    <div class="card" id="action-card">
+      <div class="board-title">Tu turno</div>
+      <div id="action-content"></div>
+    </div>
+
+    <!-- GOT FIVE -->
+    <div class="card">
+      <div class="board-title">¡GOT FIVE! — adivina tus 5 números (menor a mayor)</div>
+      <div class="guess-grid">
+        <input type="number" class="g-input" placeholder="#1">
+        <input type="number" class="g-input" placeholder="#2">
+        <input type="number" class="g-input" placeholder="#3">
+        <input type="number" class="g-input" placeholder="#4">
+        <input type="number" class="g-input" placeholder="#5">
+      </div>
+      <button class="secondary full" id="guess-btn">¡GOT FIVE!</button>
+    </div>
+
+    <!-- Tabla de referencia -->
+    <div class="card">
+      <button class="ref-toggle full" id="ref-toggle-btn">📋 Ver tabla de las 60 fichas (tacha las que descartes)</button>
+      <div id="ref-table-wrap" class="ref-table hidden">
+        <div class="ref-notes">
+          <input class="note-input" placeholder="#1">
+          <input class="note-input" placeholder="#2">
+          <input class="note-input" placeholder="#3">
+          <input class="note-input" placeholder="#4">
+          <input class="note-input" placeholder="#5">
+        </div>
+        <div id="ref-grid"></div>
+        <div class="action-hint">Toca una ficha para tacharla. Solo tú la ves — no se comparte con nadie.</div>
+      </div>
+    </div>
+
+    <!-- Historial -->
+    <div class="card">
+      <div class="board-title">Historial</div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+let myId = null;
+let lastState = null;
+let selectedFaceupIndex = null;
+let compareMode = false;
+const crossedOut = new Set();
+
+const COLORS = ["green", "pink", "blue", "red", "orange"];
+const COLOR_HEX = {
+  green: "#3f9142", pink: "#d17fae", blue: "#3f97a6", red: "#d1453f", orange: "#e8933f"
+};
+const COLOR_NAME = {
+  green: "Verde", pink: "Rosa", blue: "Azul", red: "Rojo", orange: "Naranja"
+};
+
+const joinScreen = document.getElementById('join-screen');
+const waitScreen = document.getElementById('wait-screen');
+const gameScreen = document.getElementById('game-screen');
+
+// --- Conexión -------------------------------------------------------------
+document.getElementById('join-btn').onclick = () => {
+  const room = document.getElementById('room-input').value.trim().toUpperCase();
+  const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = '';
+  if (!room || !name) {
+    errEl.textContent = 'Escribe un código de sala y tu nombre.';
+    return;
+  }
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'error') {
+      errEl.textContent = msg.message;
+      ws.close();
+      return;
+    }
+    if (msg.type === 'state') {
+      joinScreen.classList.add('hidden');
+      handleState(msg);
+    }
+  };
+  ws.onclose = () => {
+    document.getElementById('status-line').textContent = 'Conexión cerrada.';
+  };
+};
+
+document.getElementById('start-btn').onclick = () => {
+  ws.send(JSON.stringify({type: 'start'}));
+};
+
+document.getElementById('guess-btn').onclick = () => {
+  const inputs = document.querySelectorAll('.g-input');
+  const numbers = Array.from(inputs).map(i => parseInt(i.value, 10));
+  if (numbers.some(n => isNaN(n))) {
+    alert('Completa los 5 números.');
+    return;
+  }
+  ws.send(JSON.stringify({type: 'guess', numbers}));
+};
+
+document.getElementById('ref-toggle-btn').onclick = () => {
+  document.getElementById('ref-table-wrap').classList.toggle('hidden');
+};
+
+// --- Utilidades de fichas ---------------------------------------------------
+function tileInfo(n) {
+  const color = COLORS[(n - 1) % 5];
+  const column = Math.floor((n - 1) / 5) + 1;
+  const dots = ((column - 1) % 3) + 1;
+  return {number: n, color, dots};
+}
+function dotsStr(n) { return '●'.repeat(n); }
+
+function buildRefGrid() {
+  const grid = document.getElementById('ref-grid');
+  grid.innerHTML = '';
+  for (const color of COLORS) {
+    const row = document.createElement('div');
+    row.className = 'ref-row';
+    for (let col = 1; col <= 12; col++) {
+      const n = COLORS.indexOf(color) + 1 + (col - 1) * 5;
+      const info = tileInfo(n);
+      const el = document.createElement('div');
+      el.className = 'ref-tile';
+      el.style.background = COLOR_HEX[color];
+      el.dataset.n = n;
+      el.innerHTML = `${n}<span class="rt-dots">${dotsStr(info.dots)}</span>`;
+      el.onclick = () => {
+        if (crossedOut.has(n)) crossedOut.delete(n); else crossedOut.add(n);
+        el.classList.toggle('crossed', crossedOut.has(n));
+      };
+      row.appendChild(el);
+    }
+    grid.appendChild(row);
+  }
+}
+buildRefGrid();
+
+// --- Render principal ------------------------------------------------------
+function handleState(state) {
+  lastState = state;
+  myId = state.your_id;
+
+  if (state.status === 'waiting') {
+    waitScreen.classList.remove('hidden');
+    gameScreen.classList.add('hidden');
+    document.getElementById('wait-room-code').textContent = state.room;
+    document.getElementById('wait-players').innerHTML = state.players
+      .map(p => `<div>👤 ${p.name}${p.is_you ? ' (tú)' : ''}</div>`).join('');
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = !state.can_start;
+    document.getElementById('wait-hint').textContent = state.can_start
+      ? `Cualquier jugador puede iniciar (${state.players.length}/${state.max_players}).`
+      : `Esperando al menos ${state.min_players} jugadores (${state.players.length}/${state.min_players}).`;
+    return;
+  }
+
+  waitScreen.classList.add('hidden');
+  gameScreen.classList.remove('hidden');
+  renderGame(state);
+}
+
+function secretTileHtml(entry) {
+  if (entry.hidden) {
+    // Usamos el color si está disponible, si no, gris por defecto
+    const bgColor = entry.color ? COLOR_HEX[entry.color] : '#2a2e3d';
+    return `<div class="secret-tile" style="background:${bgColor}; border: 2px dashed #555;">?</div>`;
+  }
+  return `<div class="secret-tile" style="background:${COLOR_HEX[entry.color]}">${entry.number}<span class="dots">${dotsStr(entry.dots)}</span></div>`;
+}
+
+function notchTileHtml(tile) {
+  return `<div class="notch-tile" style="background:${COLOR_HEX[tile.color]}">${tile.number}</div>`;
+}
+
+function compareTileHtml(clue) {
+  const mark = clue.same ? '✅' : '❌';
+  return `<div class="compare-tile" style="background:${COLOR_HEX[clue.tile.color]}">${clue.tile.number}<span class="mark">${mark}</span></div>`;
+}
+
+function renderStand(player) {
+  const notchTiles = {};
+  const compareBySlot = {};
+  (player.clues || []).forEach(c => {
+    if (c.kind === 'categorize') {
+      (notchTiles[c.notch] = notchTiles[c.notch] || []).push(c.tile);
+    } else {
+      (compareBySlot[c.slot] = compareBySlot[c.slot] || []).push(c);
+    }
+  });
+
+  let html = '';
+  for (let i = 0; i <= 5; i++) {
+    const tiles = notchTiles[i] || [];
+    html += `<div class="notch">${tiles.map(notchTileHtml).join('')}</div>`;
+    if (i < 5) {
+      const compares = compareBySlot[i] || [];
+      html += `<div class="slot-col">
+        <div class="compare-stack">${compares.map(compareTileHtml).join('')}</div>
+        ${secretTileHtml(player.secret[i])}
+        <div class="slot-num">#${i + 1}</div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function renderGame(state) {
+  const you = state.players.find(p => p.is_you);
+  const opponents = state.players.filter(p => !p.is_you);
+  const isYourTurn = state.current_turn === myId;
+  const youEliminated = you && you.eliminated;
+
+  document.getElementById('your-stand').innerHTML = you ? renderStand(you) : '';
+  document.getElementById('turn-badge-you').textContent = isYourTurn && state.status === 'playing' ? 'TU TURNO' : '';
+  document.getElementById('turn-badge-you').className = 'badge' + (isYourTurn && state.status === 'playing' ? ' turn' : '');
+  if (youEliminated) {
+    document.getElementById('turn-badge-you').textContent = 'ELIMINADO';
+  }
+
+  const oppContainer = document.getElementById('opponents-container');
+  oppContainer.innerHTML = opponents.map(opp => `
+    <div class="card">
+      <div class="board-title">
+        <span>Atril de ${opp.name}</span>
+        <span class="badge ${state.current_turn === opp.id ? 'turn' : ''}">${state.current_turn === opp.id ? 'SU TURNO' : (opp.eliminated ? 'ELIMINADO' : '')}</span>
+      </div>
+      <div class="stand">${renderStand(opp)}</div>
+    </div>
+  `).join('');
+
+  // Fila de fichas boca arriba
+  const canPickClue = isYourTurn && state.status === 'playing' && state.phase === 'clue' && !youEliminated;
+  const faceupRow = document.getElementById('faceup-row');
+  faceupRow.innerHTML = state.faceup.map((t, idx) => `
+    <div class="faceup-tile ${canPickClue ? 'selectable' : ''} ${selectedFaceupIndex === idx ? 'selected' : ''}"
+         style="background:${COLOR_HEX[t.color]}" data-idx="${idx}">
+      ${t.number}<span class="dots">${dotsStr(t.dots)}</span>
+    </div>
+  `).join('');
+  if (canPickClue) {
+    faceupRow.querySelectorAll('.faceup-tile').forEach(el => {
+      el.onclick = () => {
+        selectedFaceupIndex = parseInt(el.dataset.idx, 10);
+        compareMode = false;
+        renderGame(lastState);
+      };
+    });
+  }
+
+  renderActionPanel(state, isYourTurn, youEliminated);
+
+  // Status / botones generales
+  const guessBtn = document.getElementById('guess-btn');
+  const statusLine = document.getElementById('status-line');
+  const resultCard = document.getElementById('result-card');
+  resultCard.classList.add('hidden');
+
+  if (state.status === 'playing') {
+    statusLine.textContent = youEliminated
+      ? 'Fuiste eliminado. Puedes seguir viendo la partida.'
+      : (isYourTurn ? '¡Es tu turno!' : `Turno de ${state.current_turn_name}`);
+    guessBtn.disabled = youEliminated;
+  } else if (state.status === 'finished') {
+    const won = state.winner === myId;
+    statusLine.textContent = 'Partida terminada.';
+    guessBtn.disabled = true;
+    const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
+    resultCard.classList.remove('hidden');
+    resultCard.className = 'card result-banner ' + (won ? 'win' : 'lose');
+    resultCard.textContent = won ? '🎉 ¡Ganaste! GOT FIVE!' : `😞 Ganó ${winnerName}`;
+  }
+
+  const logEl = document.getElementById('log');
+  logEl.innerHTML = state.log.map(l => `<div>${l}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderActionPanel(state, isYourTurn, youEliminated) {
+  const card = document.getElementById('action-card');
+  const content = document.getElementById('action-content');
+
+  if (state.status !== 'playing' || !isYourTurn || youEliminated) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+
+  if (state.phase === 'reveal') {
+    document.querySelector('#action-card .board-title').textContent = '1. Revela una ficha';
+    content.innerHTML = `
+      <div class="action-hint">Elige de qué color robar una ficha de la reserva.</div>
+      <div class="color-buttons" id="color-buttons"></div>
+    `;
+    const colorButtons = document.getElementById('color-buttons');
+    COLORS.forEach(c => {
+      const btn = document.createElement('button');
+      btn.className = 'color-btn';
+      btn.style.background = COLOR_HEX[c];
+      btn.textContent = COLOR_NAME[c];
+      btn.disabled = !state.colors_available[c];
+      btn.onclick = () => ws.send(JSON.stringify({type: 'reveal', color: c}));
+      colorButtons.appendChild(btn);
+    });
+    return;
+  }
+
+  // phase === 'clue'
+  document.querySelector('#action-card .board-title').textContent = '2. Pide una pista';
+  if (selectedFaceupIndex === null) {
+    content.innerHTML = `<div class="action-hint">Toca 1 ficha de la reserva (arriba) para elegirla.</div>`;
+    return;
+  }
+
+  if (!compareMode) {
+    content.innerHTML = `
+      <div class="action-hint">Ficha elegida: <b>${state.faceup[selectedFaceupIndex]?.number ?? ''}</b>. ¿Qué pista pides?</div>
+      <div class="row">
+        <button class="full" id="btn-categorize">📍 Categorizar (¿dónde encaja?)</button>
+        <button class="full secondary" id="btn-compare">⚖️ Comparar puntitos</button>
+      </div>
+    `;
+    document.getElementById('btn-categorize').onclick = () => {
+      ws.send(JSON.stringify({type: 'clue', action: 'categorize', faceup_index: selectedFaceupIndex}));
+      selectedFaceupIndex = null;
+      compareMode = false;
+    };
+    document.getElementById('btn-compare').onclick = () => {
+      compareMode = true;
+      renderGame(lastState);
+    };
+  } else {
+    content.innerHTML = `
+      <div class="action-hint">¿Con cuál de tus 5 fichas ocultas comparo el número ${state.faceup[selectedFaceupIndex]?.number ?? ''}?</div>
+      <div class="row" id="slot-buttons"></div>
+      <button class="full ghost" id="btn-cancel-compare" style="margin-top:8px;">Cancelar</button>
+    `;
+    const slotButtons = document.getElementById('slot-buttons');
+    for (let i = 0; i < 5; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'ghost';
+      btn.textContent = `#${i + 1}`;
+      btn.onclick = () => {
+        ws.send(JSON.stringify({type: 'clue', action: 'compare', faceup_index: selectedFaceupIndex, slot: i}));
+        selectedFaceupIndex = null;
+        compareMode = false;
+      };
+      slotButtons.appendChild(btn);
+    }
+    document.getElementById('btn-cancel-compare').onclick = () => {
+      compareMode = false;
+      renderGame(lastState);
+    };
+  }
+}
+</script>
+</body>
+</html>
