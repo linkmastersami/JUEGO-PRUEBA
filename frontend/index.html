@@ -302,7 +302,7 @@
 <!-- CONTENEDOR DEL JUEGO -->
 <div class="wrap hidden" id="pantallaJuego">
   <h1>🎯 Got Five!</h1>
-  <div class="subtitle">2-4 jugadores en línea · fiel al reglamento</div>
+  <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
   <!-- HUD DEL JUGADOR -->
   <div id="perfilJugador" class="card" style="text-align: center; border: 2px solid var(--accent2);">
@@ -339,6 +339,14 @@
     <input id="name-input" type="hidden">
     <button class="full secondary" id="join-btn">Entrar a sala privada</button>
     <div id="join-error" class="error"></div>
+
+    <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
+      — o practica sin rivales —
+    </div>
+
+    <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
+      🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
+    </button>
   </div>
 
   <!-- PANTALLA DE ESPERA -->
@@ -611,7 +619,9 @@ const gameScreen = document.getElementById('game-screen');
 
 // --- CONEXIÓN Y EMPAREJAMIENTO AUTOMÁTICO ---
 
-function conectarSala(room, name) {
+let esModoSolo = false;
+
+function conectarSala(room, name, solo = false) {
   soundTachar.play().catch(() => {}); soundTachar.pause(); soundTachar.currentTime = 0;
   soundCarta.play().catch(() => {}); soundCarta.pause(); soundCarta.currentTime = 0;
   soundTurno.play().catch(() => {}); soundTurno.pause(); soundTurno.currentTime = 0;
@@ -624,8 +634,16 @@ function conectarSala(room, name) {
     return;
   }
 
+  esModoSolo = solo;
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
+
+  if (solo) {
+    ws.onopen = () => {
+      ws.send(JSON.stringify({type: 'start'}));
+    };
+  }
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -678,6 +696,12 @@ document.getElementById('btn-auto-join').onclick = async () => {
 
 document.getElementById('start-btn').onclick = () => {
   ws.send(JSON.stringify({type: 'start'}));
+};
+
+document.getElementById('btn-solo').onclick = () => {
+  const name = document.getElementById('name-input').value.trim() || usuarioActual;
+  const room = 'SOLO-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+  conectarSala(room, name, true);
 };
 
 document.getElementById('guess-btn').onclick = () => {
@@ -818,6 +842,13 @@ function handleState(state) {
   myId = state.your_id;
 
   if (state.status === 'waiting') {
+    if (state.mode === 'solo') {
+      // El modo solitario se autoinicia al conectar; esto es solo un
+      // instante de transición mientras llega el 'start' automático.
+      waitScreen.classList.add('hidden');
+      gameScreen.classList.add('hidden');
+      return;
+    }
     waitScreen.classList.remove('hidden');
     gameScreen.classList.add('hidden');
     document.getElementById('wait-room-code').textContent = state.room;
@@ -833,6 +864,14 @@ function handleState(state) {
 
   waitScreen.classList.add('hidden');
   gameScreen.classList.remove('hidden');
+
+  const subtitleEl = document.getElementById('game-subtitle');
+  if (subtitleEl) {
+    subtitleEl.textContent = state.mode === 'solo'
+      ? '🎯 Modo Solitario · puntos a la mitad'
+      : '2-4 jugadores en línea · fiel al reglamento';
+  }
+
   renderGame(state);
 }
 
@@ -973,16 +1012,27 @@ function renderGame(state) {
     const won = state.winner === myId;
     statusLine.textContent = 'Partida terminada.';
     guessBtn.disabled = true;
-    const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
-    
+
     resultCard.classList.remove('hidden');
     resultCard.className = 'card result-banner ' + (won ? 'win' : 'lose');
-    
+
+    let mensaje;
+    if (state.mode === 'solo') {
+      mensaje = won
+        ? '🎉 ¡GOT FIVE! Descifraste tu código en solitario.'
+        : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
+    } else {
+      const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
+      mensaje = won ? '🎉 ¡Ganaste! GOT FIVE!' : `😞 Ganó ${winnerName}`;
+    }
+
+    const botonTexto = state.mode === 'solo' ? '🔄 Jugar otra vez en solitario' : '🔄 Buscar nueva partida';
+
     // Inyección del botón de Reinicio en el Resultado
     resultCard.innerHTML = `
-      <div>${won ? '🎉 ¡Ganaste! GOT FIVE!' : `😞 Ganó ${winnerName}`}</div>
+      <div>${mensaje}</div>
       <button class="full" id="btn-reinicio" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
-        🔄 Buscar nueva partida
+        ${botonTexto}
       </button>
     `;
 
@@ -990,7 +1040,11 @@ function renderGame(state) {
       if (ws) ws.close();
       document.getElementById('game-screen').classList.add('hidden');
       document.getElementById('join-screen').classList.remove('hidden');
-      document.getElementById('btn-auto-join').click();
+      if (state.mode === 'solo') {
+        document.getElementById('btn-solo').click();
+      } else {
+        document.getElementById('btn-auto-join').click();
+      }
     };
   }
 
