@@ -396,7 +396,7 @@ class Room:
         su propio código. Si falla, la partida termina sin puntos."""
         if numbers == correct:
             cur.resolved = True
-            earned_points = self.deck_remaining() // 2
+            earned_points = (self.deck_remaining() // 2) * 1000
             update_player_score(cur.name, earned_points)
             self.status = "finished"
             self.winner = cur.id
