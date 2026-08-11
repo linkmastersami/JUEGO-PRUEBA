@@ -222,8 +222,9 @@ class Player:
 
 
 class Room:
-    def __init__(self, code: str):
+    def __init__(self, code: str, mode: str = "multi"):
         self.code = code
+        self.mode = mode  # "multi" o "solo"
         self.players: List[Player] = []
         self.status = "waiting"  
         self.phase = "reveal"  
@@ -389,11 +390,40 @@ class Room:
             self.winner = None
         return True
 
+    def _guess_solo(self, cur: "Player", numbers: List[int], correct: List[int]) -> None:
+        """Modo solitario: 1 jugador contra el mazo. Gana la mitad de las
+        fichas que quedan en el mazo (redondeado hacia abajo) al descifrar
+        su propio código. Si falla, la partida termina sin puntos."""
+        if numbers == correct:
+            cur.resolved = True
+            earned_points = self.deck_remaining() // 2
+            update_player_score(cur.name, earned_points)
+            self.status = "finished"
+            self.winner = cur.id
+            self.log.append(
+                f"¡{cur.name} descifró su código en solitario! Gana {earned_points} puntos "
+                f"(mitad del mazo restante, redondeado hacia abajo)."
+            )
+            self._record_event("correct", cur, earned_points, multiplier=1)
+        else:
+            cur.eliminated = True
+            self.status = "finished"
+            self.winner = None
+            self.log.append(
+                f"{cur.name} falló su código en solitario. Partida terminada sin puntos."
+            )
+            self._record_event("exploded", cur, 0)
+
     def guess(self, pid: str, numbers: List[int]) -> None:
         cur = self.get_player(pid)
         if cur is None or cur.eliminated or cur.resolved or self.status != "playing":
             return
         correct = [t["number"] for t in cur.secret]
+
+        if self.mode == "solo":
+            self._guess_solo(cur, numbers, correct)
+            return
+
         was_current = self.current_player().id == pid
 
         if numbers == correct:
@@ -434,6 +464,7 @@ class Room:
             "status": self.status,
             "phase": self.phase,
             "room": self.code,
+            "mode": self.mode,
             "faceup": self.faceup,
             "colors_available": self.colors_available(),
             "color_hex": COLOR_HEX,
@@ -450,7 +481,9 @@ class Room:
             "your_id": viewer_id,
             "min_players": MIN_PLAYERS,
             "max_players": MAX_PLAYERS,
-            "can_start": self.status == "waiting" and len(self.players) >= MIN_PLAYERS,
+            "can_start": self.status == "waiting" and (
+                self.mode == "solo" or len(self.players) >= MIN_PLAYERS
+            ),
         }
 
 
@@ -489,7 +522,8 @@ async def matchmake():
 @app.websocket("/ws/{room_code}/{player_name}")
 async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     await websocket.accept()
-    room = rooms.setdefault(room_code, Room(room_code))
+    room_mode = "solo" if room_code.upper().startswith("SOLO-") else "multi"
+    room = rooms.setdefault(room_code, Room(room_code, mode=room_mode))
 
     clean_name = player_name.strip()
     player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower()), None)
@@ -520,7 +554,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
             mtype = msg.get("type")
 
             if mtype == "start" and room.status == "waiting":
-                if len(room.players) >= MIN_PLAYERS:
+                if room.mode == "solo" or len(room.players) >= MIN_PLAYERS:
                     room.start()
                     await broadcast(room)
 
