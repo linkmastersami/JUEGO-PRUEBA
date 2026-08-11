@@ -356,7 +356,10 @@
     <div id="result-card" class="card hidden"></div>
 
     <div class="card">
-      <div class="board-title">📋 Tabla de las 60 fichas (tacha las que descartes)</div>
+      <div class="board-title">
+        <span>📋 Tabla de las 60 fichas (tacha las que descartes)</span>
+        <button class="ghost" id="reset-table-btn" style="padding: 6px 10px; font-size: 0.75rem;">↺ Reiniciar tabla</button>
+      </div>
       <div id="ref-table-wrap" class="ref-table">
         <div class="ref-notes">
           <input class="note-input" placeholder="#1">
@@ -742,6 +745,14 @@ function buildRefGrid() {
   }
 }
 buildRefGrid();
+
+document.getElementById('reset-table-btn').onclick = () => {
+  if (!confirm('¿Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
+  const roomCode = document.getElementById('room-input').value.trim().toUpperCase() || 'default';
+  crossedOut.clear();
+  localStorage.removeItem(`crossed_${roomCode}`);
+  document.querySelectorAll('#ref-grid .ref-tile.crossed').forEach(el => el.classList.remove('crossed'));
+};
 
 let lastEventSeq = 0;
 let colaAnimEventos = [];
