@@ -1094,8 +1094,8 @@ function procesarRondaMultijugador(nuevos, state) {
         icono: '⚔️',
         titulo: `¡${ganador.player_name} le ganó a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
         chips: [
-          { tipo: 'gano', texto: `${escaparHtml(ganador.player_name)}: +${ganador.points.toLocaleString()} pts` },
-          { tipo: 'perdio', texto: perdedor.points ? `${escaparHtml(perdedor.player_name)}: -${perdedor.points.toLocaleString()} pts` : `${escaparHtml(perdedor.player_name)}: eliminado` },
+          { tipo: 'gano', texto: `${ganador.player_name}: +${ganador.points.toLocaleString()} pts` },
+          { tipo: 'perdio', texto: perdedor.points ? `${perdedor.player_name}: -${perdedor.points.toLocaleString()} pts` : `${perdedor.player_name}: eliminado` },
         ],
       }, () => {
         if (ganador.player_id === myId) {
@@ -1194,15 +1194,6 @@ let selectedFaceupIndex = null;
 let compareMode = false;
 const crossedOut = new Set();
 
-// --- Reconexión automática (importante en móvil: se pierde el socket al
-// bloquear la pantalla, cambiar de wifi a datos, minimizar la app, etc.) ---
-let currentRoom = null;
-let currentName = null;
-let explicitClose = false;   // true cuando SOMOS nosotros quienes cerramos el socket a propósito
-let reconnectAttempts = 0;
-let reconnectTimer = null;
-const MAX_RECONNECT_ATTEMPTS = 6;
-
 const soundTachar = new Audio('tachar.mp3');
 const soundCarta = new Audio('carta.mp3');
 const soundTurno = new Audio('turno.mp3');
@@ -1223,10 +1214,10 @@ function conectarSala(room, name, solo = false) {
   soundTachar.play().catch(() => {}); soundTachar.pause(); soundTachar.currentTime = 0;
   soundCarta.play().catch(() => {}); soundCarta.pause(); soundCarta.currentTime = 0;
   soundTurno.play().catch(() => {}); soundTurno.pause(); soundTurno.currentTime = 0;
-
+  
   const errEl = document.getElementById('join-error');
   errEl.textContent = '';
-
+  
   if (!room || !name) {
     errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
@@ -1236,43 +1227,18 @@ function conectarSala(room, name, solo = false) {
   actualizarPerfilHUD(name);
   esModoSolo = solo;
 
-  // Guardamos sala/nombre/modo para poder reconectar solos si el socket se
-  // corta de forma inesperada (muy común en celulares).
-  currentRoom = room;
-  currentName = name;
-  explicitClose = false;
-  reconnectAttempts = 0;
-
-  abrirWebSocket();
-}
-
-// Crea el WebSocket y conecta sus handlers. Se usa tanto para la conexión
-// inicial como para cada intento de reconexión automática.
-function abrirWebSocket() {
-  const errEl = document.getElementById('join-error');
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(currentRoom)}/${encodeURIComponent(currentName)}`);
+  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
 
-  if (esModoSolo) {
+  if (solo) {
     ws.onopen = () => {
-      // En modo solitario solo mandamos 'start' en la conexión inicial, no
-      // en cada reconexión (si ya estaba en curso, el backend nos re-liga
-      // al jugador existente y nos manda el estado tal como iba).
-      if (reconnectAttempts === 0) {
-        ws.send(JSON.stringify({type: 'start'}));
-      }
+      ws.send(JSON.stringify({type: 'start'}));
     };
   }
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-
-    // Cualquier mensaje del servidor confirma que la conexión quedó sana:
-    // reseteamos el contador de reintentos.
-    reconnectAttempts = 0;
-
     if (msg.type === 'error') {
-      explicitClose = true;
       errEl.textContent = msg.message;
       ws.close();
       return;
@@ -1284,64 +1250,19 @@ function abrirWebSocket() {
   };
 
   ws.onclose = () => {
-    if (explicitClose) return; // cierre a propósito (salir, error del server): no reconectar
-
-    if (!currentRoom || !currentName) {
-      // No hay partida en curso a la cual volver.
-      return;
-    }
-
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      const room = currentRoom, name = currentName;
+    document.getElementById('status-line').textContent = 'Conexión perdida.';
+    setTimeout(() => {
       volverAlInicio();
-      document.getElementById('join-error').textContent =
-        'No se pudo restablecer la conexión. Revisa tu internet e inténtalo de nuevo.';
-      return;
-    }
-
-    reconnectAttempts++;
-    const progresoTexto = `Conexión perdida. Reconectando… (intento ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
-    const joinScreenVisible = !document.getElementById('join-screen').classList.contains('hidden');
-    if (joinScreenVisible) {
-      document.getElementById('join-error').textContent = progresoTexto;
-    } else {
-      const statusEl = document.getElementById('status-line');
-      if (statusEl) statusEl.textContent = progresoTexto;
-    }
-
-    // Backoff progresivo: 1s, 2s, 4s, 8s... con techo de 8s.
-    const delay = Math.min(1000 * (2 ** (reconnectAttempts - 1)), 8000);
-    reconnectTimer = setTimeout(() => {
-      if (!explicitClose && currentRoom && currentName) {
-        abrirWebSocket();
-      }
-    }, delay);
+      document.getElementById('join-error').textContent = 'La conexión se interrumpió.';
+    }, 1000);
   };
 }
-
-// Si el celular bloquea la pantalla o cambia de app, el navegador puede
-// matar el WebSocket sin disparar 'onclose' de inmediato. Al volver a
-// primer plano, si el socket ya no está abierto, reconectamos ya mismo
-// en vez de esperar el próximo backoff.
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return;
-  if (explicitClose || !currentRoom || !currentName) return;
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-  reconnectAttempts = 0;
-  abrirWebSocket();
-});
 
 // --- Vuelve a la pantalla principal (paso "coloca tu nombre") ---
 function volverAlInicio() {
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
   cerrarLobby();
-  explicitClose = true;
-  currentRoom = null;
-  currentName = null;
-  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   if (ws) { try { ws.close(); } catch (e) {} }
   ws = null;
   lastState = null;
@@ -1792,7 +1713,7 @@ function handleState(state) {
     gameScreen.classList.add('hidden');
     document.getElementById('wait-room-code').textContent = state.room;
     document.getElementById('wait-players').innerHTML = state.players
-      .map(p => `<div>👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}</div>`).join('');
+      .map(p => `<div>👤 ${p.name}${p.is_you ? ' (tú)' : ''}</div>`).join('');
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = !state.can_start;
     document.getElementById('wait-hint').textContent = state.can_start
@@ -1895,7 +1816,7 @@ function renderGame(state) {
     return `
     <div class="card">
       <div class="board-title">
-        <span>Código de ${escaparHtml(opp.name)}</span>
+        <span>Código de ${opp.name}</span>
         <span class="badge ${state.current_turn === opp.id ? 'turn' : ''}">${badgeText}</span>
       </div>
       <div class="stand">${renderStand(opp)}</div>
@@ -1966,7 +1887,7 @@ function renderGame(state) {
         ? '🎉 ¡DESACTIVADO! Descifraste tu código en solitario.'
         : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
     } else {
-      const winnerName = escaparHtml(state.players.find(p => p.id === state.winner)?.name || '???');
+      const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
       mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
     }
 
@@ -1981,10 +1902,6 @@ function renderGame(state) {
     `;
 
     document.getElementById('btn-reinicio').onclick = () => {
-      explicitClose = true;
-      currentRoom = null;
-      currentName = null;
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       if (ws) ws.close();
       ws = null;
       document.getElementById('game-screen').classList.add('hidden');
@@ -2001,7 +1918,7 @@ function renderGame(state) {
   }
 
   const logEl = document.getElementById('log');
-  logEl.innerHTML = state.log.map(l => `<div>${escaparHtml(l)}</div>`).join('');
+  logEl.innerHTML = state.log.map(l => `<div>${l}</div>`).join('');
   logEl.scrollTop = logEl.scrollHeight;
 }
 
