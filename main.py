@@ -218,6 +218,22 @@ class Room:
         self.disconnect_player_id: Optional[str] = None
         self.disconnect_deadline: Optional[float] = None
         self.disconnect_token: int = 0
+        # --- Chat de texto ---
+        self.chat_messages: List[dict] = []
+        self.chat_seq = 0
+
+    def add_chat_message(self, sender: "Player", text: str) -> None:
+        text = text.strip()[:300]
+        if not text:
+            return
+        self.chat_seq += 1
+        self.chat_messages.append({
+            "seq": self.chat_seq,
+            "player_id": sender.id,
+            "player_name": sender.name,
+            "text": text,
+        })
+        self.chat_messages = self.chat_messages[-100:]
 
     def get_player(self, pid: str) -> Optional[Player]:
         return next((p for p in self.players if p.id == pid), None)
@@ -530,6 +546,7 @@ class Room:
             "disconnect_player_id": self.disconnect_player_id,
             "disconnect_player_name": disc_player.name if disc_player else None,
             "disconnect_deadline_ms": int(self.disconnect_deadline * 1000) if self.disconnect_deadline else None,
+            "chat": self.chat_messages[-50:],
             "your_id": viewer_id,
             "min_players": MIN_PLAYERS,
             "max_players": MAX_PLAYERS,
@@ -702,6 +719,12 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
 
                         asyncio.create_task(_resolver_intento_desactivacion())
 
+            elif mtype == "chat":
+                text = str(msg.get("text", ""))
+                if text.strip():
+                    room.add_chat_message(player, text)
+                    await broadcast(room)
+
             elif mtype == "leave":
                 if room.status == "playing":
                     room.leave_game(player)
@@ -745,6 +768,79 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
         if not any(p.connected for p in room.players):
             if room.code in rooms:
                 del rooms[room.code]
+
+
+# ---------------------------------------------------------------------------
+# CHAT GLOBAL (LOBBY)
+# ---------------------------------------------------------------------------
+# A diferencia del chat de cada Room (que se borra cuando esa sala se cierra
+# porque todos se desconectaron), este chat es único para todo el servidor:
+# aparece apenas el jugador escribe su nombre —antes incluso de elegir sala
+# o modo de juego— y su historial nunca se limpia solo mientras el servidor
+# siga corriendo. También sirve para llevar la cuenta de cuántos jugadores
+# están en línea con su nombre ya puesto (estén o no dentro de una partida).
+lobby_connections: Dict[int, dict] = {}  # id(ws) -> {"ws": WebSocket, "name": str}
+lobby_chat: List[dict] = []
+lobby_chat_seq = 0
+LOBBY_CHAT_KEEP = 300  # tope de memoria; no es una limpieza funcional, el
+                        # historial reciente sigue siempre disponible para
+                        # quien se conecte.
+
+
+async def _broadcast_lobby(payload: dict) -> None:
+    dead = []
+    for key, conn in lobby_connections.items():
+        try:
+            await conn["ws"].send_text(json.dumps(payload))
+        except Exception:
+            dead.append(key)
+    for key in dead:
+        lobby_connections.pop(key, None)
+
+
+async def _broadcast_lobby_online() -> None:
+    await _broadcast_lobby({"type": "lobby_online", "online": len(lobby_connections)})
+
+
+@app.websocket("/ws/lobby/{player_name}")
+async def lobby_ws_endpoint(websocket: WebSocket, player_name: str):
+    global lobby_chat_seq
+    await websocket.accept()
+    clean_name = player_name.strip()[:20] or "Agente"
+    key = id(websocket)
+    lobby_connections[key] = {"ws": websocket, "name": clean_name}
+
+    try:
+        # Al conectarse, recibe el historial completo (nunca se borra solo)
+        # y cuántos jugadores están en línea en ese momento.
+        await websocket.send_text(json.dumps({
+            "type": "lobby_init",
+            "chat": lobby_chat[-100:],
+            "online": len(lobby_connections),
+        }))
+        await _broadcast_lobby_online()
+
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            if msg.get("type") == "chat":
+                text = str(msg.get("text", "")).strip()[:300]
+                if text:
+                    lobby_chat_seq += 1
+                    entry = {"seq": lobby_chat_seq, "player_name": clean_name, "text": text}
+                    lobby_chat.append(entry)
+                    del lobby_chat[:-LOBBY_CHAT_KEEP]
+                    await _broadcast_lobby({"type": "lobby_chat", "message": entry})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        lobby_connections.pop(key, None)
+        try:
+            await _broadcast_lobby_online()
+        except Exception:
+            pass
 
 
 app.mount("/", UTF8StaticFiles(directory="frontend", html=True), name="frontend")
