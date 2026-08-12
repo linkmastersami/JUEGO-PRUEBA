@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Estratega de C��digos</title>
+<title>Estratega de Códigos</title>
 <style>
   :root {
     --bg: #12141c;
@@ -70,7 +70,7 @@
   .badge.you { background: var(--accent2); color: #fff; }
   .status-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
 
-  /* --- C��digo / stand --- */
+  /* --- Código / stand --- */
   .stand { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; padding: 6px 2px 10px; }
   .notch { min-width: 20px; display: flex; flex-direction: column; gap: 3px; align-items: center; }
   .notch-tile { width: 34px; height: 34px; border-radius: 6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size: 0.75rem; font-weight: 700; color: #1a1a1a; }
@@ -116,7 +116,7 @@
   .players-list { font-size: 0.9rem; color: var(--muted); margin-bottom: 10px; }
   .players-list div { padding: 2px 0; }
 
-  /* --- CAPA DE ANIMACI�0�7N GIGANTE DE PUNTOS / EXPLOSI�0�7N --- */
+  /* --- CAPA DE ANIMACIÓN GIGANTE DE PUNTOS / EXPLOSIÓN --- */
   #overlay-animacion {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -170,7 +170,7 @@
     100% { opacity: 0; }
   }
 
-  /* Part��culas de la explosi��n al perder */
+  /* Partículas de la explosión al perder */
   .particula-explosion {
     position: absolute;
     top: 50%;
@@ -186,7 +186,7 @@
     100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(0); opacity: 0; }
   }
 
-  /* Animaci��n de explosi��n/sacudida para derrota */
+  /* Animación de explosión/sacudida para derrota */
   @keyframes sacudidaExplosion {
     0% { transform: translate(1px, 1px) rotate(0deg) scale(1); }
     10% { transform: translate(-8px, -4px) rotate(-3deg) scale(1.3); filter: drop-shadow(0 0 20px var(--bad)); }
@@ -202,7 +202,7 @@
     animation: sacudidaExplosion 0.8s ease-in-out;
   }
 
-  /* --- CAPA DE ANIMACI�0�7N: EL OPONENTE ROB�0�7 UNA FICHA --- */
+  /* --- CAPA DE ANIMACIÓN: EL OPONENTE ROBÓ UNA FICHA --- */
   #overlay-ficha-oponente {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -259,7 +259,7 @@
 
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
 
-  /* --- CAPA: CUENTA REGRESIVA DE DESACTIVACI�0�7N --- */
+  /* --- CAPA: CUENTA REGRESIVA DE DESACTIVACIÓN --- */
   #overlay-desactivar {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -329,7 +329,7 @@
     to { width: 0%; }
   }
 
-  /* --- CAPA: RESULTADO DE RONDA (con bot��n Aceptar) --- */
+  /* --- CAPA: RESULTADO DE RONDA (con botón Aceptar) --- */
   #overlay-resultado-ronda {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -366,7 +366,7 @@
     cursor: pointer;
   }
 
-  /* --- CAPA: CUENTA REGRESIVA POR DESCONEXI�0�7N DE UN JUGADOR --- */
+  /* --- CAPA: CUENTA REGRESIVA POR DESCONEXIÓN DE UN JUGADOR --- */
   #overlay-desconexion {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -428,7 +428,7 @@
     to { width: 0%; }
   }
 
-  /* --- Pantalla de bienvenida / bot��n de salir --- */
+  /* --- Pantalla de bienvenida / botón de salir --- */
   .hero-emoji { font-size: 3.2rem; text-align: center; margin-bottom: 4px; filter: drop-shadow(0 0 18px rgba(255,183,3,0.35)); }
   .hero-title { text-align: center; margin: 0 0 4px; font-size: 1.3rem; }
   .hero-hint { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
@@ -540,107 +540,6 @@
     background: var(--accent2);
     color: #fff;
   }
-
-  /* --- Chat GLOBAL (lobby): aparece apenas pones tu nombre, nunca se limpia --- */
-  #btn-chat-global {
-    position: fixed;
-    bottom: 18px;
-    left: 18px;
-    z-index: 600;
-    width: 56px;
-    height: 56px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #1a1a1a;
-    font-size: 1.4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
-    padding: 0;
-  }
-  #lobby-chat-badge {
-    position: absolute;
-    top: -4px;
-    right: -4px;
-    background: var(--bad);
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 800;
-    min-width: 18px;
-    height: 18px;
-    border-radius: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 4px;
-  }
-  #lobby-chat-panel {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 700;
-    max-width: 520px;
-    margin: 0 auto;
-    background: var(--card);
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.45);
-    display: flex;
-    flex-direction: column;
-    height: 62vh;
-    transform: translateY(100%);
-    transition: transform 0.28s ease;
-  }
-  #lobby-chat-panel.abierto { transform: translateY(0); }
-  #lobby-chat-header {
-    display: flex;
-    flex-direction: column;
-    padding: 12px 14px;
-    border-bottom: 1px solid #2a2d3a;
-  }
-  #lobby-chat-header-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-weight: 700;
-  }
-  #lobby-chat-cerrar {
-    background: none;
-    border: none;
-    color: var(--muted);
-    font-size: 1.3rem;
-    padding: 0 4px;
-    cursor: pointer;
-  }
-  #lobby-online-count {
-    font-size: 0.75rem;
-    color: var(--good);
-    margin-top: 2px;
-  }
-  #lobby-chat-mensajes {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  #lobby-chat-input-row {
-    display: flex;
-    gap: 8px;
-    padding: 10px 14px;
-    border-top: 1px solid #2a2d3a;
-  }
-  #lobby-chat-input {
-    flex: 1;
-    margin-bottom: 0;
-  }
-  #lobby-chat-enviar {
-    padding: 10px 16px;
-    background: var(--accent);
-    color: #1a1a1a;
-  }
 </style>
 </head>
 <body>
@@ -657,7 +556,7 @@
         <span id="of-numero"></span>
         <span id="of-dots" class="dots"></span>
     </div>
-    <div id="of-sub">rob�� esta ficha</div>
+    <div id="of-sub">robó esta ficha</div>
 </div>
 
 <div id="overlay-desactivar">
@@ -676,22 +575,22 @@
 
 <div id="overlay-desconexion">
     <div id="dc-nombre"></div>
-    <div id="dc-sub">se desconect�� en su turno �� si no vuelve, pierde autom��ticamente</div>
+    <div id="dc-sub">se desconectó en su turno · si no vuelve, pierde automáticamente</div>
     <div id="dc-contador">20</div>
     <div id="dc-barra-wrap"><div id="dc-barra"></div></div>
 </div>
 
-<button id="btn-salir" class="ghost hidden">�0�6 Salir</button>
+<button id="btn-salir" class="ghost hidden">🚪 Salir</button>
 
 <button id="btn-chat" class="hidden">
-  �9�6
+  💬
   <span id="chat-badge" class="hidden">0</span>
 </button>
 
 <div id="chat-panel">
   <div id="chat-header">
-    <span>�9�6 Chat de la sala</span>
-    <button id="chat-cerrar">�7�9</button>
+    <span>💬 Chat de la sala</span>
+    <button id="chat-cerrar">✕</button>
   </div>
   <div id="chat-mensajes"></div>
   <div id="chat-input-row">
@@ -700,30 +599,10 @@
   </div>
 </div>
 
-<button id="btn-chat-global" class="hidden">
-  🌐
-  <span id="lobby-chat-badge" class="hidden">0</span>
-</button>
-
-<div id="lobby-chat-panel">
-  <div id="lobby-chat-header">
-    <div id="lobby-chat-header-top">
-      <span>🌐 Chat grupal</span>
-      <button id="lobby-chat-cerrar">×</button>
-    </div>
-    <span id="lobby-online-count">0 agentes en línea</span>
-  </div>
-  <div id="lobby-chat-mensajes"></div>
-  <div id="lobby-chat-input-row">
-    <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
-    <button id="lobby-chat-enviar">Enviar</button>
-  </div>
-</div>
-
 <!-- CONTENEDOR DEL JUEGO -->
 <div class="wrap" id="pantallaJuego">
-  <h1>�9�3 Estratega de C��digos</h1>
-  <div class="subtitle" id="game-subtitle">2-4 jugadores en l��nea �� fiel al reglamento</div>
+  <h1>🎯 Estratega de Códigos</h1>
+  <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
   <!-- HUD DEL JUGADOR -->
   <div id="perfilJugador" class="card hidden" style="text-align: center; border: 2px solid var(--accent2);">
@@ -744,44 +623,44 @@
     <div id="action-content" style="margin-top: 12px;"></div>
   </div>
 
-  <!-- PANTALLA DE UNI�0�7N -->
+  <!-- PANTALLA DE UNIÓN -->
   <div id="join-screen" class="card">
 
     <!-- Paso 1: solo pedimos el nombre -->
     <div id="join-step-name">
-      <div class="hero-emoji">�9�3�9�7</div>
-      <h2 class="hero-title">�0�3Bienvenido, agente!</h2>
+      <div class="hero-emoji">🎯💣</div>
+      <h2 class="hero-title">¡Bienvenido, agente!</h2>
       <div class="hero-hint">Coloca tu nombre para empezar</div>
       <input id="name-input" type="text" placeholder="Tu nombre" maxlength="20" autofocus>
-      <button class="full" id="btn-continuar-nombre" style="font-size: 1.05rem;">Continuar �7�4</button>
+      <button class="full" id="btn-continuar-nombre" style="font-size: 1.05rem;">Continuar ➜</button>
     </div>
 
-    <!-- Paso 2: elegir c��mo jugar (aparece despu��s del nombre) -->
+    <!-- Paso 2: elegir cómo jugar (aparece después del nombre) -->
     <div id="join-step-modo" class="hidden">
       <div class="board-title" style="justify-content:center; text-align:center;">
-        �0�3Hola, <span id="nombre-confirmado"></span>! �0�7C��mo quieres jugar?
+        ¡Hola, <span id="nombre-confirmado"></span>! ¿Cómo quieres jugar?
       </div>
 
       <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
-        �9�3 Encontrar Partida R��pida
+        🔍 Encontrar Partida Rápida
       </button>
 
       <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
-        �� o crea/��nete a una sala privada ��
+        — o crea/únete a una sala privada —
       </div>
 
-      <input id="room-input" placeholder="C��digo de sala (ej: ABCD)" maxlength="10">
+      <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
       <button class="full secondary" id="join-btn">Entrar a sala privada</button>
 
       <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
-        �� o practica sin rivales ��
+        — o practica sin rivales —
       </div>
 
       <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
-        �9�3 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
+        🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
       </button>
 
-      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">�� Cambiar nombre</button>
+      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cambiar nombre</button>
     </div>
 
     <div id="join-error" class="error"></div>
@@ -803,8 +682,8 @@
 
     <div class="card">
       <div class="board-title">
-        <span>�9�7 Tabla de las 60 fichas (tacha las que descartes)</span>
-        <button class="ghost" id="reset-table-btn" style="padding: 6px 10px; font-size: 0.75rem;">�6�6 Reiniciar tabla</button>
+        <span>📋 Tabla de las 60 fichas (tacha las que descartes)</span>
+        <button class="ghost" id="reset-table-btn" style="padding: 6px 10px; font-size: 0.75rem;">↺ Reiniciar tabla</button>
       </div>
       <div id="ref-table-wrap" class="ref-table">
         <div class="ref-notes">
@@ -815,19 +694,19 @@
           <input class="note-input" placeholder="#5">
         </div>
         <div id="ref-grid"></div>
-        <div class="action-hint">Toca una ficha para tacharla. Solo t�� la ves �� no se comparte con nadie.</div>
+        <div class="action-hint">Toca una ficha para tacharla. Solo tú la ves — no se comparte con nadie.</div>
       </div>
     </div>
 
-    <!-- Tu c��digo -->
+    <!-- Tu código -->
     <div class="card">
       <div class="board-title">
-        <span>Tu c��digo <span class="badge you">T�0�3</span> <span class="badge" id="turn-badge-you"></span></span>
+        <span>Tu código <span class="badge you">TÚ</span> <span class="badge" id="turn-badge-you"></span></span>
       </div>
       <div class="stand" id="your-stand"></div>
 
       <div class="guess-section">
-        <div class="board-title">�0�3DESACTIVAR! �� �0�7cu��l crees que es tu c��digo? (menor a mayor)</div>
+        <div class="board-title">¡DESACTIVAR! — ¿cuál crees que es tu código? (menor a mayor)</div>
         <div class="guess-grid">
           <input type="number" class="g-input" placeholder="#1">
           <input type="number" class="g-input" placeholder="#2">
@@ -839,7 +718,7 @@
       </div>
     </div>
 
-    <!-- C��digos de oponentes -->
+    <!-- Códigos de oponentes -->
     <div id="opponents-container"></div>
 
     <!-- Historial -->
@@ -906,15 +785,15 @@ function ejecutarAnimacionFinPartida(esVictoria, puntosInicio, puntosFin, callba
 
     if (esVictoria) {
         textoGrande.style.color = "var(--good)";
-        subtexto.innerText = haySumaDePuntos ? "�0�3VICTORIA! Puntos obtenidos" : "�0�3VICTORIA!";
-        if (!haySumaDePuntos) textoGrande.innerText = "�9�6";
+        subtexto.innerText = haySumaDePuntos ? "¡VICTORIA! Puntos obtenidos" : "¡VICTORIA!";
+        if (!haySumaDePuntos) textoGrande.innerText = "🏆";
         iniciarConteoYCerrar(1800);
         return;
     }
 
     textoGrande.style.color = "var(--bad)";
     textoGrande.classList.add("efecto-explosion");
-    textoGrande.innerText = "�9�9";
+    textoGrande.innerText = "💥";
     subtexto.innerText = "IMPACTO DETECTADO...";
 
     const duracionExplosion = 4000;
@@ -931,7 +810,7 @@ function ejecutarAnimacionFinPartida(esVictoria, puntosInicio, puntosFin, callba
         clearInterval(intervaloParticulas);
         textoGrande.classList.remove("efecto-explosion");
         subtexto.innerText = haySumaDePuntos ? "DERROTA... Puntos perdidos" : "DERROTA...";
-        if (!haySumaDePuntos) textoGrande.innerText = "�9�9";
+        if (!haySumaDePuntos) textoGrande.innerText = "💥";
         iniciarConteoYCerrar(1800);
     }, duracionExplosion);
 }
@@ -944,7 +823,7 @@ function mostrarFichaOponente(nombre, tile) {
     const numEl = document.getElementById("of-numero");
     const dotsEl = document.getElementById("of-dots");
 
-    nombreEl.textContent = `${nombre} rob�� una ficha`;
+    nombreEl.textContent = `${nombre} robó una ficha`;
     tileEl.style.background = COLOR_HEX[tile.color];
     numEl.textContent = tile.number;
     dotsEl.textContent = dotsStr(tile.dots);
@@ -980,7 +859,7 @@ function animarPuntajeHUD(elementoId, puntajeInicial, puntajeFinal, duracion) {
     window.requestAnimationFrame(paso);
 }
 
-// --- CAPA: CUENTA REGRESIVA DE DESACTIVACI�0�7N ---
+// --- CAPA: CUENTA REGRESIVA DE DESACTIVACIÓN ---
 let intervaloCuentaRegresiva = null;
 let pendingGuessMostrado = null;
 
@@ -991,7 +870,7 @@ function iniciarCuentaRegresivaDesactivar(nombre, esMio) {
   const barra = document.getElementById('dz-barra');
 
   nombreEl.textContent = esMio
-    ? '�0�3Est��s intentando desactivar tu bomba!'
+    ? '¡Estás intentando desactivar tu bomba!'
     : `${nombre} intenta desactivar su bomba`;
   contadorEl.textContent = '5';
 
@@ -1024,7 +903,7 @@ function cerrarCuentaRegresivaDesactivar() {
   document.getElementById('overlay-desactivar').classList.remove('activo');
 }
 
-// --- CAPA: CUENTA REGRESIVA POR DESCONEXI�0�7N DE UN JUGADOR (20s) ---
+// --- CAPA: CUENTA REGRESIVA POR DESCONEXIÓN DE UN JUGADOR (20s) ---
 let intervaloDesconexion = null;
 
 function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs) {
@@ -1033,7 +912,7 @@ function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs) {
   const contadorEl = document.getElementById('dc-contador');
   const barra = document.getElementById('dc-barra');
 
-  nombreEl.textContent = `${nombre} se desconect��`;
+  nombreEl.textContent = `${nombre} se desconectó`;
 
   overlay.classList.remove('activo');
   void overlay.offsetWidth;
@@ -1058,7 +937,7 @@ function cerrarCuentaRegresivaDesconexion() {
   document.getElementById('overlay-desconexion').classList.remove('activo');
 }
 
-// --- CAPA: RESULTADO DE RONDA (con bot��n Aceptar) ---
+// --- CAPA: RESULTADO DE RONDA (con botón Aceptar) ---
 function mostrarResultadoRonda(datos, onAceptar) {
   const overlay = document.getElementById('overlay-resultado-ronda');
   document.getElementById('rr-icono').textContent = datos.icono || '';
@@ -1086,8 +965,8 @@ function nombreJugadorPorId(state, pid) {
 
 // Procesa los eventos nuevos de una ronda de "DESACTIVAR" en partidas multijugador.
 // Un solo evento = intento contra el mazo (3-4 jugadores activos).
-// Dos eventos encadenados = desenlace 1 contra 1 (el rival queda autom��ticamente
-// ganador o perdedor al no quedar nadie m��s en juego).
+// Dos eventos encadenados = desenlace 1 contra 1 (el rival queda automáticamente
+// ganador o perdedor al no quedar nadie más en juego).
 function procesarRondaMultijugador(nuevos, state) {
   cerrarCuentaRegresivaDesactivar();
 
@@ -1096,18 +975,18 @@ function procesarRondaMultijugador(nuevos, state) {
     const segundo = nuevos[1];
     let ganador, perdedor, motivoPerdida;
     if (primero.type === 'correct') {
-      ganador = primero; perdedor = segundo; motivoPerdida = 'explot��';
+      ganador = primero; perdedor = segundo; motivoPerdida = 'explotó';
     } else if (primero.type === 'left') {
-      ganador = segundo; perdedor = primero; motivoPerdida = 'sali�� de la partida';
+      ganador = segundo; perdedor = primero; motivoPerdida = 'salió de la partida';
     } else if (primero.type === 'disconnected_out') {
-      ganador = segundo; perdedor = primero; motivoPerdida = 'no volvi�� a tiempo tras desconectarse';
+      ganador = segundo; perdedor = primero; motivoPerdida = 'no volvió a tiempo tras desconectarse';
     } else {
-      ganador = segundo; perdedor = primero; motivoPerdida = 'explot��';
+      ganador = segundo; perdedor = primero; motivoPerdida = 'explotó';
     }
 
     mostrarResultadoRonda({
-      icono: '�7�0�1�5',
-      titulo: `�0�3${ganador.player_name} le gan�� a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
+      icono: '⚔️',
+      titulo: `¡${ganador.player_name} le ganó a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
       chips: [
         { tipo: 'gano', texto: `${ganador.player_name}: +${ganador.points.toLocaleString()} pts` },
         { tipo: 'perdio', texto: perdedor.points ? `${perdedor.player_name}: -${perdedor.points.toLocaleString()} pts` : `${perdedor.player_name}: eliminado` },
@@ -1126,10 +1005,10 @@ function procesarRondaMultijugador(nuevos, state) {
   if (!ev) return;
 
   if (ev.type === 'left' || ev.type === 'disconnected_out') {
-    const motivo = ev.type === 'left' ? 'sali�� de la partida' : 'no volvi�� a tiempo tras desconectarse';
+    const motivo = ev.type === 'left' ? 'salió de la partida' : 'no volvió a tiempo tras desconectarse';
     mostrarResultadoRonda({
-      icono: ev.type === 'left' ? '�0�6' : '�7�5�1�5',
-      titulo: `${ev.player_name} perdi��: ${motivo}. La partida contin��a sin ${ev.player_name}.`,
+      icono: ev.type === 'left' ? '🚪' : '⏱️',
+      titulo: `${ev.player_name} perdió: ${motivo}. La partida continúa sin ${ev.player_name}.`,
       chips: [],
     }, null);
     return;
@@ -1138,10 +1017,10 @@ function procesarRondaMultijugador(nuevos, state) {
   if (ev.type === 'correct') {
     const esMio = ev.player_id === myId;
     mostrarResultadoRonda({
-      icono: '�9�3',
+      icono: '🎯',
       titulo: esMio
-        ? `�0�3Acertaste tu c��digo! Ganaste ${ev.points.toLocaleString()} puntos.`
-        : `�0�3${ev.player_name} acert�� su c��digo! Gan�� ${ev.points.toLocaleString()} puntos.`,
+        ? `¡Acertaste tu código! Ganaste ${ev.points.toLocaleString()} puntos.`
+        : `¡${ev.player_name} acertó su código! Ganó ${ev.points.toLocaleString()} puntos.`,
       chips: [],
     }, () => {
       if (esMio) queueAnimacionEvento(ev);
@@ -1151,12 +1030,12 @@ function procesarRondaMultijugador(nuevos, state) {
 
   if (ev.type === 'exploded') {
     if (ev.player_id === myId) {
-      // Al jugador que fall�� le sale directo la animaci��n de explosi��n y p��rdida de puntos.
+      // Al jugador que falló le sale directo la animación de explosión y pérdida de puntos.
       queueAnimacionEvento(ev);
     } else {
       mostrarResultadoRonda({
-        icono: '�9�9',
-        titulo: `�0�3${ev.player_name} explot��! Que no te pase lo mismo.`,
+        icono: '💥',
+        titulo: `¡${ev.player_name} explotó! Que no te pase lo mismo.`,
         chips: [],
       }, null);
     }
@@ -1167,7 +1046,7 @@ let puntosActuales = 0;
 
 // Por ahora no hay login/registro: el "usuario" es simplemente el nombre que
 // la persona escribe. Igual consultamos el perfil por nombre para mostrar
-// puntos/rango acumulados si ya jug�� antes con ese mismo nombre.
+// puntos/rango acumulados si ya jugó antes con ese mismo nombre.
 async function actualizarPerfilHUD(name) {
     document.getElementById("perfilJugador").classList.remove("hidden");
     document.getElementById("uiNombre").innerText = name;
@@ -1176,10 +1055,10 @@ async function actualizarPerfilHUD(name) {
         const data = await respuesta.json();
         let puntajeAnterior = puntosActuales;
         puntosActuales = data.puntos || 0;
-        document.getElementById("uiRango").innerText = data.rango || "Novato en Desactivaci��n";
+        document.getElementById("uiRango").innerText = data.rango || "Novato en Desactivación";
         animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 800);
     } catch (e) {
-        document.getElementById("uiRango").innerText = "Novato en Desactivaci��n";
+        document.getElementById("uiRango").innerText = "Novato en Desactivación";
     }
 }
 
@@ -1202,7 +1081,7 @@ const joinScreen = document.getElementById('join-screen');
 const waitScreen = document.getElementById('wait-screen');
 const gameScreen = document.getElementById('game-screen');
 
-// --- CONEXI�0�7N Y EMPAREJAMIENTO AUTOM�0�9TICO ---
+// --- CONEXIÓN Y EMPAREJAMIENTO AUTOMÁTICO ---
 
 let esModoSolo = false;
 
@@ -1245,10 +1124,10 @@ function conectarSala(room, name, solo = false) {
   };
 
   ws.onclose = () => {
-    document.getElementById('status-line').textContent = 'Conexi��n perdida.';
+    document.getElementById('status-line').textContent = 'Conexión perdida.';
     setTimeout(() => {
       volverAlInicio();
-      document.getElementById('join-error').textContent = 'La conexi��n se interrumpi��.';
+      document.getElementById('join-error').textContent = 'La conexión se interrumpió.';
     }, 1000);
   };
 }
@@ -1278,7 +1157,7 @@ function volverAlInicio() {
 }
 
 // --- Paso 1 -> Paso 2: al continuar, primero revisamos si ese nombre ya
-// ten��a una partida activa (para reconectarlo directo, sin pedir c��digo) ---
+// tenía una partida activa (para reconectarlo directo, sin pedir código) ---
 document.getElementById('btn-continuar-nombre').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
   const errEl = document.getElementById('join-error');
@@ -1288,9 +1167,7 @@ document.getElementById('btn-continuar-nombre').onclick = async () => {
     return;
   }
 
-  conectarLobby(name);
-
-  errEl.textContent = 'Comprobando si ya ten��as una partida activa...';
+  errEl.textContent = 'Comprobando si ya tenías una partida activa...';
   try {
     const resp = await fetch('/buscar-partida/' + encodeURIComponent(name));
     const data = await resp.json();
@@ -1300,7 +1177,7 @@ document.getElementById('btn-continuar-nombre').onclick = async () => {
       return;
     }
   } catch (e) {
-    // Si falla la b��squeda, seguimos normalmente a elegir modo de juego.
+    // Si falla la búsqueda, seguimos normalmente a elegir modo de juego.
   }
 
   errEl.textContent = '';
@@ -1348,7 +1225,7 @@ document.getElementById('btn-auto-join').onclick = async () => {
       errEl.textContent = data.detail || 'No se pudo encontrar partida.';
     }
   } catch (error) {
-    errEl.textContent = 'Error de conexi��n con el servidor.';
+    errEl.textContent = 'Error de conexión con el servidor.';
   }
 };
 
@@ -1366,7 +1243,7 @@ document.getElementById('btn-solo').onclick = () => {
   conectarSala(room, name, true);
 };
 
-// --- Bot��n "Salir" (visible durante la sala de espera o la partida) ---
+// --- Botón "Salir" (visible durante la sala de espera o la partida) ---
 document.getElementById('btn-salir').onclick = () => {
   const status = lastState ? lastState.status : null;
 
@@ -1377,8 +1254,8 @@ document.getElementById('btn-salir').onclick = () => {
   }
 
   const advertencia = status === 'playing'
-    ? 'Si sales ahora perder��s autom��ticamente y la partida continuar�� sin ti. �0�7Seguro que quieres salir?'
-    : '�0�7Seguro que quieres salir de la sala?';
+    ? 'Si sales ahora perderás automáticamente y la partida continuará sin ti. ¿Seguro que quieres salir?'
+    : '¿Seguro que quieres salir de la sala?';
   if (!confirm(advertencia)) return;
 
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1391,7 +1268,7 @@ document.getElementById('guess-btn').onclick = () => {
   const inputs = document.querySelectorAll('.g-input');
   const numbers = Array.from(inputs).map(i => parseInt(i.value, 10));
   if (numbers.some(n => isNaN(n))) {
-    alert('Completa los 5 n��meros.');
+    alert('Completa los 5 números.');
     return;
   }
   ws.send(JSON.stringify({type: 'guess', numbers}));
@@ -1403,7 +1280,7 @@ function tileInfo(n) {
   const dots = ((column - 1) % 3) + 1;
   return {number: n, color, dots};
 }
-function dotsStr(n) { return '��'.repeat(n); }
+function dotsStr(n) { return '●'.repeat(n); }
 
 function buildRefGrid() {
   const grid = document.getElementById('ref-grid');
@@ -1454,7 +1331,7 @@ function buildRefGrid() {
 buildRefGrid();
 
 document.getElementById('reset-table-btn').onclick = () => {
-  if (!confirm('�0�7Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
+  if (!confirm('¿Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
   const roomCode = document.getElementById('room-input').value.trim().toUpperCase() || 'default';
   crossedOut.clear();
   localStorage.removeItem(`crossed_${roomCode}`);
@@ -1482,7 +1359,7 @@ function renderMensajeChat(msg) {
   const div = document.createElement('div');
   const esPropio = msg.player_id === myId;
   div.className = 'chat-msg ' + (esPropio ? 'propio' : 'ajeno');
-  div.innerHTML = `<span class="chat-autor">${esPropio ? 'T��' : escaparHtml(msg.player_name)}</span>${escaparHtml(msg.text)}`;
+  div.innerHTML = `<span class="chat-autor">${esPropio ? 'Tú' : escaparHtml(msg.player_name)}</span>${escaparHtml(msg.text)}`;
   cont.appendChild(div);
   cont.scrollTop = cont.scrollHeight;
 }
@@ -1522,105 +1399,6 @@ function enviarMensajeChat() {
 document.getElementById('chat-enviar').onclick = enviarMensajeChat;
 document.getElementById('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeChat();
-});
-
-// --- Chat GLOBAL (lobby): independiente del chat de sala. No se limpia
-// nunca solo, y queda disponible desde que el jugador pone su nombre. ---
-let lobbyWs = null;
-let lobbyChatAbierto = false;
-let lobbyNoLeidos = 0;
-let miNombreLobby = '';
-
-function renderMensajeLobby(msg) {
-  const cont = document.getElementById('lobby-chat-mensajes');
-  const esPropio = msg.player_name === miNombreLobby;
-  const div = document.createElement('div');
-  div.className = 'chat-msg ' + (esPropio ? 'propio' : 'ajeno');
-  div.innerHTML = `<span class="chat-autor">${esPropio ? 'Tu' : escaparHtml(msg.player_name)}</span>${escaparHtml(msg.text)}`;
-  cont.appendChild(div);
-  cont.scrollTop = cont.scrollHeight;
-}
-
-function actualizarBadgeLobby() {
-  const badge = document.getElementById('lobby-chat-badge');
-  if (lobbyNoLeidos > 0) {
-    badge.textContent = lobbyNoLeidos > 9 ? '9+' : String(lobbyNoLeidos);
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
-  }
-}
-
-function actualizarOnlineLobby(cantidad) {
-  const el = document.getElementById('lobby-online-count');
-  if (el) el.textContent = (cantidad === 1 ? '1 agente en linea' : (cantidad + ' agentes en linea'));
-}
-
-// Conecta (o reconecta) al chat grupal apenas el jugador confirma su
-// nombre. El historial vive en el servidor y nunca se borra solo: al
-// reconectar, se vuelve a pintar completo desde 'lobby_init'.
-function conectarLobby(name) {
-  miNombreLobby = name;
-  if (lobbyWs) {
-    try { lobbyWs.onclose = null; lobbyWs.close(); } catch (e) {}
-  }
-  document.getElementById('lobby-chat-mensajes').innerHTML = '';
-
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  lobbyWs = new WebSocket(`${proto}://${location.host}/ws/lobby/${encodeURIComponent(name)}`);
-
-  lobbyWs.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'lobby_init') {
-      actualizarOnlineLobby(msg.online);
-      (msg.chat || []).forEach(renderMensajeLobby);
-    } else if (msg.type === 'lobby_chat') {
-      renderMensajeLobby(msg.message);
-      if (!lobbyChatAbierto && msg.message.player_name !== miNombreLobby) {
-        lobbyNoLeidos++;
-        actualizarBadgeLobby();
-      }
-    } else if (msg.type === 'lobby_online') {
-      actualizarOnlineLobby(msg.online);
-    }
-  };
-
-  lobbyWs.onclose = () => {
-    lobbyWs = null;
-    // Si seguimos con nombre puesto, reintenta la conexion al chat grupal.
-    if (miNombreLobby) {
-      setTimeout(() => { if (miNombreLobby && !lobbyWs) conectarLobby(miNombreLobby); }, 2000);
-    }
-  };
-
-  document.getElementById('btn-chat-global').classList.remove('hidden');
-}
-
-document.getElementById('btn-chat-global').onclick = () => {
-  lobbyChatAbierto = !lobbyChatAbierto;
-  document.getElementById('lobby-chat-panel').classList.toggle('abierto', lobbyChatAbierto);
-  if (lobbyChatAbierto) {
-    lobbyNoLeidos = 0;
-    actualizarBadgeLobby();
-    document.getElementById('lobby-chat-input').focus();
-  }
-};
-
-document.getElementById('lobby-chat-cerrar').onclick = () => {
-  lobbyChatAbierto = false;
-  document.getElementById('lobby-chat-panel').classList.remove('abierto');
-};
-
-function enviarMensajeLobby() {
-  const input = document.getElementById('lobby-chat-input');
-  const texto = input.value.trim();
-  if (!texto || !lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) return;
-  lobbyWs.send(JSON.stringify({type: 'chat', text: texto}));
-  input.value = '';
-}
-document.getElementById('lobby-chat-enviar').onclick = enviarMensajeLobby;
-document.getElementById('lobby-chat-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') enviarMensajeLobby();
 });
 
 function queueAnimacionEvento(ev) {
@@ -1684,7 +1462,7 @@ function handleState(state) {
   }
   lastEventSeq = (state.event_seq) || lastEventSeq;
 
-  // --- Cuenta regresiva del intento de desactivaci��n (�0�3DESACTIVAR!) ---
+  // --- Cuenta regresiva del intento de desactivación (¡DESACTIVAR!) ---
   if (state.pending_guess) {
     if (pendingGuessMostrado !== state.pending_guess.player_id) {
       pendingGuessMostrado = state.pending_guess.player_id;
@@ -1695,7 +1473,7 @@ function handleState(state) {
     cerrarCuentaRegresivaDesactivar();
   }
 
-  // --- Cuenta regresiva por desconexi��n de un jugador en su turno (20s) ---
+  // --- Cuenta regresiva por desconexión de un jugador en su turno (20s) ---
   if (state.disconnect_player_id) {
     if (dcMostrado !== state.disconnect_player_id) {
       dcMostrado = state.disconnect_player_id;
@@ -1739,7 +1517,7 @@ function handleState(state) {
   if (state.status === 'waiting') {
     if (state.mode === 'solo') {
       // El modo solitario se autoinicia al conectar; esto es solo un
-      // instante de transici��n mientras llega el 'start' autom��tico.
+      // instante de transición mientras llega el 'start' automático.
       waitScreen.classList.add('hidden');
       gameScreen.classList.add('hidden');
       return;
@@ -1748,7 +1526,7 @@ function handleState(state) {
     gameScreen.classList.add('hidden');
     document.getElementById('wait-room-code').textContent = state.room;
     document.getElementById('wait-players').innerHTML = state.players
-      .map(p => `<div>�9�4 ${p.name}${p.is_you ? ' (t��)' : ''}</div>`).join('');
+      .map(p => `<div>👤 ${p.name}${p.is_you ? ' (tú)' : ''}</div>`).join('');
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = !state.can_start;
     document.getElementById('wait-hint').textContent = state.can_start
@@ -1763,8 +1541,8 @@ function handleState(state) {
   const subtitleEl = document.getElementById('game-subtitle');
   if (subtitleEl) {
     subtitleEl.textContent = state.mode === 'solo'
-      ? '�9�3 Modo Solitario �� puntos a la mitad'
-      : '2-4 jugadores en l��nea �� fiel al reglamento';
+      ? '🎯 Modo Solitario · puntos a la mitad'
+      : '2-4 jugadores en línea · fiel al reglamento';
   }
 
   renderGame(state);
@@ -1783,7 +1561,7 @@ function notchTileHtml(tile) {
 }
 
 function compareTileHtml(clue) {
-  const mark = clue.same ? '�7�3' : '�7�4';
+  const mark = clue.same ? '✅' : '❌';
   return `<div class="compare-tile" style="background:${COLOR_HEX[clue.tile.color]}">${clue.tile.number}<span class="mark">${mark}</span></div>`;
 }
 
@@ -1851,7 +1629,7 @@ function renderGame(state) {
     return `
     <div class="card">
       <div class="board-title">
-        <span>C��digo de ${opp.name}</span>
+        <span>Código de ${opp.name}</span>
         <span class="badge ${state.current_turn === opp.id ? 'turn' : ''}">${badgeText}</span>
       </div>
       <div class="stand">${renderStand(opp)}</div>
@@ -1862,7 +1640,7 @@ function renderGame(state) {
   const canPickClue = isYourTurn && state.status === 'playing' && state.phase === 'clue' && !youDone && !hayIntentoEnCurso;
 
   if (canPickClue && selectedFaceupIndex === null) {
-    // La ��nica ficha sin usar es siempre la ��ltima revelada.
+    // La única ficha sin usar es siempre la última revelada.
     const lastUnusedIdx = state.faceup.reduce((acc, t, idx) => (t.used ? acc : idx), -1);
     if (lastUnusedIdx >= 0) selectedFaceupIndex = lastUnusedIdx;
   }
@@ -1898,14 +1676,14 @@ function renderGame(state) {
   if (state.status === 'playing') {
     if (hayIntentoEnCurso) {
       statusLine.textContent = state.pending_guess.player_id === myId
-        ? 'Est��s intentando desactivar tu bomba...'
-        : `${state.pending_guess.player_name} est�� intentando desactivar su bomba...`;
+        ? 'Estás intentando desactivar tu bomba...'
+        : `${state.pending_guess.player_name} está intentando desactivar su bomba...`;
     } else if (youEliminated) {
       statusLine.textContent = 'Explotaste. Puedes seguir viendo la partida.';
     } else if (youResolved) {
-      statusLine.textContent = 'Ya acertaste tu c��digo. Esperando a que termine la partida.';
+      statusLine.textContent = 'Ya acertaste tu código. Esperando a que termine la partida.';
     } else {
-      statusLine.textContent = isYourTurn ? '�0�3Es tu turno!' : `Turno de ${state.current_turn_name}`;
+      statusLine.textContent = isYourTurn ? '¡Es tu turno!' : `Turno de ${state.current_turn_name}`;
     }
     guessBtn.disabled = youDone || hayIntentoEnCurso;
   } else if (state.status === 'finished') {
@@ -1919,16 +1697,16 @@ function renderGame(state) {
     let mensaje;
     if (state.mode === 'solo') {
       mensaje = won
-        ? '�9�5 �0�3DESACTIVADO! Descifraste tu c��digo en solitario.'
-        : '�9�9 Explotaste. No lograste descifrar tu c��digo a tiempo.';
+        ? '🎉 ¡DESACTIVADO! Descifraste tu código en solitario.'
+        : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
     } else {
       const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
-      mensaje = won ? '�9�5 �0�3Ganaste! �0�3DESACTIVADO!' : `�0�6 Gan�� ${winnerName}`;
+      mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
     }
 
-    const botonTexto = state.mode === 'solo' ? '�9�4 Jugar otra vez en solitario' : '�9�4 Buscar nueva partida';
+    const botonTexto = state.mode === 'solo' ? '🔄 Jugar otra vez en solitario' : '🔄 Buscar nueva partida';
 
-    // Inyecci��n del bot��n de Reinicio en el Resultado
+    // Inyección del botón de Reinicio en el Resultado
     resultCard.innerHTML = `
       <div>${mensaje}</div>
       <button class="full" id="btn-reinicio" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
@@ -1962,8 +1740,8 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
   const titleEl = document.getElementById('action-card-title');
 
   if (state.pending_guess) {
-    titleEl.textContent = '�9�7 Desactivaci��n en curso';
-    content.innerHTML = `<div class="action-hint">Esperando el resultado del intento de desactivaci��n...</div>`;
+    titleEl.textContent = '💣 Desactivación en curso';
+    content.innerHTML = `<div class="action-hint">Esperando el resultado del intento de desactivación...</div>`;
     return;
   }
 
@@ -1976,7 +1754,7 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
   if (state.phase === 'reveal') {
     titleEl.textContent = '1. Revela una ficha';
     content.innerHTML = `
-      <div class="action-hint">Elige de qu�� color robar una ficha de la reserva.</div>
+      <div class="action-hint">Elige de qué color robar una ficha de la reserva.</div>
       <div class="color-buttons" id="color-buttons"></div>
     `;
     const colorButtons = document.getElementById('color-buttons');
@@ -2001,10 +1779,10 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
 
   if (!compareMode) {
     content.innerHTML = `
-      <div class="action-hint">Ficha elegida: <b>${state.faceup[selectedFaceupIndex]?.number ?? ''}</b>. �0�7Qu�� pista pides?</div>
+      <div class="action-hint">Ficha elegida: <b>${state.faceup[selectedFaceupIndex]?.number ?? ''}</b>. ¿Qué pista pides?</div>
       <div class="row">
-        <button class="full" id="btn-categorize">�9�9 Categorizar (�0�7d��nde encaja?)</button>
-        <button class="full secondary" id="btn-compare">�7�2�1�5 Comparar puntitos</button>
+        <button class="full" id="btn-categorize">📍 Categorizar (¿dónde encaja?)</button>
+        <button class="full secondary" id="btn-compare">⚖️ Comparar puntitos</button>
       </div>
     `;
     document.getElementById('btn-categorize').onclick = () => {
@@ -2018,7 +1796,7 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
     };
   } else {
     content.innerHTML = `
-      <div class="action-hint">�0�7Con cu��l de tus 5 fichas ocultas comparo el n��mero ${state.faceup[selectedFaceupIndex]?.number ?? ''}?</div>
+      <div class="action-hint">¿Con cuál de tus 5 fichas ocultas comparo el número ${state.faceup[selectedFaceupIndex]?.number ?? ''}?</div>
       <div class="row" id="slot-buttons"></div>
       <button class="full ghost" id="btn-cancel-compare" style="margin-top:8px;">Cancelar</button>
     `;
