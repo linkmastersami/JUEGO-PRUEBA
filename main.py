@@ -716,7 +716,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     room_mode = "solo" if room_code.upper().startswith("SOLO-") else "multi"
     room = rooms.setdefault(room_code, Room(room_code, mode=room_mode))
 
-    clean_name = player_name.strip()[:20] or "Agente"
+    clean_name = player_name.strip()
     player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower()), None)
 
     if player:
@@ -775,11 +775,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
             elif mtype == "guess" and room.status == "playing":
                 numbers = msg.get("numbers", [])
 
-                # Solo el jugador en turno puede intentar desactivar su
-                # bomba (misma regla que 'reveal' y 'clue'). Antes faltaba
-                # esta verificación y cualquier jugador podía intentarlo en
-                # cualquier momento, rompiendo el orden de turnos.
-                if room.pending_guess is None and room.players and room.current_player().id == player.id:
+                if room.pending_guess is None:
                     cur = room.get_player(player.id)
                     if cur is not None and not cur.eliminated and not cur.resolved:
                         room.pending_guess = {"player_id": cur.id, "player_name": cur.name}
