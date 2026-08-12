@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Got Five!</title>
+<title>Estratega de Códigos</title>
 <style>
   :root {
     --bg: #12141c;
@@ -258,6 +258,191 @@
   }
 
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
+
+  /* --- CAPA: CUENTA REGRESIVA DE DESACTIVACIÓN --- */
+  #overlay-desactivar {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(10, 8, 20, 0.92);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+  }
+  #overlay-desactivar.activo {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #dz-nombre {
+    font-size: 1.3rem;
+    font-weight: 800;
+    text-align: center;
+    padding: 0 24px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  #dz-sub {
+    font-size: 0.9rem;
+    color: var(--muted);
+    margin-bottom: 26px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  #dz-contador {
+    font-size: 7rem;
+    font-weight: 900;
+    color: var(--bad);
+    line-height: 1;
+    text-shadow: 0 0 40px rgba(209, 69, 63, 0.7);
+  }
+  #dz-contador.tick {
+    animation: dzTick 1s ease-out;
+  }
+  @keyframes dzTick {
+    0% { transform: scale(1.5); opacity: 0.3; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  #dz-barra-wrap {
+    width: 220px;
+    height: 8px;
+    border-radius: 4px;
+    background: #2a2d3a;
+    margin-top: 28px;
+    overflow: hidden;
+  }
+  #dz-barra {
+    height: 100%;
+    background: var(--bad);
+    width: 100%;
+    transform-origin: left;
+  }
+  #dz-barra.animar {
+    animation: dzBarra 5s linear forwards;
+  }
+  @keyframes dzBarra {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+
+  /* --- CAPA: RESULTADO DE RONDA (con botón Aceptar) --- */
+  #overlay-resultado-ronda {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.88);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+    padding: 20px;
+    text-align: center;
+  }
+  #overlay-resultado-ronda.activo {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  #rr-icono { font-size: 3.4rem; margin-bottom: 10px; }
+  #rr-titulo { font-size: 1.25rem; font-weight: 900; margin-bottom: 16px; max-width: 360px; }
+  #rr-detalle { display: flex; gap: 12px; margin-bottom: 26px; flex-wrap: wrap; justify-content: center; }
+  #rr-detalle .rr-chip { padding: 8px 14px; border-radius: 10px; font-weight: 800; font-size: 0.9rem; color: #fff; }
+  #rr-detalle .rr-chip.gano { background: var(--good); }
+  #rr-detalle .rr-chip.perdio { background: var(--bad); }
+  #rr-btn-aceptar {
+    padding: 12px 42px;
+    border-radius: 10px;
+    border: none;
+    background: #fff;
+    color: #1a1a1a;
+    font-weight: 800;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  /* --- CAPA: CUENTA REGRESIVA POR DESCONEXIÓN DE UN JUGADOR --- */
+  #overlay-desconexion {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(10, 8, 20, 0.85);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 9990;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+  }
+  #overlay-desconexion.activo { opacity: 1; }
+  #dc-nombre {
+    font-size: 1.2rem;
+    font-weight: 800;
+    text-align: center;
+    padding: 0 24px;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  #dc-sub {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 22px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    text-align: center;
+    padding: 0 20px;
+  }
+  #dc-contador {
+    font-size: 5rem;
+    font-weight: 900;
+    color: var(--accent);
+    line-height: 1;
+    text-shadow: 0 0 30px rgba(255, 183, 3, 0.6);
+  }
+  #dc-barra-wrap {
+    width: 220px;
+    height: 8px;
+    border-radius: 4px;
+    background: #2a2d3a;
+    margin-top: 24px;
+    overflow: hidden;
+  }
+  #dc-barra {
+    height: 100%;
+    background: var(--accent);
+    width: 100%;
+    transform-origin: left;
+  }
+  #dc-barra.animar {
+    animation: dcBarra 20s linear forwards;
+  }
+  @keyframes dcBarra {
+    from { width: 100%; }
+    to { width: 0%; }
+  }
+
+  /* --- Pantalla de bienvenida / botón de salir --- */
+  .hero-emoji { font-size: 3.2rem; text-align: center; margin-bottom: 4px; filter: drop-shadow(0 0 18px rgba(255,183,3,0.35)); }
+  .hero-title { text-align: center; margin: 0 0 4px; font-size: 1.3rem; }
+  .hero-hint { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+  #btn-salir {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 500;
+    padding: 8px 14px;
+    font-size: 0.78rem;
+    background: #2a2e3d;
+    color: var(--text);
+    border: 1px solid #3a3f52;
+  }
 </style>
 </head>
 <body>
@@ -277,35 +462,36 @@
     <div id="of-sub">robó esta ficha</div>
 </div>
 
-<!-- PANTALLA DE AUTENTICACIÓN -->
-<div class="wrap" id="pantallaAuth">
-    <h1>💣 Got Five!</h1>
-    <div class="subtitle">Centro de Mando</div>
-
-    <div class="card">
-        <div class="board-title">Iniciar Sesión</div>
-        <input type="text" id="loginUser" placeholder="Nombre de Usuario">
-        <input type="password" id="loginPass" placeholder="Contraseña">
-        <button class="full" onclick="iniciarSesion()">Entrar a Desactivar</button>
-        <div id="loginError" class="error"></div>
-    </div>
-
-    <div class="card" style="border: 2px dashed #3a3f52; background: transparent;">
-        <div class="board-title" style="color: var(--muted);">Reclutamiento (Nuevo Jugador)</div>
-        <input type="text" id="regUser" placeholder="Elige un Usuario">
-        <input type="password" id="regPass" placeholder="Crea una Contraseña">
-        <button class="full secondary" onclick="registrar()">Registrarse</button>
-        <div id="regMensaje" class="error" style="color: var(--good);"></div>
-    </div>
+<div id="overlay-desactivar">
+    <div id="dz-nombre"></div>
+    <div id="dz-sub">intenta desactivar su bomba</div>
+    <div id="dz-contador">5</div>
+    <div id="dz-barra-wrap"><div id="dz-barra"></div></div>
 </div>
 
+<div id="overlay-resultado-ronda">
+    <div id="rr-icono"></div>
+    <div id="rr-titulo"></div>
+    <div id="rr-detalle"></div>
+    <button id="rr-btn-aceptar">Aceptar</button>
+</div>
+
+<div id="overlay-desconexion">
+    <div id="dc-nombre"></div>
+    <div id="dc-sub">se desconectó en su turno · si no vuelve, pierde automáticamente</div>
+    <div id="dc-contador">20</div>
+    <div id="dc-barra-wrap"><div id="dc-barra"></div></div>
+</div>
+
+<button id="btn-salir" class="ghost hidden">🚪 Salir</button>
+
 <!-- CONTENEDOR DEL JUEGO -->
-<div class="wrap hidden" id="pantallaJuego">
-  <h1>🎯 Got Five!</h1>
+<div class="wrap" id="pantallaJuego">
+  <h1>🎯 Estratega de Códigos</h1>
   <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
   <!-- HUD DEL JUGADOR -->
-  <div id="perfilJugador" class="card" style="text-align: center; border: 2px solid var(--accent2);">
+  <div id="perfilJugador" class="card hidden" style="text-align: center; border: 2px solid var(--accent2);">
       <h2 id="uiNombre" style="margin: 0;"></h2>
       <h3 id="uiRango" style="color: var(--accent); margin: 5px 0;"></h3>
       <div style="font-size: 1.1rem; font-weight: bold;">
@@ -325,28 +511,45 @@
 
   <!-- PANTALLA DE UNIÓN -->
   <div id="join-screen" class="card">
-    <div class="board-title">Unirse a una partida</div>
-    
-    <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
-      🔍 Encontrar Partida Rápida
-    </button>
 
-    <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
-      — o crea/únete a una sala privada —
+    <!-- Paso 1: solo pedimos el nombre -->
+    <div id="join-step-name">
+      <div class="hero-emoji">🎯💣</div>
+      <h2 class="hero-title">¡Bienvenido, agente!</h2>
+      <div class="hero-hint">Coloca tu nombre para empezar</div>
+      <input id="name-input" type="text" placeholder="Tu nombre" maxlength="20" autofocus>
+      <button class="full" id="btn-continuar-nombre" style="font-size: 1.05rem;">Continuar ➜</button>
     </div>
 
-    <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
-    <input id="name-input" type="hidden">
-    <button class="full secondary" id="join-btn">Entrar a sala privada</button>
+    <!-- Paso 2: elegir cómo jugar (aparece después del nombre) -->
+    <div id="join-step-modo" class="hidden">
+      <div class="board-title" style="justify-content:center; text-align:center;">
+        ¡Hola, <span id="nombre-confirmado"></span>! ¿Cómo quieres jugar?
+      </div>
+
+      <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
+        🔍 Encontrar Partida Rápida
+      </button>
+
+      <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
+        — o crea/únete a una sala privada —
+      </div>
+
+      <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
+      <button class="full secondary" id="join-btn">Entrar a sala privada</button>
+
+      <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
+        — o practica sin rivales —
+      </div>
+
+      <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
+        🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
+      </button>
+
+      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cambiar nombre</button>
+    </div>
+
     <div id="join-error" class="error"></div>
-
-    <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
-      — o practica sin rivales —
-    </div>
-
-    <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
-      🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
-    </button>
   </div>
 
   <!-- PANTALLA DE ESPERA -->
@@ -389,7 +592,7 @@
       <div class="stand" id="your-stand"></div>
 
       <div class="guess-section">
-        <div class="board-title">¡GOT FIVE! — ¿cuál crees que es tu código? (menor a mayor)</div>
+        <div class="board-title">¡DESACTIVAR! — ¿cuál crees que es tu código? (menor a mayor)</div>
         <div class="guess-grid">
           <input type="number" class="g-input" placeholder="#1">
           <input type="number" class="g-input" placeholder="#2">
@@ -397,7 +600,7 @@
           <input type="number" class="g-input" placeholder="#4">
           <input type="number" class="g-input" placeholder="#5">
         </div>
-        <button class="secondary full" id="guess-btn">¡GOT FIVE!</button>
+        <button class="secondary full" id="guess-btn">DESACTIVAR</button>
       </div>
     </div>
 
@@ -542,59 +745,206 @@ function animarPuntajeHUD(elementoId, puntajeInicial, puntajeFinal, duracion) {
     window.requestAnimationFrame(paso);
 }
 
-let usuarioActual = "";
-let puntosActuales = 0;
+// --- CAPA: CUENTA REGRESIVA DE DESACTIVACIÓN ---
+let intervaloCuentaRegresiva = null;
+let pendingGuessMostrado = null;
 
-async function registrar() {
-    const user = document.getElementById("regUser").value;
-    const pass = document.getElementById("regPass").value;
-    const msj = document.getElementById("regMensaje");
+function iniciarCuentaRegresivaDesactivar(nombre, esMio) {
+  const overlay = document.getElementById('overlay-desactivar');
+  const nombreEl = document.getElementById('dz-nombre');
+  const contadorEl = document.getElementById('dz-contador');
+  const barra = document.getElementById('dz-barra');
 
-    const respuesta = await fetch('/registro', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pass })
-    });
+  nombreEl.textContent = esMio
+    ? '¡Estás intentando desactivar tu bomba!'
+    : `${nombre} intenta desactivar su bomba`;
+  contadorEl.textContent = '5';
 
-    const data = await respuesta.json();
-    
-    if (respuesta.ok) {
-        msj.style.color = "var(--good)";
-        msj.innerText = data.mensaje;
-    } else {
-        msj.style.color = "var(--bad)";
-        msj.innerText = data.detail;
+  overlay.classList.remove('activo');
+  void overlay.offsetWidth;
+  overlay.classList.add('activo');
+
+  barra.classList.remove('animar');
+  void barra.offsetWidth;
+  barra.classList.add('animar');
+
+  let restante = 5;
+  clearInterval(intervaloCuentaRegresiva);
+  intervaloCuentaRegresiva = setInterval(() => {
+    restante -= 1;
+    if (restante <= 0) {
+      clearInterval(intervaloCuentaRegresiva);
+      contadorEl.textContent = '0';
+      return;
     }
+    contadorEl.textContent = String(restante);
+    contadorEl.classList.remove('tick');
+    void contadorEl.offsetWidth;
+    contadorEl.classList.add('tick');
+  }, 1000);
 }
 
-async function iniciarSesion() {
-    const user = document.getElementById("loginUser").value;
-    const pass = document.getElementById("loginPass").value;
-    const error = document.getElementById("loginError");
+function cerrarCuentaRegresivaDesactivar() {
+  clearInterval(intervaloCuentaRegresiva);
+  document.getElementById('overlay-desactivar').classList.remove('activo');
+}
 
-    const respuesta = await fetch('/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: user, password: pass })
-    });
+// --- CAPA: CUENTA REGRESIVA POR DESCONEXIÓN DE UN JUGADOR (20s) ---
+let intervaloDesconexion = null;
 
-    const data = await respuesta.json();
-    
-    if (respuesta.ok) {
-        usuarioActual = data.username;
-        let puntajeAnterior = puntosActuales;
-        puntosActuales = data.puntos;
-        
-        document.getElementById("pantallaAuth").classList.add("hidden");
-        document.getElementById("pantallaJuego").classList.remove("hidden");
-        
-        document.getElementById("uiNombre").innerText = usuarioActual;
-        document.getElementById("uiRango").innerText = data.rango;
-        
-        animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 1000);
-        document.getElementById("name-input").value = usuarioActual;
+function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs) {
+  const overlay = document.getElementById('overlay-desconexion');
+  const nombreEl = document.getElementById('dc-nombre');
+  const contadorEl = document.getElementById('dc-contador');
+  const barra = document.getElementById('dc-barra');
+
+  nombreEl.textContent = `${nombre} se desconectó`;
+
+  overlay.classList.remove('activo');
+  void overlay.offsetWidth;
+  overlay.classList.add('activo');
+
+  barra.classList.remove('animar');
+  void barra.offsetWidth;
+  barra.classList.add('animar');
+
+  clearInterval(intervaloDesconexion);
+  const actualizar = () => {
+    const restanteS = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+    contadorEl.textContent = String(restanteS);
+    if (restanteS <= 0) clearInterval(intervaloDesconexion);
+  };
+  actualizar();
+  intervaloDesconexion = setInterval(actualizar, 250);
+}
+
+function cerrarCuentaRegresivaDesconexion() {
+  clearInterval(intervaloDesconexion);
+  document.getElementById('overlay-desconexion').classList.remove('activo');
+}
+
+// --- CAPA: RESULTADO DE RONDA (con botón Aceptar) ---
+function mostrarResultadoRonda(datos, onAceptar) {
+  const overlay = document.getElementById('overlay-resultado-ronda');
+  document.getElementById('rr-icono').textContent = datos.icono || '';
+  document.getElementById('rr-titulo').textContent = datos.titulo || '';
+  const detalle = document.getElementById('rr-detalle');
+  detalle.innerHTML = (datos.chips || [])
+    .map(c => `<div class="rr-chip ${c.tipo}">${c.texto}</div>`)
+    .join('');
+
+  overlay.classList.remove('activo');
+  void overlay.offsetWidth;
+  overlay.classList.add('activo');
+
+  const btn = document.getElementById('rr-btn-aceptar');
+  btn.onclick = () => {
+    overlay.classList.remove('activo');
+    if (onAceptar) onAceptar();
+  };
+}
+
+function nombreJugadorPorId(state, pid) {
+  const p = state.players.find(pl => pl.id === pid);
+  return p ? p.name : '???';
+}
+
+// Procesa los eventos nuevos de una ronda de "DESACTIVAR" en partidas multijugador.
+// Un solo evento = intento contra el mazo (3-4 jugadores activos).
+// Dos eventos encadenados = desenlace 1 contra 1 (el rival queda automáticamente
+// ganador o perdedor al no quedar nadie más en juego).
+function procesarRondaMultijugador(nuevos, state) {
+  cerrarCuentaRegresivaDesactivar();
+
+  if (nuevos.length >= 2) {
+    const primero = nuevos[0];
+    const segundo = nuevos[1];
+    let ganador, perdedor, motivoPerdida;
+    if (primero.type === 'correct') {
+      ganador = primero; perdedor = segundo; motivoPerdida = 'explotó';
+    } else if (primero.type === 'left') {
+      ganador = segundo; perdedor = primero; motivoPerdida = 'salió de la partida';
+    } else if (primero.type === 'disconnected_out') {
+      ganador = segundo; perdedor = primero; motivoPerdida = 'no volvió a tiempo tras desconectarse';
     } else {
-        error.innerText = data.detail;
+      ganador = segundo; perdedor = primero; motivoPerdida = 'explotó';
+    }
+
+    mostrarResultadoRonda({
+      icono: '⚔️',
+      titulo: `¡${ganador.player_name} le ganó a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
+      chips: [
+        { tipo: 'gano', texto: `${ganador.player_name}: +${ganador.points.toLocaleString()} pts` },
+        { tipo: 'perdio', texto: perdedor.points ? `${perdedor.player_name}: -${perdedor.points.toLocaleString()} pts` : `${perdedor.player_name}: eliminado` },
+      ],
+    }, () => {
+      if (ganador.player_id === myId) {
+        queueAnimacionEvento(ganador);
+      } else if (perdedor.player_id === myId && perdedor.points) {
+        queueAnimacionEvento(perdedor);
+      }
+    });
+    return;
+  }
+
+  const ev = nuevos[0];
+  if (!ev) return;
+
+  if (ev.type === 'left' || ev.type === 'disconnected_out') {
+    const motivo = ev.type === 'left' ? 'salió de la partida' : 'no volvió a tiempo tras desconectarse';
+    mostrarResultadoRonda({
+      icono: ev.type === 'left' ? '🚪' : '⏱️',
+      titulo: `${ev.player_name} perdió: ${motivo}. La partida continúa sin ${ev.player_name}.`,
+      chips: [],
+    }, null);
+    return;
+  }
+
+  if (ev.type === 'correct') {
+    const esMio = ev.player_id === myId;
+    mostrarResultadoRonda({
+      icono: '🎯',
+      titulo: esMio
+        ? `¡Acertaste tu código! Ganaste ${ev.points.toLocaleString()} puntos.`
+        : `¡${ev.player_name} acertó su código! Ganó ${ev.points.toLocaleString()} puntos.`,
+      chips: [],
+    }, () => {
+      if (esMio) queueAnimacionEvento(ev);
+    });
+    return;
+  }
+
+  if (ev.type === 'exploded') {
+    if (ev.player_id === myId) {
+      // Al jugador que falló le sale directo la animación de explosión y pérdida de puntos.
+      queueAnimacionEvento(ev);
+    } else {
+      mostrarResultadoRonda({
+        icono: '💥',
+        titulo: `¡${ev.player_name} explotó! Que no te pase lo mismo.`,
+        chips: [],
+      }, null);
+    }
+  }
+}
+
+let puntosActuales = 0;
+
+// Por ahora no hay login/registro: el "usuario" es simplemente el nombre que
+// la persona escribe. Igual consultamos el perfil por nombre para mostrar
+// puntos/rango acumulados si ya jugó antes con ese mismo nombre.
+async function actualizarPerfilHUD(name) {
+    document.getElementById("perfilJugador").classList.remove("hidden");
+    document.getElementById("uiNombre").innerText = name;
+    try {
+        const respuesta = await fetch('/perfil/' + encodeURIComponent(name));
+        const data = await respuesta.json();
+        let puntajeAnterior = puntosActuales;
+        puntosActuales = data.puntos || 0;
+        document.getElementById("uiRango").innerText = data.rango || "Novato en Desactivación";
+        animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 800);
+    } catch (e) {
+        document.getElementById("uiRango").innerText = "Novato en Desactivación";
     }
 }
 
@@ -630,10 +980,11 @@ function conectarSala(room, name, solo = false) {
   errEl.textContent = '';
   
   if (!room || !name) {
-    errEl.textContent = 'Faltan datos para entrar a la sala.';
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
 
+  actualizarPerfilHUD(name);
   esModoSolo = solo;
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -661,23 +1012,84 @@ function conectarSala(room, name, solo = false) {
   ws.onclose = () => {
     document.getElementById('status-line').textContent = 'Conexión perdida.';
     setTimeout(() => {
-      document.getElementById('game-screen').classList.add('hidden');
-      document.getElementById('wait-screen').classList.add('hidden');
-      document.getElementById('join-screen').classList.remove('hidden');
+      volverAlInicio();
       document.getElementById('join-error').textContent = 'La conexión se interrumpió.';
     }, 1000);
   };
 }
 
+// --- Vuelve a la pantalla principal (paso "coloca tu nombre") ---
+function volverAlInicio() {
+  cerrarCuentaRegresivaDesactivar();
+  cerrarCuentaRegresivaDesconexion();
+  if (ws) { try { ws.close(); } catch (e) {} }
+  ws = null;
+  lastState = null;
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('wait-screen').classList.add('hidden');
+  document.getElementById('btn-salir').classList.add('hidden');
+  document.getElementById('join-screen').classList.remove('hidden');
+  document.getElementById('join-step-modo').classList.add('hidden');
+  document.getElementById('join-step-name').classList.remove('hidden');
+}
+
+// --- Paso 1 -> Paso 2: al continuar, primero revisamos si ese nombre ya
+// tenía una partida activa (para reconectarlo directo, sin pedir código) ---
+document.getElementById('btn-continuar-nombre').onclick = async () => {
+  const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = '';
+  if (!name) {
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+
+  errEl.textContent = 'Comprobando si ya tenías una partida activa...';
+  try {
+    const resp = await fetch('/buscar-partida/' + encodeURIComponent(name));
+    const data = await resp.json();
+    if (data.found) {
+      errEl.textContent = '';
+      conectarSala(data.room, name, data.mode === 'solo');
+      return;
+    }
+  } catch (e) {
+    // Si falla la búsqueda, seguimos normalmente a elegir modo de juego.
+  }
+
+  errEl.textContent = '';
+  document.getElementById('nombre-confirmado').textContent = name;
+  document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+};
+
+document.getElementById('name-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btn-continuar-nombre').click();
+});
+
+document.getElementById('btn-cambiar-nombre').onclick = () => {
+  document.getElementById('join-error').textContent = '';
+  document.getElementById('join-step-modo').classList.add('hidden');
+  document.getElementById('join-step-name').classList.remove('hidden');
+};
+
 document.getElementById('join-btn').onclick = () => {
   const room = document.getElementById('room-input').value.trim().toUpperCase();
-  const name = document.getElementById('name-input').value.trim() || usuarioActual;
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) {
+    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
   conectarSala(room, name);
 };
 
 document.getElementById('btn-auto-join').onclick = async () => {
-  const name = document.getElementById('name-input').value.trim() || usuarioActual;
+  const name = document.getElementById('name-input').value.trim();
   const errEl = document.getElementById('join-error');
+  if (!name) {
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
   errEl.textContent = 'Buscando sala disponible...';
   
   try {
@@ -699,9 +1111,34 @@ document.getElementById('start-btn').onclick = () => {
 };
 
 document.getElementById('btn-solo').onclick = () => {
-  const name = document.getElementById('name-input').value.trim() || usuarioActual;
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) {
+    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
   const room = 'SOLO-' + Math.random().toString(36).slice(2, 8).toUpperCase();
   conectarSala(room, name, true);
+};
+
+// --- Botón "Salir" (visible durante la sala de espera o la partida) ---
+document.getElementById('btn-salir').onclick = () => {
+  const status = lastState ? lastState.status : null;
+
+  if (!status || status === 'finished') {
+    // Ya no hay partida activa: solo volvemos a la pantalla principal.
+    volverAlInicio();
+    return;
+  }
+
+  const advertencia = status === 'playing'
+    ? 'Si sales ahora perderás automáticamente y la partida continuará sin ti. ¿Seguro que quieres salir?'
+    : '¿Seguro que quieres salir de la sala?';
+  if (!confirm(advertencia)) return;
+
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({type: 'leave'}));
+  }
+  volverAlInicio();
 };
 
 document.getElementById('guess-btn').onclick = () => {
@@ -781,6 +1218,7 @@ document.getElementById('reset-table-btn').onclick = () => {
 let lastEventSeq = 0;
 let colaAnimEventos = [];
 let animEventoEnCurso = false;
+let dcMostrado = null;
 
 function queueAnimacionEvento(ev) {
   colaAnimEventos.push(ev);
@@ -829,17 +1267,50 @@ function handleState(state) {
     if (state.events && state.events.length) {
       const nuevos = state.events.filter(ev => ev.seq > lastEventSeq);
       nuevos.sort((a, b) => a.seq - b.seq);
-      nuevos.forEach(ev => {
-        if (ev.player_id === myId) {
-          queueAnimacionEvento(ev);
+      if (nuevos.length) {
+        if (state.mode === 'solo') {
+          nuevos.forEach(ev => {
+            if (ev.player_id === myId) queueAnimacionEvento(ev);
+          });
+        } else {
+          procesarRondaMultijugador(nuevos, state);
         }
-      });
+      }
     }
   }
   lastEventSeq = (state.event_seq) || lastEventSeq;
 
+  // --- Cuenta regresiva del intento de desactivación (¡DESACTIVAR!) ---
+  if (state.pending_guess) {
+    if (pendingGuessMostrado !== state.pending_guess.player_id) {
+      pendingGuessMostrado = state.pending_guess.player_id;
+      iniciarCuentaRegresivaDesactivar(state.pending_guess.player_name, state.pending_guess.player_id === state.your_id);
+    }
+  } else if (pendingGuessMostrado !== null) {
+    pendingGuessMostrado = null;
+    cerrarCuentaRegresivaDesactivar();
+  }
+
+  // --- Cuenta regresiva por desconexión de un jugador en su turno (20s) ---
+  if (state.disconnect_player_id) {
+    if (dcMostrado !== state.disconnect_player_id) {
+      dcMostrado = state.disconnect_player_id;
+      iniciarCuentaRegresivaDesconexion(state.disconnect_player_name, state.disconnect_deadline_ms);
+    }
+  } else if (dcMostrado !== null) {
+    dcMostrado = null;
+    cerrarCuentaRegresivaDesconexion();
+  }
+
   lastState = state;
   myId = state.your_id;
+
+  const btnSalir = document.getElementById('btn-salir');
+  if (state.status === 'waiting' && state.mode === 'solo') {
+    btnSalir.classList.add('hidden');
+  } else {
+    btnSalir.classList.remove('hidden');
+  }
 
   if (state.status === 'waiting') {
     if (state.mode === 'solo') {
@@ -926,6 +1397,7 @@ function renderGame(state) {
   const youEliminated = you && you.eliminated;
   const youResolved = you && you.resolved;
   const youDone = youEliminated || youResolved;
+  const hayIntentoEnCurso = !!state.pending_guess;
 
   document.getElementById('your-stand').innerHTML = you ? renderStand(you) : '';
   document.getElementById('turn-badge-you').textContent = isYourTurn && state.status === 'playing' ? 'TU TURNO' : '';
@@ -963,7 +1435,7 @@ function renderGame(state) {
   `;
   }).join('');
 
-  const canPickClue = isYourTurn && state.status === 'playing' && state.phase === 'clue' && !youDone;
+  const canPickClue = isYourTurn && state.status === 'playing' && state.phase === 'clue' && !youDone && !hayIntentoEnCurso;
 
   if (canPickClue && selectedFaceupIndex === null) {
     // La única ficha sin usar es siempre la última revelada.
@@ -1000,14 +1472,18 @@ function renderGame(state) {
   resultCard.classList.add('hidden');
 
   if (state.status === 'playing') {
-    if (youEliminated) {
+    if (hayIntentoEnCurso) {
+      statusLine.textContent = state.pending_guess.player_id === myId
+        ? 'Estás intentando desactivar tu bomba...'
+        : `${state.pending_guess.player_name} está intentando desactivar su bomba...`;
+    } else if (youEliminated) {
       statusLine.textContent = 'Explotaste. Puedes seguir viendo la partida.';
     } else if (youResolved) {
       statusLine.textContent = 'Ya acertaste tu código. Esperando a que termine la partida.';
     } else {
       statusLine.textContent = isYourTurn ? '¡Es tu turno!' : `Turno de ${state.current_turn_name}`;
     }
-    guessBtn.disabled = youDone;
+    guessBtn.disabled = youDone || hayIntentoEnCurso;
   } else if (state.status === 'finished') {
     const won = state.winner === myId;
     statusLine.textContent = 'Partida terminada.';
@@ -1019,11 +1495,11 @@ function renderGame(state) {
     let mensaje;
     if (state.mode === 'solo') {
       mensaje = won
-        ? '🎉 ¡GOT FIVE! Descifraste tu código en solitario.'
+        ? '🎉 ¡DESACTIVADO! Descifraste tu código en solitario.'
         : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
     } else {
       const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
-      mensaje = won ? '🎉 ¡Ganaste! GOT FIVE!' : `😞 Ganó ${winnerName}`;
+      mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
     }
 
     const botonTexto = state.mode === 'solo' ? '🔄 Jugar otra vez en solitario' : '🔄 Buscar nueva partida';
@@ -1038,8 +1514,12 @@ function renderGame(state) {
 
     document.getElementById('btn-reinicio').onclick = () => {
       if (ws) ws.close();
+      ws = null;
       document.getElementById('game-screen').classList.add('hidden');
+      document.getElementById('btn-salir').classList.add('hidden');
       document.getElementById('join-screen').classList.remove('hidden');
+      document.getElementById('join-step-name').classList.add('hidden');
+      document.getElementById('join-step-modo').classList.remove('hidden');
       if (state.mode === 'solo') {
         document.getElementById('btn-solo').click();
       } else {
@@ -1056,6 +1536,12 @@ function renderGame(state) {
 function renderActionPanel(state, isYourTurn, youEliminated) {
   const content = document.getElementById('action-content');
   const titleEl = document.getElementById('action-card-title');
+
+  if (state.pending_guess) {
+    titleEl.textContent = '💣 Desactivación en curso';
+    content.innerHTML = `<div class="action-hint">Esperando el resultado del intento de desactivación...</div>`;
+    return;
+  }
 
   if (state.status !== 'playing' || !isYourTurn || youEliminated) {
     titleEl.textContent = 'Fichas junto a la reserva';
