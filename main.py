@@ -1,5 +1,5 @@
 """
-Got Five! - Prototipo web fiel al reglamento oficial, para 2-4 jugadores en línea.
+Estratega de Códigos - Prototipo web fiel al reglamento oficial, para 2-4 jugadores en línea.
 
 Cómo correrlo:
     pip install -r requirements.txt
@@ -11,9 +11,8 @@ usa el mismo código de sala y nombres diferentes.
 import json
 import random
 import sqlite3
-import hashlib
-from pydantic import BaseModel
-from fastapi import HTTPException
+import asyncio
+import time
 from typing import Dict, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -44,7 +43,7 @@ app = FastAPI()
 # Base de datos y Autenticación
 # ---------------------------------------------------------------------------
 def init_db():
-    conn = sqlite3.connect('got_five.db')
+    conn = sqlite3.connect('estratega_de_codigos.db')
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS usuarios (
@@ -59,13 +58,6 @@ def init_db():
     conn.close()
 
 init_db() 
-
-def hash_password(password: str):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-class UsuarioAuth(BaseModel):
-    username: str
-    password: str    
 
 RANGOS = [
     "Adivino de Feria", "Curioso Empedernido", "Observador Casual", 
@@ -84,65 +76,45 @@ def obtener_rango(puntos: int, victorias: int):
     return RANGOS[indice]
 
 def update_player_score(username: str, points_change: int) -> int:
-    conn = sqlite3.connect('got_five.db')
+    conn = sqlite3.connect('estratega_de_codigos.db')
+    cursor = conn.cursor()
+    # Por ahora no hay registro/login: si el nombre todavía no tiene fila en la
+    # base de datos, se crea automáticamente para poder llevar sus puntos.
+    cursor.execute(
+        "INSERT OR IGNORE INTO usuarios (username, password_hash, puntos, victorias) VALUES (?, '', 0, 0)",
+        (username,)
+    )
+    cursor.execute("SELECT puntos, victorias FROM usuarios WHERE username = ?", (username,))
+    current_puntos, current_victorias = cursor.fetchone()
+
+    new_puntos = max(0, current_puntos + points_change)
+    new_victorias = current_victorias + (1 if points_change > 0 else 0)
+
+    cursor.execute(
+        "UPDATE usuarios SET puntos = ?, victorias = ? WHERE username = ?",
+        (new_puntos, new_victorias, username)
+    )
+    conn.commit()
+    conn.close()
+    return new_puntos
+
+@app.get("/perfil/{username}")
+async def obtener_perfil(username: str):
+    """Devuelve puntos/victorias/rango acumulados para un nombre dado.
+
+    Por ahora no hay contraseñas ni login: cualquiera puede jugar con
+    cualquier nombre, y este endpoint solo sirve para mostrar el progreso
+    acumulado si ya se jugó antes con ese mismo nombre.
+    """
+    conn = sqlite3.connect('estratega_de_codigos.db')
     cursor = conn.cursor()
     cursor.execute("SELECT puntos, victorias FROM usuarios WHERE username = ?", (username,))
     row = cursor.fetchone()
-    
-    if row:
-        current_puntos, current_victorias = row
-        new_puntos = max(0, current_puntos + points_change)
-        new_victorias = current_victorias + (1 if points_change > 0 else 0)
-        
-        cursor.execute(
-            "UPDATE usuarios SET puntos = ?, victorias = ? WHERE username = ?",
-            (new_puntos, new_victorias, username)
-        )
-        conn.commit()
-        conn.close()
-        return new_puntos
-    conn.close()
-    return 0
-
-@app.post("/registro")
-async def registrar_usuario(user: UsuarioAuth):
-    conn = sqlite3.connect('got_five.db')
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO usuarios (username, password_hash) VALUES (?, ?)",
-            (user.username, hash_password(user.password))
-        )
-        conn.commit()
-        return {"mensaje": "¡Registro exitoso! Prepárate para la explosión."}
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="Este nombre de usuario ya está en uso.")
-    finally:
-        conn.close()
-
-@app.post("/login")
-async def iniciar_sesion(user: UsuarioAuth):
-    conn = sqlite3.connect('got_five.db')
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT puntos, victorias FROM usuarios WHERE username = ? AND password_hash = ?",
-        (user.username, hash_password(user.password))
-    )
-    usuario = cursor.fetchone()
     conn.close()
 
-    if usuario:
-        puntos, victorias = usuario
-        rango = obtener_rango(puntos, victorias)
-        return {
-            "mensaje": "Login exitoso",
-            "username": user.username,
-            "puntos": puntos,
-            "victorias": victorias,
-            "rango": rango
-        }
-    else:
-        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos. ¿Intentaste adivinar?")
+    puntos, victorias = row if row else (0, 0)
+    rango = obtener_rango(puntos, victorias)
+    return {"username": username, "puntos": puntos, "victorias": victorias, "rango": rango}
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +125,7 @@ room_counter = 1  # Contador global para emparejamiento automático
 
 MIN_PLAYERS = 2
 MAX_PLAYERS = 4
+DISCONNECT_TIMEOUT = 20  # segundos de gracia antes de que un jugador desconectado pierda automáticamente
 
 COLORS = ["green", "pink", "blue", "red", "orange"]
 COLOR_HEX = {
@@ -237,6 +210,14 @@ class Room:
         self.event_seq = 0
         self.last_event: Optional[dict] = None
         self.events: List[dict] = []  
+        self.pending_guess: Optional[dict] = None
+        # --- Manejo de desconexiones ---
+        # Solo se activa una cuenta regresiva cuando le toca jugar a un
+        # jugador desconectado (o se desconecta estando en su turno). Los
+        # demás jugadores no se enteran de nada hasta ese momento.
+        self.disconnect_player_id: Optional[str] = None
+        self.disconnect_deadline: Optional[float] = None
+        self.disconnect_token: int = 0
 
     def get_player(self, pid: str) -> Optional[Player]:
         return next((p for p in self.players if p.id == pid), None)
@@ -273,6 +254,8 @@ class Room:
         self.event_seq = 0
         self.last_event = None
         self.events = []
+        self.pending_guess = None
+        self._clear_disconnect_timer()
         self.log.append("La partida ha comenzado. ¡Suerte!")
 
     def current_player(self) -> Player:
@@ -338,6 +321,70 @@ class Room:
             p = self.players[self.turn_index]
             if not p.eliminated and not p.resolved:
                 break
+        self._sync_disconnect_timer()
+
+    # --- Manejo de desconexiones ---
+    def _clear_disconnect_timer(self):
+        self.disconnect_player_id = None
+        self.disconnect_deadline = None
+        self.disconnect_token += 1
+
+    def _start_disconnect_timer(self, player: "Player"):
+        self.disconnect_player_id = player.id
+        self.disconnect_deadline = time.time() + DISCONNECT_TIMEOUT
+        self.disconnect_token += 1
+        self.log.append(
+            f"{player.name} está desconectado y le tocaba jugar: tiene {DISCONNECT_TIMEOUT}s para volver o pierde."
+        )
+        asyncio.create_task(_watch_disconnect(self.code, player.id, self.disconnect_token))
+
+    def _sync_disconnect_timer(self):
+        """Revisa si al jugador en turno le toca cuenta regresiva por estar
+        desconectado. Solo aplica en partidas multijugador en curso."""
+        if self.mode != "multi" or self.status != "playing" or not self.players:
+            if self.disconnect_player_id is not None:
+                self._clear_disconnect_timer()
+            return
+        cur = self.current_player()
+        if cur.connected:
+            if self.disconnect_player_id is not None:
+                self._clear_disconnect_timer()
+        elif self.disconnect_player_id != cur.id:
+            self._start_disconnect_timer(cur)
+
+    def eliminate_disconnected(self, player: "Player") -> None:
+        """Un jugador desconectado no volvió a tiempo (20s): pierde
+        automáticamente y la partida continúa sin él."""
+        if player.eliminated or player.resolved:
+            return
+        was_current = self.current_player().id == player.id
+        player.eliminated = True
+        self.log.append(f"{player.name} perdió por no volver a tiempo tras desconectarse.")
+        self._record_event("disconnected_out", player, 0)
+        if self.disconnect_player_id == player.id:
+            self._clear_disconnect_timer()
+        finished = self._finish_if_one_active_remains("exploded")
+        if not finished and was_current:
+            self.advance_turn()
+            self.phase = "reveal"
+
+    def leave_game(self, player: "Player") -> bool:
+        """Un jugador presiona 'Salir' durante una partida en curso: pierde
+        automáticamente y la partida continúa sin él."""
+        if self.status != "playing" or player.eliminated or player.resolved:
+            return False
+        was_current = self.current_player().id == player.id
+        player.eliminated = True
+        player.connected = False
+        self.log.append(f"{player.name} salió de la partida y perdió automáticamente.")
+        self._record_event("left", player, 0)
+        if self.disconnect_player_id == player.id:
+            self._clear_disconnect_timer()
+        finished = self._finish_if_one_active_remains("exploded")
+        if not finished and was_current:
+            self.advance_turn()
+            self.phase = "reveal"
+        return True
 
     def active_players(self) -> List[Player]:
         return [p for p in self.players if not p.eliminated and not p.resolved]
@@ -436,7 +483,7 @@ class Room:
             earned_points = self.deck_remaining() * 1000 * multiplier
             update_player_score(cur.name, earned_points)
             self.log.append(
-                f"¡{cur.name} gritó GOT FIVE! y acertó. Gana {earned_points} puntos (×{multiplier})."
+                f"¡{cur.name} gritó DESACTIVAR! y acertó. Gana {earned_points} puntos (×{multiplier})."
             )
             self._record_event("correct", cur, earned_points, multiplier=multiplier)
 
@@ -449,7 +496,7 @@ class Room:
         lost_points = self.deck_remaining() * 1000
         update_player_score(cur.name, -lost_points)
         self.log.append(
-            f"{cur.name} gritó GOT FIVE! pero falló y pierde {lost_points} puntos. Queda eliminado."
+            f"{cur.name} gritó DESACTIVAR! pero falló y pierde {lost_points} puntos. Queda eliminado."
         )
         self._record_event("exploded", cur, lost_points)
 
@@ -459,6 +506,7 @@ class Room:
 
     def state_for(self, viewer_id: str) -> dict:
         cur = self.current_player() if self.players and self.status == "playing" else None
+        disc_player = self.get_player(self.disconnect_player_id) if self.disconnect_player_id else None
         return {
             "type": "state",
             "status": self.status,
@@ -478,6 +526,10 @@ class Room:
             "event_seq": self.event_seq,
             "last_event": self.last_event,
             "events": self.events,
+            "pending_guess": self.pending_guess,
+            "disconnect_player_id": self.disconnect_player_id,
+            "disconnect_player_name": disc_player.name if disc_player else None,
+            "disconnect_deadline_ms": int(self.disconnect_deadline * 1000) if self.disconnect_deadline else None,
             "your_id": viewer_id,
             "min_players": MIN_PLAYERS,
             "max_players": MAX_PLAYERS,
@@ -495,6 +547,29 @@ async def broadcast(room: Room):
             await p.ws.send_text(json.dumps(room.state_for(p.id)))
         except Exception:
             pass
+
+
+async def _watch_disconnect(room_code: str, pid: str, token: int):
+    """Espera 20s y, si el jugador sigue desconectado y sigue siendo el
+    turno pendiente, lo elimina automáticamente para que la partida siga."""
+    await asyncio.sleep(DISCONNECT_TIMEOUT)
+    room = rooms.get(room_code)
+    if room is None:
+        return
+    # Si el token ya no coincide, es que el jugador volvió, cambió el turno,
+    # o la partida ya terminó: esta cuenta regresiva quedó obsoleta.
+    if room.disconnect_token != token or room.disconnect_player_id != pid:
+        return
+    player = room.get_player(pid)
+    if player is None or player.connected or player.eliminated or player.resolved:
+        return
+    if room.status != "playing":
+        return
+    room.eliminate_disconnected(player)
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -519,6 +594,23 @@ async def matchmake():
     return {"room": new_room_id}
 
 
+@app.get("/buscar-partida/{player_name}")
+async def buscar_partida(player_name: str):
+    """Busca si ya existe una partida activa (esperando o en curso) donde
+    ese nombre esté jugando, para poder reconectar sin pedir el código de
+    sala de nuevo."""
+    clean = player_name.strip().lower()
+    if not clean:
+        return {"found": False}
+    for code, room in rooms.items():
+        if room.status not in ("waiting", "playing"):
+            continue
+        for p in room.players:
+            if p.name.strip().lower() == clean:
+                return {"found": True, "room": code, "mode": room.mode}
+    return {"found": False}
+
+
 @app.websocket("/ws/{room_code}/{player_name}")
 async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     await websocket.accept()
@@ -531,6 +623,8 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     if player:
         player.ws = websocket
         player.connected = True
+        if room.disconnect_player_id == player.id:
+            room._clear_disconnect_timer()
         room.log.append(f"{player.name} se reconectó a la partida.")
         await broadcast(room)
     else:
@@ -558,13 +652,13 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                     room.start()
                     await broadcast(room)
 
-            elif mtype == "reveal" and room.status == "playing" and room.phase == "reveal":
+            elif mtype == "reveal" and room.status == "playing" and room.phase == "reveal" and room.pending_guess is None:
                 if room.current_player().id == player.id:
                     color = msg.get("color")
                     if room.reveal_tile(color) is not None:
                         await broadcast(room)
 
-            elif mtype == "clue" and room.status == "playing" and room.phase == "clue":
+            elif mtype == "clue" and room.status == "playing" and room.phase == "clue" and room.pending_guess is None:
                 if room.current_player().id == player.id:
                     action = msg.get("action")
                     faceup_index = msg.get("faceup_index")
@@ -578,12 +672,70 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
 
             elif mtype == "guess" and room.status == "playing":
                 numbers = msg.get("numbers", [])
-                room.guess(player.id, numbers)
-                await broadcast(room)
+
+                if room.mode == "solo":
+                    # En solitario se resuelve al instante, sin cuenta regresiva.
+                    room.guess(player.id, numbers)
+                    await broadcast(room)
+                elif room.pending_guess is None:
+                    cur = room.get_player(player.id)
+                    if cur is not None and not cur.eliminated and not cur.resolved:
+                        room.pending_guess = {"player_id": cur.id, "player_name": cur.name}
+                        room.log.append(f"{cur.name} intenta desactivar su bomba...")
+                        await broadcast(room)
+
+                        async def _resolver_intento_desactivacion(
+                            room_code: str = room.code, pid: str = player.id, nums: List[int] = numbers
+                        ):
+                            # Cuenta regresiva de 5 segundos antes de resolver el intento,
+                            # para que todos los jugadores vean la animación en simultáneo.
+                            await asyncio.sleep(5)
+                            target_room = rooms.get(room_code)
+                            if target_room is None:
+                                return
+                            target_room.pending_guess = None
+                            target_room.guess(pid, nums)
+                            try:
+                                await broadcast(target_room)
+                            except Exception:
+                                pass
+
+                        asyncio.create_task(_resolver_intento_desactivacion())
+
+            elif mtype == "leave":
+                if room.status == "playing":
+                    room.leave_game(player)
+                elif room.status == "waiting":
+                    room.players = [p for p in room.players if p.id != player.id]
+                    room.log.append(f"{player.name} salió de la sala.")
+                    player.connected = False
+
+                try:
+                    await websocket.send_text(json.dumps({"type": "left"}))
+                except Exception:
+                    pass
+                try:
+                    await broadcast(room)
+                except Exception:
+                    pass
+
+                if not any(p.connected for p in room.players):
+                    if room.code in rooms:
+                        del rooms[room.code]
+
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
 
     except WebSocketDisconnect:
         player.connected = False
-        room.log.append(f"{player.name} se desconectó temporalmente.")
+        # No avisamos en el historial de inmediato: los demás jugadores no
+        # deben enterarse de la desconexión hasta que le toque su turno.
+        if room.status == "playing" and room.mode == "multi" and not player.eliminated and not player.resolved:
+            if room.players and room.current_player().id == player.id:
+                room._start_disconnect_timer(player)
         try:
             await broadcast(room)
         except Exception:
