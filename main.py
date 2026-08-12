@@ -127,6 +127,49 @@ MIN_PLAYERS = 2
 MAX_PLAYERS = 4
 DISCONNECT_TIMEOUT = 20  # segundos de gracia antes de que un jugador desconectado pierda automáticamente
 
+# ---------------------------------------------------------------------------
+# Chat grupal (lobby) y contador de jugadores en línea
+# ---------------------------------------------------------------------------
+# Es un chat global, independiente de las salas: nunca se limpia por sí solo,
+# solo conserva los últimos 50 mensajes (se van borrando los más viejos).
+# Solo es visible para quien ya puso su nombre. "En línea" cuenta a
+# cualquier jugador conectado y con nombre puesto, esté en el lobby o ya
+# dentro de una sala/partida.
+LOBBY_CHAT_LIMIT = 50
+lobby_sockets: Dict[str, WebSocket] = {}   # id de conexión -> websocket
+lobby_chat_messages: List[dict] = []
+lobby_chat_seq = 0
+online_names: Dict[str, int] = {}          # nombre -> nº de conexiones activas
+
+
+def _add_online(name: str) -> None:
+    online_names[name] = online_names.get(name, 0) + 1
+
+
+def _remove_online(name: str) -> None:
+    if name not in online_names:
+        return
+    online_names[name] -= 1
+    if online_names[name] <= 0:
+        del online_names[name]
+
+
+async def _broadcast_lobby() -> None:
+    payload = json.dumps({
+        "type": "lobby_state",
+        "chat": lobby_chat_messages,
+        "online_count": len(online_names),
+    })
+    caidos = []
+    for sid, sock in lobby_sockets.items():
+        try:
+            await sock.send_text(payload)
+        except Exception:
+            caidos.append(sid)
+    for sid in caidos:
+        lobby_sockets.pop(sid, None)
+
+
 COLORS = ["green", "pink", "blue", "red", "orange"]
 COLOR_HEX = {
     "green": "#3f9142",
@@ -628,6 +671,45 @@ async def buscar_partida(player_name: str):
     return {"found": False}
 
 
+@app.websocket("/ws/lobby/{player_name}")
+async def ws_lobby(websocket: WebSocket, player_name: str):
+    """Conexión del chat grupal + contador de jugadores en línea. Se abre en
+    cuanto el jugador escribe su nombre, antes incluso de elegir sala, y es
+    independiente de cualquier partida."""
+    await websocket.accept()
+    clean_name = (player_name.strip() or "Agente")[:20]
+    sid = f"{clean_name}-{random.randint(100000, 999999)}"
+    lobby_sockets[sid] = websocket
+    _add_online(clean_name)
+    await _broadcast_lobby()
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            if msg.get("type") == "chat":
+                text = str(msg.get("text", "")).strip()[:300]
+                if text:
+                    global lobby_chat_seq
+                    lobby_chat_seq += 1
+                    lobby_chat_messages.append({
+                        "seq": lobby_chat_seq,
+                        "player_name": clean_name,
+                        "text": text,
+                    })
+                    del lobby_chat_messages[:-LOBBY_CHAT_LIMIT]
+                    await _broadcast_lobby()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        lobby_sockets.pop(sid, None)
+        _remove_online(clean_name)
+        try:
+            await _broadcast_lobby()
+        except Exception:
+            pass
+
+
 @app.websocket("/ws/{room_code}/{player_name}")
 async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     await websocket.accept()
@@ -657,6 +739,9 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
         room.players.append(player)
         room.log.append(f"{clean_name} se unió a la sala.")
         await broadcast(room)
+
+    _add_online(clean_name)
+    await _broadcast_lobby()
 
     try:
         while True:
@@ -733,6 +818,12 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                     room.log.append(f"{player.name} salió de la sala.")
                     player.connected = False
 
+                _remove_online(player.name)
+                try:
+                    await _broadcast_lobby()
+                except Exception:
+                    pass
+
                 try:
                     await websocket.send_text(json.dumps({"type": "left"}))
                 except Exception:
@@ -761,6 +852,12 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                 room._start_disconnect_timer(player)
         try:
             await broadcast(room)
+        except Exception:
+            pass
+
+        _remove_online(player.name)
+        try:
+            await _broadcast_lobby()
         except Exception:
             pass
         
