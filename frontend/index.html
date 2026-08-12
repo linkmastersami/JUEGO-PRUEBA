@@ -491,7 +491,9 @@
     box-shadow: 0 -4px 20px rgba(0,0,0,0.45);
     display: flex;
     flex-direction: column;
-    height: 62vh;
+    /* Ventana chica: solo se alcanzan a ver ~3 mensajes, el resto se ve deslizando */
+    height: 260px;
+    max-height: 60vh;
     transform: translateY(100%);
     transition: transform 0.28s ease;
   }
@@ -539,6 +541,33 @@
     padding: 10px 16px;
     background: var(--accent2);
     color: #fff;
+  }
+
+  /* --- Chat grupal (lobby) --- */
+  #lobby-online-badge { background: #2a2e3d; }
+  #lobby-online-badge .dot-verde { color: var(--good); }
+  #lobby-chat-mensajes {
+    /* Ventana chica: solo se alcanzan a ver ~3 mensajes, el resto deslizando */
+    max-height: 140px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 4px 2px;
+    margin-bottom: 8px;
+  }
+  #lobby-chat-mensajes:empty::after {
+    content: 'Sé el primero en saludar 👋';
+    color: var(--muted);
+    font-size: 0.8rem;
+  }
+  #lobby-chat-input-row { display: flex; gap: 8px; }
+  #lobby-chat-input-row input { flex: 1; margin-bottom: 0; min-width: 0; }
+  #lobby-chat-enviar {
+    padding: 10px 16px;
+    background: var(--accent2);
+    color: #fff;
+    white-space: nowrap;
   }
 </style>
 </head>
@@ -639,6 +668,20 @@
     <div id="join-step-modo" class="hidden">
       <div class="board-title" style="justify-content:center; text-align:center;">
         ¡Hola, <span id="nombre-confirmado"></span>! ¿Cómo quieres jugar?
+      </div>
+
+      <!-- Chat grupal: solo visible después de poner el nombre. No se limpia
+           solo, guarda como máximo los últimos 50 mensajes. -->
+      <div class="card" id="lobby-chat-card" style="background:#171a24; margin: 4px 0 16px;">
+        <div class="board-title" style="margin-bottom:6px;">
+          <span>💬 Chat grupal</span>
+          <span class="badge" id="lobby-online-badge">🟢 -- en línea</span>
+        </div>
+        <div id="lobby-chat-mensajes"></div>
+        <div id="lobby-chat-input-row">
+          <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
+          <button id="lobby-chat-enviar">Enviar</button>
+        </div>
       </div>
 
       <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
@@ -1098,6 +1141,7 @@ function conectarSala(room, name, solo = false) {
     return;
   }
 
+  cerrarLobby();
   actualizarPerfilHUD(name);
   esModoSolo = solo;
 
@@ -1136,6 +1180,7 @@ function conectarSala(room, name, solo = false) {
 function volverAlInicio() {
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
+  cerrarLobby();
   if (ws) { try { ws.close(); } catch (e) {} }
   ws = null;
   lastState = null;
@@ -1184,6 +1229,7 @@ document.getElementById('btn-continuar-nombre').onclick = async () => {
   document.getElementById('nombre-confirmado').textContent = name;
   document.getElementById('join-step-name').classList.add('hidden');
   document.getElementById('join-step-modo').classList.remove('hidden');
+  conectarLobby(name);
 };
 
 document.getElementById('name-input').addEventListener('keydown', (e) => {
@@ -1194,6 +1240,7 @@ document.getElementById('btn-cambiar-nombre').onclick = () => {
   document.getElementById('join-error').textContent = '';
   document.getElementById('join-step-modo').classList.add('hidden');
   document.getElementById('join-step-name').classList.remove('hidden');
+  cerrarLobby();
 };
 
 document.getElementById('join-btn').onclick = () => {
@@ -1363,6 +1410,66 @@ function renderMensajeChat(msg) {
   cont.appendChild(div);
   cont.scrollTop = cont.scrollHeight;
 }
+
+// --- Chat grupal (lobby): aparece apenas se pone el nombre, es independiente
+// de cualquier sala/partida, no se limpia solo y guarda máx. 50 mensajes ---
+let lobbyWs = null;
+let lobbyChatSeqMostrado = 0;
+let miNombreLobby = '';
+
+function conectarLobby(name) {
+  cerrarLobby();
+  miNombreLobby = name;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  lobbyWs = new WebSocket(`${proto}://${location.host}/ws/lobby/${encodeURIComponent(name)}`);
+
+  lobbyWs.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type !== 'lobby_state') return;
+
+    const badge = document.getElementById('lobby-online-badge');
+    if (badge) badge.textContent = `🟢 ${msg.online_count} en línea`;
+
+    const chat = msg.chat || [];
+    const nuevos = chat.filter(m => m.seq > lobbyChatSeqMostrado);
+    nuevos.sort((a, b) => a.seq - b.seq);
+    nuevos.forEach(m => renderMensajeLobbyChat(m));
+    if (nuevos.length) {
+      lobbyChatSeqMostrado = chat[chat.length - 1].seq;
+    }
+  };
+}
+
+function cerrarLobby() {
+  if (lobbyWs) { try { lobbyWs.close(); } catch (e) {} }
+  lobbyWs = null;
+  lobbyChatSeqMostrado = 0;
+  const cont = document.getElementById('lobby-chat-mensajes');
+  if (cont) cont.innerHTML = '';
+}
+
+function renderMensajeLobbyChat(msg) {
+  const cont = document.getElementById('lobby-chat-mensajes');
+  if (!cont) return;
+  const div = document.createElement('div');
+  const esPropio = msg.player_name === miNombreLobby;
+  div.className = 'chat-msg ' + (esPropio ? 'propio' : 'ajeno');
+  div.innerHTML = `<span class="chat-autor">${esPropio ? 'Tú' : escaparHtml(msg.player_name)}</span>${escaparHtml(msg.text)}`;
+  cont.appendChild(div);
+  cont.scrollTop = cont.scrollHeight;
+}
+
+function enviarMensajeLobbyChat() {
+  const input = document.getElementById('lobby-chat-input');
+  const texto = input.value.trim();
+  if (!texto || !lobbyWs || lobbyWs.readyState !== WebSocket.OPEN) return;
+  lobbyWs.send(JSON.stringify({type: 'chat', text: texto}));
+  input.value = '';
+}
+document.getElementById('lobby-chat-enviar').onclick = enviarMensajeLobbyChat;
+document.getElementById('lobby-chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') enviarMensajeLobbyChat();
+});
 
 function actualizarBadgeChat() {
   const badge = document.getElementById('chat-badge');
