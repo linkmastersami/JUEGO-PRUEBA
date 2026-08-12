@@ -775,11 +775,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
             elif mtype == "guess" and room.status == "playing":
                 numbers = msg.get("numbers", [])
 
-                if room.mode == "solo":
-                    # En solitario se resuelve al instante, sin cuenta regresiva.
-                    room.guess(player.id, numbers)
-                    await broadcast(room)
-                elif room.pending_guess is None:
+                if room.pending_guess is None:
                     cur = room.get_player(player.id)
                     if cur is not None and not cur.eliminated and not cur.resolved:
                         room.pending_guess = {"player_id": cur.id, "player_name": cur.name}
@@ -789,8 +785,9 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                         async def _resolver_intento_desactivacion(
                             room_code: str = room.code, pid: str = player.id, nums: List[int] = numbers
                         ):
-                            # Cuenta regresiva de 5 segundos antes de resolver el intento,
-                            # para que todos los jugadores vean la animación en simultáneo.
+                            # Cuenta regresiva de 5 segundos antes de resolver el intento
+                            # (también en modo solitario), para que la animación se vea
+                            # en simultáneo con la cuenta regresiva en pantalla.
                             await asyncio.sleep(5)
                             target_room = rooms.get(room_code)
                             if target_room is None:
