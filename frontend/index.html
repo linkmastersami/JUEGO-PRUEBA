@@ -792,48 +792,36 @@ function crearExplosionParticulas(contenedor, cantidad = 30) {
     }
 }
 
-function ejecutarAnimacionFinPartida(esVictoria, puntosInicio, puntosFin, callbackFin) {
+// Animación corta que anuncia que ganaste la ronda del "1 contra 1" (sin
+// contar puntos todavía). Se usa ANTES del mensaje de resultado, que es
+// donde ambos jugadores ven cuánto ganó uno y cuánto perdió el otro.
+function ejecutarAnimacionVictoriaRonda(callbackFin) {
+    const overlay = document.getElementById("overlay-animacion");
+    const textoGrande = document.getElementById("texto-animacion-grande");
+    const subtexto = document.getElementById("subtexto-animacion");
+
+    overlay.classList.add("activo");
+    textoGrande.classList.remove("efecto-explosion");
+    textoGrande.style.color = "var(--good)";
+    textoGrande.innerText = "🏆";
+    subtexto.innerText = "¡GANASTE LA RONDA!";
+
+    setTimeout(() => {
+        overlay.classList.remove("activo");
+        if (callbackFin) callbackFin();
+    }, 1600);
+}
+
+// Solo la animación visual de la explosión (partículas, destello, sacudida).
+// No cuenta puntos: se usa apenas llega el evento, ANTES del mensaje de
+// resultado ("perdiste... mejor suerte para la próxima").
+function ejecutarAnimacionExplosion(callbackFin) {
     const overlay = document.getElementById("overlay-animacion");
     const textoGrande = document.getElementById("texto-animacion-grande");
     const subtexto = document.getElementById("subtexto-animacion");
     const destello = document.getElementById("destello-explosion");
-    const haySumaDePuntos = puntosFin !== 0;
 
     overlay.classList.add("activo");
-
-    function iniciarConteoYCerrar(duracionConteo) {
-        let inicioTiempo = null;
-        function animar(timestamp) {
-            if (!inicioTiempo) inicioTiempo = timestamp;
-            let progreso = timestamp - inicioTiempo;
-            let porcentaje = Math.min(progreso / duracionConteo, 1);
-
-            if (haySumaDePuntos) {
-                let valorActual = Math.floor(puntosInicio + (puntosFin - puntosInicio) * porcentaje);
-                textoGrande.innerText = (valorActual > 0 && esVictoria ? "+" : "") + valorActual.toLocaleString();
-            }
-
-            if (progreso < duracionConteo) {
-                window.requestAnimationFrame(animar);
-            } else {
-                setTimeout(() => {
-                    overlay.classList.remove("activo");
-                    textoGrande.classList.remove("efecto-explosion");
-                    if (callbackFin) callbackFin();
-                }, 800);
-            }
-        }
-        window.requestAnimationFrame(animar);
-    }
-
-    if (esVictoria) {
-        textoGrande.style.color = "var(--good)";
-        subtexto.innerText = haySumaDePuntos ? "¡VICTORIA! Puntos obtenidos" : "¡VICTORIA!";
-        if (!haySumaDePuntos) textoGrande.innerText = "🏆";
-        iniciarConteoYCerrar(1800);
-        return;
-    }
-
     textoGrande.style.color = "var(--bad)";
     textoGrande.classList.add("efecto-explosion");
     textoGrande.innerText = "💥";
@@ -841,7 +829,7 @@ function ejecutarAnimacionFinPartida(esVictoria, puntosInicio, puntosFin, callba
 
     const duracionExplosion = 4000;
     destello.classList.remove("destello-activo");
-    void destello.offsetWidth; 
+    void destello.offsetWidth;
     destello.classList.add("destello-activo");
 
     crearExplosionParticulas(overlay, 30);
@@ -852,11 +840,55 @@ function ejecutarAnimacionFinPartida(esVictoria, puntosInicio, puntosFin, callba
     setTimeout(() => {
         clearInterval(intervaloParticulas);
         textoGrande.classList.remove("efecto-explosion");
-        subtexto.innerText = haySumaDePuntos ? "DERROTA... Puntos perdidos" : "DERROTA...";
-        if (!haySumaDePuntos) textoGrande.innerText = "💥";
-        iniciarConteoYCerrar(1800);
+        overlay.classList.remove("activo");
+        if (callbackFin) callbackFin();
     }, duracionExplosion);
 }
+
+// Animación grande del conteo de puntos ganados o perdidos. Se usa DESPUÉS
+// de que el jugador le da "Aceptar" al mensaje de resultado.
+function ejecutarAnimacionPuntos(esVictoria, puntosInicio, puntosFin, callbackFin) {
+    const overlay = document.getElementById("overlay-animacion");
+    const textoGrande = document.getElementById("texto-animacion-grande");
+    const subtexto = document.getElementById("subtexto-animacion");
+    const haySumaDePuntos = puntosFin !== 0;
+
+    overlay.classList.add("activo");
+    textoGrande.classList.remove("efecto-explosion");
+    textoGrande.style.color = esVictoria ? "var(--good)" : "var(--bad)";
+
+    if (esVictoria) {
+        subtexto.innerText = haySumaDePuntos ? "¡VICTORIA! Puntos obtenidos" : "¡VICTORIA!";
+        textoGrande.innerText = haySumaDePuntos ? "" : "🏆";
+    } else {
+        subtexto.innerText = haySumaDePuntos ? "Puntos perdidos" : "DERROTA...";
+        textoGrande.innerText = haySumaDePuntos ? "" : "💥";
+    }
+
+    const duracionConteo = 1800;
+    let inicioTiempo = null;
+    function animar(timestamp) {
+        if (!inicioTiempo) inicioTiempo = timestamp;
+        let progreso = timestamp - inicioTiempo;
+        let porcentaje = Math.min(progreso / duracionConteo, 1);
+
+        if (haySumaDePuntos) {
+            let valorActual = Math.floor(puntosInicio + (puntosFin - puntosInicio) * porcentaje);
+            textoGrande.innerText = (valorActual > 0 && esVictoria ? "+" : "") + valorActual.toLocaleString();
+        }
+
+        if (progreso < duracionConteo) {
+            window.requestAnimationFrame(animar);
+        } else {
+            setTimeout(() => {
+                overlay.classList.remove("activo");
+                if (callbackFin) callbackFin();
+            }, 800);
+        }
+    }
+    window.requestAnimationFrame(animar);
+}
+
 
 let timeoutFichaOponente = null;
 function mostrarFichaOponente(nombre, tile) {
@@ -1001,6 +1033,36 @@ function mostrarResultadoRonda(datos, onAceptar) {
   };
 }
 
+// Procesa el resultado del intento de "DESACTIVAR" en modo solitario: muestra
+// el mensaje de victoria o derrota con botón Aceptar, y al aceptar dispara
+// la animación grande de puntos ganados/perdidos.
+function procesarRondaSolo(nuevos) {
+  cerrarCuentaRegresivaDesactivar();
+  const ev = nuevos.find(e => e.player_id === myId);
+  if (!ev) return;
+
+  if (ev.type === 'correct') {
+    mostrarResultadoRonda({
+      icono: '🎯',
+      titulo: `¡Bien hecho! Cada día eres un mejor decodificador. Ganaste ${ev.points.toLocaleString()} puntos.`,
+      chips: [],
+    }, () => queueAnimacionEvento(ev));
+    return;
+  }
+
+  if (ev.type === 'exploded') {
+    // Primero la explosión, y como en solitario no se pierden puntos,
+    // al aceptar el mensaje no hace falta ninguna animación de puntos.
+    ejecutarAnimacionExplosion(() => {
+      mostrarResultadoRonda({
+        icono: '💥',
+        titulo: 'Perdiste... ¡por suerte no perdiste puntos!',
+        chips: [],
+      }, null);
+    });
+  }
+}
+
 function nombreJugadorPorId(state, pid) {
   const p = state.players.find(pl => pl.id === pid);
   return p ? p.name : '???';
@@ -1027,20 +1089,33 @@ function procesarRondaMultijugador(nuevos, state) {
       ganador = segundo; perdedor = primero; motivoPerdida = 'explotó';
     }
 
-    mostrarResultadoRonda({
-      icono: '⚔️',
-      titulo: `¡${ganador.player_name} le ganó a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
-      chips: [
-        { tipo: 'gano', texto: `${ganador.player_name}: +${ganador.points.toLocaleString()} pts` },
-        { tipo: 'perdio', texto: perdedor.points ? `${perdedor.player_name}: -${perdedor.points.toLocaleString()} pts` : `${perdedor.player_name}: eliminado` },
-      ],
-    }, () => {
-      if (ganador.player_id === myId) {
-        queueAnimacionEvento(ganador);
-      } else if (perdedor.player_id === myId && perdedor.points) {
-        queueAnimacionEvento(perdedor);
-      }
-    });
+    const mostrarDialogoRonda = () => {
+      mostrarResultadoRonda({
+        icono: '⚔️',
+        titulo: `¡${ganador.player_name} le ganó a ${perdedor.player_name}! (${perdedor.player_name} ${motivoPerdida})`,
+        chips: [
+          { tipo: 'gano', texto: `${ganador.player_name}: +${ganador.points.toLocaleString()} pts` },
+          { tipo: 'perdio', texto: perdedor.points ? `${perdedor.player_name}: -${perdedor.points.toLocaleString()} pts` : `${perdedor.player_name}: eliminado` },
+        ],
+      }, () => {
+        if (ganador.player_id === myId) {
+          queueAnimacionEvento(ganador);
+        } else if (perdedor.player_id === myId && perdedor.points) {
+          queueAnimacionEvento(perdedor);
+        }
+      });
+    };
+
+    // Antes del mensaje de resultados (donde ambos ven cuánto ganó uno y
+    // cuánto perdió el otro), cada quien ve primero su propia animación:
+    // al que explotó le sale la bomba, y al ganador la de victoria.
+    if (perdedor.type === 'exploded' && perdedor.player_id === myId) {
+      ejecutarAnimacionExplosion(mostrarDialogoRonda);
+    } else if (ganador.player_id === myId) {
+      ejecutarAnimacionVictoriaRonda(mostrarDialogoRonda);
+    } else {
+      mostrarDialogoRonda();
+    }
     return;
   }
 
@@ -1073,8 +1148,15 @@ function procesarRondaMultijugador(nuevos, state) {
 
   if (ev.type === 'exploded') {
     if (ev.player_id === myId) {
-      // Al jugador que falló le sale directo la animación de explosión y pérdida de puntos.
-      queueAnimacionEvento(ev);
+      // Primero la animación de explosión, luego el mensaje de resultado
+      // y, al aceptar, recién la animación de puntos perdidos.
+      ejecutarAnimacionExplosion(() => {
+        mostrarResultadoRonda({
+          icono: '💥',
+          titulo: `Explotaste... ¡mejor suerte para la próxima! Perdiste ${ev.points.toLocaleString()} puntos.`,
+          chips: [],
+        }, () => queueAnimacionEvento(ev));
+      });
     } else {
       mostrarResultadoRonda({
         icono: '💥',
@@ -1528,7 +1610,7 @@ function procesarColaAnimEventos() {
     puntosActuales = Math.max(0, puntosActuales - ev.points);
   }
 
-  ejecutarAnimacionFinPartida(gano, 0, puntosGanadosPerdidos, () => {
+  ejecutarAnimacionPuntos(gano, 0, puntosGanadosPerdidos, () => {
     animarPuntajeHUD("uiPuntos", oldPoints, puntosActuales, 1000);
     animEventoEnCurso = false;
     procesarColaAnimEventos();
@@ -1558,9 +1640,7 @@ function handleState(state) {
       nuevos.sort((a, b) => a.seq - b.seq);
       if (nuevos.length) {
         if (state.mode === 'solo') {
-          nuevos.forEach(ev => {
-            if (ev.player_id === myId) queueAnimacionEvento(ev);
-          });
+          procesarRondaSolo(nuevos);
         } else {
           procesarRondaMultijugador(nuevos, state);
         }
