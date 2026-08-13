@@ -219,9 +219,13 @@ class Player:
     def notch_for(self, number: int) -> int:
         return sum(1 for t in self.secret if t["number"] < number)
 
-    def to_dict(self, viewer_id: str) -> dict:
-        is_owner = viewer_id == self.id
-        if is_owner:
+    def to_dict(self, viewer_id: str, for_spectator: bool = False) -> dict:
+        is_owner = (not for_spectator) and viewer_id == self.id
+        if for_spectator:
+            # Los espectadores nunca ven el código de ningún jugador, ni
+            # siquiera el color: solo saben cuántas fichas tiene cada uno.
+            secret_view = [{"hidden": True} for _ in self.secret]
+        elif is_owner:
             secret_view = [{"hidden": True, "color": t["color"]} for t in self.secret]
         else:
             secret_view = [{"hidden": False, **t} for t in self.secret]
@@ -264,6 +268,8 @@ class Room:
         # --- Chat de texto ---
         self.chat_messages: List[dict] = []
         self.chat_seq = 0
+        # --- Espectadores: no ocupan lugar de jugador ni ven códigos ---
+        self.spectators: Dict[str, WebSocket] = {}
 
     def add_chat_message(self, sender: "Player", text: str) -> None:
         text = text.strip()[:300]
@@ -275,6 +281,21 @@ class Room:
             "player_id": sender.id,
             "player_name": sender.name,
             "text": text,
+            "is_spectator": False,
+        })
+        self.chat_messages = self.chat_messages[-100:]
+
+    def add_spectator_chat_message(self, viewer_name: str, text: str) -> None:
+        text = text.strip()[:300]
+        if not text:
+            return
+        self.chat_seq += 1
+        self.chat_messages.append({
+            "seq": self.chat_seq,
+            "player_id": None,
+            "player_name": viewer_name,
+            "text": text,
+            "is_spectator": True,
         })
         self.chat_messages = self.chat_messages[-100:]
 
@@ -596,7 +617,19 @@ class Room:
             "can_start": self.status == "waiting" and (
                 self.mode == "solo" or len(self.players) >= MIN_PLAYERS
             ),
+            "is_spectator": False,
+            "spectator_count": len(self.spectators),
         }
+
+    def spectator_state_for(self) -> dict:
+        """Igual que state_for, pero sin revelar el código de ningún
+        jugador (ni siquiera el del dueño): un espectador solo ve nombres,
+        estado (eliminado/resuelto/en turno) y el historial/chat."""
+        base = self.state_for("__espectador__")
+        base["players"] = [p.to_dict("__espectador__", for_spectator=True) for p in self.players]
+        base["your_id"] = None
+        base["is_spectator"] = True
+        return base
 
 
 async def broadcast(room: Room):
@@ -607,6 +640,17 @@ async def broadcast(room: Room):
             await p.ws.send_text(json.dumps(room.state_for(p.id)))
         except Exception:
             pass
+
+    if room.spectators:
+        payload = json.dumps(room.spectator_state_for())
+        caidos = []
+        for sid, sock in room.spectators.items():
+            try:
+                await sock.send_text(payload)
+            except Exception:
+                caidos.append(sid)
+        for sid in caidos:
+            room.spectators.pop(sid, None)
 
 
 async def _watch_disconnect(room_code: str, pid: str, token: int):
@@ -671,6 +715,25 @@ async def buscar_partida(player_name: str):
     return {"found": False}
 
 
+@app.get("/salas-en-curso")
+async def salas_en_curso():
+    """Lista salas con partidas esperando o en curso (incluye modo
+    solitario) para que cualquiera pueda entrar como espectador."""
+    out = []
+    for code, room in rooms.items():
+        if room.status not in ("waiting", "playing") or not room.players:
+            continue
+        out.append({
+            "code": code,
+            "mode": room.mode,
+            "status": room.status,
+            "players": len(room.players),
+            "spectators": len(room.spectators),
+        })
+    out.sort(key=lambda r: (r["status"] != "playing", r["code"]))
+    return {"rooms": out}
+
+
 @app.websocket("/ws/lobby/{player_name}")
 async def ws_lobby(websocket: WebSocket, player_name: str):
     """Conexión del chat grupal + contador de jugadores en línea. Se abre en
@@ -727,9 +790,19 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
         room.log.append(f"{player.name} se reconectó a la partida.")
         await broadcast(room)
     else:
+        if room.status == "playing":
+            # La partida ya empezó con este código y el nombre no es de
+            # ningún jugador ya en la sala: lo mandamos a entrar como
+            # espectador en vez de rechazarlo.
+            await websocket.send_text(json.dumps(
+                {"type": "redirect_spectator", "room": room_code,
+                 "message": "La partida ya comenzó: entrarás como espectador."}
+            ))
+            await websocket.close()
+            return
         if room.status != "waiting" or len(room.players) >= MAX_PLAYERS:
             await websocket.send_text(json.dumps(
-                {"type": "error", "message": "La sala ya está llena o la partida ya empezó."}
+                {"type": "error", "message": "La sala ya está llena."}
             ))
             await websocket.close()
             return
@@ -867,6 +940,47 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
         if not any(p.connected for p in room.players):
             if room.code in rooms:
                 del rooms[room.code]
+
+
+@app.websocket("/ws/espectador/{room_code}/{viewer_name}")
+async def ws_espectador(websocket: WebSocket, room_code: str, viewer_name: str):
+    """Conexión de solo lectura: cualquiera puede entrar a ver una partida
+    en curso (incluso en solitario) con acceso al chat de la sala, pero
+    nunca ve el código de ningún jugador."""
+    await websocket.accept()
+    room = rooms.get(room_code)
+    if room is None or not room.players:
+        await websocket.send_text(json.dumps(
+            {"type": "error", "message": "Esa sala no existe o todavía no tiene partida."}
+        ))
+        await websocket.close()
+        return
+
+    clean_name = (viewer_name.strip() or "Espectador")[:20]
+    sid = f"esp-{clean_name}-{random.randint(100000, 999999)}"
+    room.spectators[sid] = websocket
+
+    try:
+        await websocket.send_text(json.dumps(room.spectator_state_for()))
+    except Exception:
+        room.spectators.pop(sid, None)
+        return
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            if msg.get("type") == "ping":
+                continue
+            if msg.get("type") == "chat":
+                text = str(msg.get("text", ""))
+                if text.strip():
+                    room.add_spectator_chat_message(clean_name, text)
+                    await broadcast(room)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        room.spectators.pop(sid, None)
 
 
 app.mount("/", UTF8StaticFiles(directory="frontend", html=True), name="frontend")
