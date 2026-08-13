@@ -709,6 +709,16 @@
       </button>
 
       <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cambiar nombre</button>
+
+      <!-- Salas con partidas en curso: cualquiera puede entrar a ver como
+           espectador, incluso si es una partida en solitario. -->
+      <div class="card" id="salas-en-curso-card" style="background:#171a24; margin-top:16px;">
+        <div class="board-title" style="margin-bottom:6px;">
+          <span>👁️ Partidas en curso</span>
+          <button class="ghost" id="btn-refrescar-salas" style="padding: 4px 10px; font-size: 0.7rem;">↻ Actualizar</button>
+        </div>
+        <div id="salas-en-curso-lista" style="font-size:0.85rem; color:var(--muted);">Cargando...</div>
+      </div>
     </div>
 
     <div id="join-error" class="error"></div>
@@ -720,6 +730,32 @@
     <div class="players-list" id="wait-players"></div>
     <button class="full" id="start-btn">Iniciar partida</button>
     <div class="action-hint" id="wait-hint"></div>
+  </div>
+
+  <!-- PANTALLA DE ESPECTADOR -->
+  <div id="spectator-screen" class="hidden">
+    <div class="status-line">👁️ Viendo como espectador · Sala <span id="esp-room-code"></span></div>
+    <button class="ghost full" id="esp-btn-salir" style="margin: 10px 0;">⬅ Volver a la selección de modo</button>
+
+    <div class="card">
+      <div class="board-title"><span>Jugadores</span></div>
+      <div id="esp-players" style="font-size:0.9rem;"></div>
+      <div class="action-hint">Como espectador nunca puedes ver el código de ningún jugador.</div>
+    </div>
+
+    <div class="card">
+      <div class="board-title"><span>Historial</span></div>
+      <div class="log" id="esp-log"></div>
+    </div>
+
+    <div class="card">
+      <div class="board-title"><span>💬 Chat de la sala</span></div>
+      <div id="esp-chat-mensajes" style="max-height:220px; overflow-y:auto;"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input id="esp-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" style="flex:1;">
+        <button id="esp-chat-enviar">Enviar</button>
+      </div>
+    </div>
   </div>
 
   <!-- PANTALLA DE JUEGO -->
@@ -1209,6 +1245,46 @@ const gameScreen = document.getElementById('game-screen');
 
 let esModoSolo = false;
 
+// Identifica de qué tipo de sala se trata a partir de su código, para
+// poder volver a entrar al mismo tipo de partida tras un reinicio.
+function tipoDeSala(code) {
+  if (!code) return 'quick';
+  if (code.startsWith('SOLO-')) return 'solo';
+  if (/^[0-9]+$/.test(code)) return 'quick';
+  return 'private:' + code;
+}
+
+// Se ejecuta al cargar la página cuando quedó guardado un pedido de
+// "jugar de nuevo": reingresa automáticamente a una sala disponible del
+// mismo modo (solitario nuevo, partida rápida por matchmaking, o la
+// misma sala privada de antes — como espectador si esa partida ya
+// arrancó de nuevo con otra gente).
+async function ejecutarReinicio(tipo, nombre) {
+  if (tipo === 'solo') {
+    const room = 'SOLO-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    conectarSala(room, nombre, true);
+    return;
+  }
+  if (tipo.startsWith('private:')) {
+    const code = tipo.slice('private:'.length);
+    conectarSala(code, nombre);
+    return;
+  }
+  // 'quick' (partida rápida): busca una sala esperando con espacio, o
+  // crea una nueva, igual que el botón "Encontrar Partida Rápida".
+  try {
+    const r = await fetch('/matchmake');
+    const d = await r.json();
+    if (r.ok && d.room) {
+      conectarSala(d.room, nombre);
+    } else {
+      document.getElementById('join-error').textContent = d.detail || 'No se pudo encontrar partida.';
+    }
+  } catch (e) {
+    document.getElementById('join-error').textContent = 'Error de conexión con el servidor.';
+  }
+}
+
 function conectarSala(room, name, solo = false) {
   soundTachar.play().catch(() => {}); soundTachar.pause(); soundTachar.currentTime = 0;
   soundCarta.play().catch(() => {}); soundCarta.pause(); soundCarta.currentTime = 0;
@@ -1277,6 +1353,13 @@ function abrirWebSocket(room, name, solo) {
       errEl_join().textContent = msg.message;
       esSalidaIntencional = true;
       thisSocket.close();
+      return;
+    }
+    if (msg.type === 'redirect_spectator') {
+      esSalidaIntencional = true;
+      thisSocket.close();
+      const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
+      conectarEspectador(msg.room, nombre);
       return;
     }
     if (msg.type === 'state') {
@@ -1399,6 +1482,7 @@ function irASeleccionModo(nombre) {
   actualizarBadgeChat();
 
   conectarLobby(nombre);
+  cargarSalasEnCurso();
 }
 document.getElementById('btn-continuar-nombre').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
@@ -1408,6 +1492,8 @@ document.getElementById('btn-continuar-nombre').onclick = async () => {
     errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+
+  localStorage.setItem('edc_name', name);
 
   errEl.textContent = 'Comprobando si ya tenías una partida activa...';
   try {
@@ -1427,6 +1513,7 @@ document.getElementById('btn-continuar-nombre').onclick = async () => {
   document.getElementById('join-step-name').classList.add('hidden');
   document.getElementById('join-step-modo').classList.remove('hidden');
   conectarLobby(name);
+  cargarSalasEnCurso();
 };
 
 document.getElementById('name-input').addEventListener('keydown', (e) => {
@@ -1434,6 +1521,8 @@ document.getElementById('name-input').addEventListener('keydown', (e) => {
 });
 
 document.getElementById('btn-cambiar-nombre').onclick = () => {
+  localStorage.removeItem('edc_name');
+  localStorage.removeItem('edc_restart');
   document.getElementById('join-error').textContent = '';
   document.getElementById('join-step-modo').classList.add('hidden');
   document.getElementById('join-step-name').classList.remove('hidden');
@@ -1488,25 +1577,28 @@ document.getElementById('btn-solo').onclick = () => {
 };
 
 // --- Botón "Salir" (visible durante la sala de espera o la partida) ---
+// Recarga la página de verdad (no solo cambia de pantalla dentro de la SPA)
+// para evitar que quede algún estado colgado del navegador, pero conserva
+// el nombre guardado para no tener que volver a escribirlo.
 document.getElementById('btn-salir').onclick = () => {
   const status = lastState ? lastState.status : null;
   const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
 
-  if (!status || status === 'finished') {
-    // Ya no hay partida activa: volvemos a elegir modo, sin pedir el nombre otra vez.
-    irASeleccionModo(nombre);
-    return;
+  if (status && status === 'playing') {
+    const advertencia = 'Si sales ahora perderás automáticamente y la partida continuará sin ti. ¿Seguro que quieres salir?';
+    if (!confirm(advertencia)) return;
+  } else if (status === 'waiting') {
+    if (!confirm('¿Seguro que quieres salir de la sala?')) return;
   }
 
-  const advertencia = status === 'playing'
-    ? 'Si sales ahora perderás automáticamente y la partida continuará sin ti. ¿Seguro que quieres salir?'
-    : '¿Seguro que quieres salir de la sala?';
-  if (!confirm(advertencia)) return;
+  if (nombre) localStorage.setItem('edc_name', nombre);
+  localStorage.removeItem('edc_restart');
 
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({type: 'leave'}));
+    try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
   }
-  irASeleccionModo(nombre);
+  esSalidaIntencional = true;
+  setTimeout(() => location.reload(), 80);
 };
 
 document.getElementById('guess-btn').onclick = () => {
@@ -1734,6 +1826,141 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeChat();
 });
 
+// --- Modo espectador: ver una partida en curso sin ocupar lugar de
+// jugador ni ver ningún código. ---
+let wsEspectador = null;
+
+async function cargarSalasEnCurso() {
+  const cont = document.getElementById('salas-en-curso-lista');
+  if (!cont) return;
+  try {
+    const r = await fetch('/salas-en-curso');
+    const d = await r.json();
+    const salas = d.rooms || [];
+    if (!salas.length) {
+      cont.innerHTML = 'No hay partidas en curso por ahora.';
+      return;
+    }
+    cont.innerHTML = salas.map(s => {
+      const modoTxt = s.mode === 'solo' ? 'Solitario' : 'Multijugador';
+      const estadoTxt = s.status === 'playing' ? 'en juego' : 'esperando';
+      const codeAttr = escaparHtml(s.code);
+      return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #2a2e3d;">
+        <span>Sala <b>${codeAttr}</b> · ${modoTxt} · ${s.players} jugador(es) · ${estadoTxt}</span>
+        <button class="ghost btn-ver-espectador" data-code="${codeAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>
+      </div>`;
+    }).join('');
+    cont.querySelectorAll('.btn-ver-espectador').forEach(btn => {
+      btn.onclick = () => verComoEspectador(btn.dataset.code);
+    });
+  } catch (e) {
+    cont.innerHTML = 'No se pudo cargar la lista.';
+  }
+}
+document.getElementById('btn-refrescar-salas').onclick = cargarSalasEnCurso;
+
+function verComoEspectador(code) {
+  const nombre = (currentPlayerName || document.getElementById('name-input').value.trim() || localStorage.getItem('edc_name') || 'Espectador');
+  conectarEspectador(code, nombre);
+}
+
+function conectarEspectador(roomCode, viewerName) {
+  cerrarWsEspectador();
+  cerrarLobby();
+  document.getElementById('join-screen').classList.add('hidden');
+  document.getElementById('wait-screen').classList.add('hidden');
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('btn-salir').classList.add('hidden');
+  document.getElementById('btn-chat').classList.add('hidden');
+  document.getElementById('spectator-screen').classList.remove('hidden');
+  document.getElementById('esp-room-code').textContent = roomCode;
+  document.getElementById('esp-chat-mensajes').innerHTML = '';
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  wsEspectador = new WebSocket(`${proto}://${location.host}/ws/espectador/${encodeURIComponent(roomCode)}/${encodeURIComponent(viewerName)}`);
+  const thisSocket = wsEspectador;
+
+  wsEspectador.onmessage = (event) => {
+    if (wsEspectador !== thisSocket) return;
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'error') {
+      alert(msg.message);
+      volverDeEspectador();
+      return;
+    }
+    if (msg.type === 'state') renderEspectador(msg);
+  };
+}
+
+function cerrarWsEspectador() {
+  if (wsEspectador) { try { wsEspectador.close(); } catch (e) {} }
+  wsEspectador = null;
+}
+
+function volverDeEspectador() {
+  cerrarWsEspectador();
+  document.getElementById('spectator-screen').classList.add('hidden');
+  const nombre = currentPlayerName || localStorage.getItem('edc_name') || document.getElementById('name-input').value.trim();
+  irASeleccionModo(nombre);
+}
+document.getElementById('esp-btn-salir').onclick = volverDeEspectador;
+
+function renderEspectador(state) {
+  const cont = document.getElementById('esp-players');
+  cont.innerHTML = (state.players || []).map(p => {
+    let estado;
+    if (p.eliminated) estado = '💥 eliminado';
+    else if (p.resolved) estado = '✅ ya descifró su código';
+    else if (state.current_turn === p.id) estado = '🎯 en turno';
+    else estado = 'jugando';
+    return `<div>👤 ${escaparHtml(p.name)} — ${estado}</div>`;
+  }).join('') || '<div style="opacity:0.6;">Sin jugadores.</div>';
+
+  const logEl = document.getElementById('esp-log');
+  logEl.innerHTML = (state.log || []).map(l => `<div>${l}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+
+  const chatCont = document.getElementById('esp-chat-mensajes');
+  chatCont.innerHTML = (state.chat || []).map(m => {
+    const autor = m.is_spectator ? `${escaparHtml(m.player_name)} (espectador)` : escaparHtml(m.player_name);
+    return `<div class="chat-msg ajeno"><span class="chat-autor">${autor}</span>${escaparHtml(m.text)}</div>`;
+  }).join('');
+  chatCont.scrollTop = chatCont.scrollHeight;
+}
+
+function enviarMensajeEspectador() {
+  const input = document.getElementById('esp-chat-input');
+  const texto = input.value.trim();
+  if (!texto || !wsEspectador || wsEspectador.readyState !== WebSocket.OPEN) return;
+  wsEspectador.send(JSON.stringify({type: 'chat', text: texto}));
+  input.value = '';
+}
+document.getElementById('esp-chat-enviar').onclick = enviarMensajeEspectador;
+document.getElementById('esp-chat-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') enviarMensajeEspectador();
+});
+
+// --- Al cargar la página: si hay un nombre guardado, salta directo a la
+// selección de modo (sin volver a pedirlo) y, si además había un pedido
+// de "jugar de nuevo", reingresa automáticamente a la misma modalidad. ---
+window.addEventListener('DOMContentLoaded', () => {
+  const nombreGuardado = localStorage.getItem('edc_name');
+  if (!nombreGuardado) return;
+
+  document.getElementById('name-input').value = nombreGuardado;
+  document.getElementById('nombre-confirmado').textContent = nombreGuardado;
+  document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+  conectarLobby(nombreGuardado);
+  cargarSalasEnCurso();
+
+  const reinicio = localStorage.getItem('edc_restart');
+  if (reinicio) {
+    localStorage.removeItem('edc_restart');
+    ejecutarReinicio(reinicio, nombreGuardado);
+  }
+});
+
 function queueAnimacionEvento(ev) {
   colaAnimEventos.push(ev);
   procesarColaAnimEventos();
@@ -1838,12 +2065,8 @@ function handleState(state) {
     btnSalir.classList.remove('hidden');
   }
 
-  const btnChat = document.getElementById('btn-chat');
-  if (state.mode === 'solo') {
-    btnChat.classList.add('hidden');
-  } else {
-    btnChat.classList.remove('hidden');
-  }
+  // El chat de sala ahora también está disponible en modo solitario.
+  document.getElementById('btn-chat').classList.remove('hidden');
 
   if (state.status === 'waiting') {
     if (state.mode === 'solo') {
@@ -2035,21 +2258,46 @@ function renderGame(state) {
       mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
     }
 
-    const botonTexto = '🔄 Elegir cómo jugar';
-
-    // Inyección del botón de Reinicio en el Resultado
+    // Inyección de los botones de reinicio en el Resultado.
     resultCard.innerHTML = `
       <div>${mensaje}</div>
-      <button class="full" id="btn-reinicio" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
-        ${botonTexto}
+      <button class="full" id="btn-jugar-de-nuevo" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
+        🔁 Jugar de nuevo (misma modalidad)
+      </button>
+      <button class="full ghost" id="btn-reinicio" style="margin-top: 10px;">
+        🔄 Elegir cómo jugar
       </button>
     `;
 
+    const nombreParaReinicio = () => currentPlayerName
+      || state.players.find(p => p.is_you)?.name
+      || document.getElementById('name-input').value.trim();
+
+    // "Jugar de nuevo": recarga la página conservando el nombre y, al
+    // volver a cargar, entra directo a una sala disponible del mismo
+    // modo en el que estaba (solitario, partida rápida o sala privada).
+    document.getElementById('btn-jugar-de-nuevo').onclick = () => {
+      const nombre = nombreParaReinicio();
+      if (nombre) localStorage.setItem('edc_name', nombre);
+      localStorage.setItem('edc_restart', tipoDeSala(currentRoomCode));
+      esSalidaIntencional = true;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+      }
+      setTimeout(() => location.reload(), 80);
+    };
+
+    // "Elegir cómo jugar": recarga la página conservando el nombre, pero
+    // sin reingresar automáticamente a ninguna partida.
     document.getElementById('btn-reinicio').onclick = () => {
-      const nombre = currentPlayerName
-        || state.players.find(p => p.is_you)?.name
-        || document.getElementById('name-input').value.trim();
-      irASeleccionModo(nombre);
+      const nombre = nombreParaReinicio();
+      if (nombre) localStorage.setItem('edc_name', nombre);
+      localStorage.removeItem('edc_restart');
+      esSalidaIntencional = true;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+      }
+      setTimeout(() => location.reload(), 80);
     };
   }
 
