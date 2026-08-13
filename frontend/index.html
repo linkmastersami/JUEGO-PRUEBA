@@ -734,13 +734,27 @@
 
   <!-- PANTALLA DE ESPECTADOR -->
   <div id="spectator-screen" class="hidden">
-    <div class="status-line">👁️ Viendo como espectador · Sala <span id="esp-room-code"></span></div>
+    <div class="status-line" id="esp-status-line">👁️ Viendo como espectador · Sala <span id="esp-room-code"></span></div>
     <button class="ghost full" id="esp-btn-salir" style="margin: 10px 0;">⬅ Volver a la selección de modo</button>
 
     <div class="card">
-      <div class="board-title"><span>Jugadores</span></div>
-      <div id="esp-players" style="font-size:0.9rem;"></div>
-      <div class="action-hint">Como espectador nunca puedes ver el código de ningún jugador.</div>
+      <div class="board-title">
+        <span>Fichas junto a la reserva</span>
+        <span class="badge" id="esp-deck-badge">Mazo: --</span>
+      </div>
+      <div class="faceup-row" id="esp-faceup-row"></div>
+    </div>
+
+    <div class="card">
+      <div class="board-title"><span>👥 Cambiar de pantalla · elige un jugador</span></div>
+      <div id="esp-player-tabs" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 12px;"></div>
+
+      <div class="board-title">
+        <span id="esp-selected-name">—</span>
+        <span class="badge" id="esp-selected-badge"></span>
+      </div>
+      <div class="stand" id="esp-selected-stand"></div>
+      <div class="action-hint">Nadie —ni siquiera el propio jugador— puede ver el número real de un código: solo su color y sus puntitos.</div>
     </div>
 
     <div class="card">
@@ -770,13 +784,6 @@
         <button class="ghost" id="reset-table-btn" style="padding: 6px 10px; font-size: 0.75rem;">↺ Reiniciar tabla</button>
       </div>
       <div id="ref-table-wrap" class="ref-table">
-        <div class="ref-notes">
-          <input class="note-input" placeholder="#1">
-          <input class="note-input" placeholder="#2">
-          <input class="note-input" placeholder="#3">
-          <input class="note-input" placeholder="#4">
-          <input class="note-input" placeholder="#5">
-        </div>
         <div id="ref-grid"></div>
         <div class="action-hint">Toca una ficha para tacharla. Cuando en cada color quede sin tachar una sola ficha, esas 5 se convierten en tu respuesta.</div>
         <button class="secondary full" id="guess-btn" style="margin-top: 10px;" disabled>DESACTIVAR</button>
@@ -1829,6 +1836,7 @@ document.getElementById('chat-input').addEventListener('keydown', (e) => {
 // --- Modo espectador: ver una partida en curso sin ocupar lugar de
 // jugador ni ver ningún código. ---
 let wsEspectador = null;
+let espectadorPlayerId = null;
 
 async function cargarSalasEnCurso() {
   const cont = document.getElementById('salas-en-curso-lista');
@@ -1867,6 +1875,7 @@ function verComoEspectador(code) {
 function conectarEspectador(roomCode, viewerName) {
   cerrarWsEspectador();
   cerrarLobby();
+  espectadorPlayerId = null;
   document.getElementById('join-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
   document.getElementById('game-screen').classList.add('hidden');
@@ -1906,15 +1915,68 @@ function volverDeEspectador() {
 document.getElementById('esp-btn-salir').onclick = volverDeEspectador;
 
 function renderEspectador(state) {
-  const cont = document.getElementById('esp-players');
-  cont.innerHTML = (state.players || []).map(p => {
-    let estado;
-    if (p.eliminated) estado = '💥 eliminado';
-    else if (p.resolved) estado = '✅ ya descifró su código';
-    else if (state.current_turn === p.id) estado = '🎯 en turno';
-    else estado = 'jugando';
-    return `<div>👤 ${escaparHtml(p.name)} — ${estado}</div>`;
+  document.getElementById('esp-deck-badge').textContent = `Mazo: ${state.deck_remaining ?? '--'}`;
+
+  const faceupRow = document.getElementById('esp-faceup-row');
+  faceupRow.innerHTML = (state.faceup || []).map(t => `
+    <div class="faceup-tile ${t.used ? 'used' : ''}" style="background:${COLOR_HEX[t.color]}">
+      ${t.number}<span class="dots">${dotsStr(t.dots)}</span>
+    </div>
+  `).join('');
+
+  const jugadores = state.players || [];
+
+  // Si el jugador que se estaba viendo ya no existe o todavía no se eligió
+  // ninguno, se elige por defecto el que tiene el turno (o el primero).
+  if (!espectadorPlayerId || !jugadores.some(p => p.id === espectadorPlayerId)) {
+    const enTurno = jugadores.find(p => p.id === state.current_turn);
+    espectadorPlayerId = (enTurno || jugadores[0] || {}).id || null;
+  }
+
+  const tabsCont = document.getElementById('esp-player-tabs');
+  tabsCont.innerHTML = jugadores.map(p => {
+    let emoji = '🧩';
+    if (p.eliminated) emoji = '💥';
+    else if (p.resolved) emoji = '✅';
+    else if (state.current_turn === p.id) emoji = '🎯';
+    const activo = p.id === espectadorPlayerId;
+    return `<button class="ghost esp-tab-btn ${activo ? 'selected' : ''}" data-id="${p.id}"
+      style="padding:8px 12px; font-size:0.85rem; ${activo ? 'border-color: var(--accent); background: #232838;' : ''}">
+      ${emoji} ${escaparHtml(p.name)}
+    </button>`;
   }).join('') || '<div style="opacity:0.6;">Sin jugadores.</div>';
+
+  tabsCont.querySelectorAll('.esp-tab-btn').forEach(btn => {
+    btn.onclick = () => {
+      espectadorPlayerId = btn.dataset.id;
+      renderEspectador(state);
+    };
+  });
+
+  const seleccionado = jugadores.find(p => p.id === espectadorPlayerId);
+  document.getElementById('esp-selected-name').textContent = seleccionado ? `Código de ${seleccionado.name}` : '—';
+  const badgeEl = document.getElementById('esp-selected-badge');
+  if (seleccionado) {
+    if (seleccionado.eliminated) { badgeEl.textContent = 'ELIMINADO'; badgeEl.className = 'badge'; }
+    else if (seleccionado.resolved) { badgeEl.textContent = 'RESUELTO'; badgeEl.className = 'badge'; }
+    else if (state.current_turn === seleccionado.id) { badgeEl.textContent = 'SU TURNO'; badgeEl.className = 'badge turn'; }
+    else { badgeEl.textContent = ''; badgeEl.className = 'badge'; }
+  } else {
+    badgeEl.textContent = '';
+  }
+  document.getElementById('esp-selected-stand').innerHTML = seleccionado ? renderStand(seleccionado) : '';
+
+  const statusLine = document.getElementById('esp-status-line');
+  if (state.status === 'finished') {
+    const ganador = jugadores.find(p => p.id === state.winner);
+    statusLine.textContent = ganador
+      ? `👁️ Partida terminada · ganó ${ganador.name} · Sala ${state.room}`
+      : `👁️ Partida terminada · Sala ${state.room}`;
+  } else if (state.pending_guess) {
+    statusLine.textContent = `👁️ ${state.pending_guess.player_name} está intentando desactivar su bomba... · Sala ${state.room}`;
+  } else {
+    statusLine.textContent = `👁️ Turno de ${state.current_turn_name || '—'} · Sala ${state.room}`;
+  }
 
   const logEl = document.getElementById('esp-log');
   logEl.innerHTML = (state.log || []).map(l => `<div>${l}</div>`).join('');
@@ -2105,7 +2167,8 @@ function handleState(state) {
 function secretTileHtml(entry) {
   if (entry.hidden) {
     const bgColor = entry.color ? COLOR_HEX[entry.color] : '#2a2e3d';
-    return `<div class="secret-tile" style="background:${bgColor}; border: 2px dashed #555;">?</div>`;
+    const dotsHtml = (entry.dots != null) ? `<span class="dots">${dotsStr(entry.dots)}</span>` : '';
+    return `<div class="secret-tile" style="background:${bgColor}; border: 2px dashed #555;">?${dotsHtml}</div>`;
   }
   return `<div class="secret-tile" style="background:${COLOR_HEX[entry.color]}">${entry.number}<span class="dots">${dotsStr(entry.dots)}</span></div>`;
 }
