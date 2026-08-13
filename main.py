@@ -9,8 +9,8 @@ usa el mismo código de sala y nombres diferentes.
 """
 
 import json
+import os
 import random
-import sqlite3
 import asyncio
 import time
 from typing import Dict, List, Optional
@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
+from supabase import create_client, Client
 
 
 class UTF8StaticFiles(StaticFiles):
@@ -40,24 +41,20 @@ class UTF8StaticFiles(StaticFiles):
 app = FastAPI()
 
 # ---------------------------------------------------------------------------
-# Base de datos y Autenticación
+# Base de datos y Autenticación (Supabase)
 # ---------------------------------------------------------------------------
-def init_db():
-    conn = sqlite3.connect('estratega_de_codigos.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            puntos INTEGER DEFAULT 0,
-            victorias INTEGER DEFAULT 0
-        )
-    ''')
-    conn.commit()
-    conn.close()
+# El login/registro (usuario+contraseña) lo maneja Supabase Auth desde el
+# frontend. El backend solo necesita la SERVICE ROLE KEY para leer/escribir
+# puntos y victorias en la tabla "profiles" sin quedar sujeto a las políticas
+# de RLS (esta llave es secreta: nunca debe usarse en el frontend).
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY")
 
-init_db() 
+supabase: Optional[Client] = None
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+else:
+    print("⚠️  SUPABASE_URL / SUPABASE_SERVICE_KEY no configuradas: los puntos no se guardarán.")
 
 RANGOS = [
     "Adivino de Feria", "Curioso Empedernido", "Observador Casual", 
@@ -76,43 +73,54 @@ def obtener_rango(puntos: int, victorias: int):
     return RANGOS[indice]
 
 def update_player_score(username: str, points_change: int) -> int:
-    conn = sqlite3.connect('estratega_de_codigos.db')
-    cursor = conn.cursor()
-    # Por ahora no hay registro/login: si el nombre todavía no tiene fila en la
-    # base de datos, se crea automáticamente para poder llevar sus puntos.
-    cursor.execute(
-        "INSERT OR IGNORE INTO usuarios (username, password_hash, puntos, victorias) VALUES (?, '', 0, 0)",
-        (username,)
-    )
-    cursor.execute("SELECT puntos, victorias FROM usuarios WHERE username = ?", (username,))
-    current_puntos, current_victorias = cursor.fetchone()
+    """Suma/resta puntos al perfil del usuario autenticado en Supabase.
+
+    El nombre con el que se juega es siempre el "username" con el que la
+    persona se registró/inició sesión (ver frontend), así que esta fila ya
+    existe desde el registro (la crea un trigger en Supabase). Si por algún
+    motivo no existiera, se crea aquí como respaldo.
+    """
+    if supabase is None:
+        return 0  # Supabase no configurado: no se pueden guardar puntos.
+
+    resp = supabase.table("profiles").select("puntos, victorias").eq("username", username).execute()
+
+    if resp.data:
+        current_puntos = resp.data[0]["puntos"] or 0
+        current_victorias = resp.data[0]["victorias"] or 0
+    else:
+        current_puntos, current_victorias = 0, 0
 
     new_puntos = max(0, current_puntos + points_change)
     new_victorias = current_victorias + (1 if points_change > 0 else 0)
 
-    cursor.execute(
-        "UPDATE usuarios SET puntos = ?, victorias = ? WHERE username = ?",
-        (new_puntos, new_victorias, username)
-    )
-    conn.commit()
-    conn.close()
+    if resp.data:
+        supabase.table("profiles").update(
+            {"puntos": new_puntos, "victorias": new_victorias}
+        ).eq("username", username).execute()
+    else:
+        # Respaldo: no debería pasar en condiciones normales porque el
+        # perfil se crea al registrarse, pero evita perder puntos si pasa.
+        supabase.table("profiles").insert(
+            {"username": username, "puntos": new_puntos, "victorias": new_victorias}
+        ).execute()
+
     return new_puntos
 
 @app.get("/perfil/{username}")
 async def obtener_perfil(username: str):
-    """Devuelve puntos/victorias/rango acumulados para un nombre dado.
+    """Devuelve puntos/victorias/rango acumulados para un usuario registrado
+    en Supabase."""
+    if supabase is None:
+        return {"username": username, "puntos": 0, "victorias": 0, "rango": obtener_rango(0, 0)}
 
-    Por ahora no hay contraseñas ni login: cualquiera puede jugar con
-    cualquier nombre, y este endpoint solo sirve para mostrar el progreso
-    acumulado si ya se jugó antes con ese mismo nombre.
-    """
-    conn = sqlite3.connect('estratega_de_codigos.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT puntos, victorias FROM usuarios WHERE username = ?", (username,))
-    row = cursor.fetchone()
-    conn.close()
+    resp = supabase.table("profiles").select("puntos, victorias").eq("username", username).execute()
+    if resp.data:
+        puntos = resp.data[0]["puntos"] or 0
+        victorias = resp.data[0]["victorias"] or 0
+    else:
+        puntos, victorias = 0, 0
 
-    puntos, victorias = row if row else (0, 0)
     rango = obtener_rango(puntos, victorias)
     return {"username": username, "puntos": puntos, "victorias": victorias, "rango": rango}
 
