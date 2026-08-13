@@ -81,31 +81,37 @@ def update_player_score(username: str, points_change: int) -> int:
     motivo no existiera, se crea aquí como respaldo.
     """
     if supabase is None:
-        return 0  # Supabase no configurado: no se pueden guardar puntos.
+        print(f"⚠️  No se guardaron los puntos de {username}: Supabase no configurado.")
+        return 0
 
-    resp = supabase.table("profiles").select("puntos, victorias").eq("username", username).execute()
+    try:
+        resp = supabase.table("profiles").select("puntos, victorias").eq("username", username).execute()
 
-    if resp.data:
-        current_puntos = resp.data[0]["puntos"] or 0
-        current_victorias = resp.data[0]["victorias"] or 0
-    else:
-        current_puntos, current_victorias = 0, 0
+        if resp.data:
+            current_puntos = resp.data[0]["puntos"] or 0
+            current_victorias = resp.data[0]["victorias"] or 0
+        else:
+            current_puntos, current_victorias = 0, 0
 
-    new_puntos = max(0, current_puntos + points_change)
-    new_victorias = current_victorias + (1 if points_change > 0 else 0)
+        new_puntos = max(0, current_puntos + points_change)
+        new_victorias = current_victorias + (1 if points_change > 0 else 0)
 
-    if resp.data:
-        supabase.table("profiles").update(
-            {"puntos": new_puntos, "victorias": new_victorias}
-        ).eq("username", username).execute()
-    else:
-        # Respaldo: no debería pasar en condiciones normales porque el
-        # perfil se crea al registrarse, pero evita perder puntos si pasa.
-        supabase.table("profiles").insert(
-            {"username": username, "puntos": new_puntos, "victorias": new_victorias}
-        ).execute()
+        if resp.data:
+            update_resp = supabase.table("profiles").update(
+                {"puntos": new_puntos, "victorias": new_victorias}
+            ).eq("username", username).execute()
+            if not update_resp.data:
+                print(f"⚠️  UPDATE de puntos para {username} no afectó ninguna fila (revisa RLS/policies).")
+        else:
+            supabase.table("profiles").insert(
+                {"username": username, "puntos": new_puntos, "victorias": new_victorias}
+            ).execute()
 
-    return new_puntos
+        print(f"✅ Puntos de {username} actualizados: {current_puntos} → {new_puntos}")
+        return new_puntos
+    except Exception as e:
+        print(f"❌ ERROR guardando puntos de {username} en Supabase: {e}")
+        return 0
 
 @app.get("/perfil/{username}")
 async def obtener_perfil(username: str):
