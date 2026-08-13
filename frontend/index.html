@@ -1182,6 +1182,17 @@ let compareMode = false;
 const crossedOut = new Set();
 let tableGuessReady = false;
 
+// --- Reconexión automática (evita que el celular quede "colgado" si el
+// WebSocket se cae por inactividad, cambio de red, o el navegador
+// suspendiendo la pestaña en segundo plano) ---
+let currentRoomCode = null;
+let currentPlayerName = null;
+let esSalidaIntencional = false;
+let heartbeatInterval = null;
+let reconnectTimeout = null;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+
 const soundTachar = new Audio('tachar.mp3');
 const soundCarta = new Audio('carta.mp3');
 const soundTurno = new Audio('turno.mp3');
@@ -1215,19 +1226,52 @@ function conectarSala(room, name, solo = false) {
   actualizarPerfilHUD(name);
   esModoSolo = solo;
 
+  currentRoomCode = room;
+  currentPlayerName = name;
+  esSalidaIntencional = false;
+  reconnectAttempts = 0;
+
+  abrirWebSocket(room, name, solo);
+}
+
+function iniciarHeartbeat() {
+  detenerHeartbeat();
+  heartbeatInterval = setInterval(() => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({type: 'ping'})); } catch (e) {}
+    }
+  }, 20000);
+}
+
+function detenerHeartbeat() {
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+}
+
+function abrirWebSocket(room, name, solo) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
 
   if (solo) {
     ws.onopen = () => {
+      reconnectAttempts = 0;
+      iniciarHeartbeat();
       ws.send(JSON.stringify({type: 'start'}));
+    };
+  } else {
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      iniciarHeartbeat();
     };
   }
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
     if (msg.type === 'error') {
-      errEl.textContent = msg.message;
+      errEl_join().textContent = msg.message;
+      esSalidaIntencional = true;
       ws.close();
       return;
     }
@@ -1238,16 +1282,54 @@ function conectarSala(room, name, solo = false) {
   };
 
   ws.onclose = () => {
-    document.getElementById('status-line').textContent = 'Conexión perdida.';
-    setTimeout(() => {
-      volverAlInicio();
-      document.getElementById('join-error').textContent = 'La conexión se interrumpió.';
-    }, 1000);
+    detenerHeartbeat();
+
+    if (esSalidaIntencional) return;
+
+    // Si la partida ya no existe para nosotros (nunca llegamos a jugar),
+    // no insistimos en reconectar.
+    if (!currentRoomCode || !currentPlayerName) {
+      mostrarDesconexionFinal();
+      return;
+    }
+
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      mostrarDesconexionFinal();
+      return;
+    }
+
+    reconnectAttempts++;
+    const statusLine = document.getElementById('status-line');
+    if (statusLine) statusLine.textContent = `Conexión perdida. Reconectando... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`;
+
+    const espera = Math.min(800 * reconnectAttempts, 5000);
+    reconnectTimeout = setTimeout(() => {
+      if (esSalidaIntencional) return;
+      abrirWebSocket(currentRoomCode, currentPlayerName, esModoSolo);
+    }, espera);
   };
+}
+
+function errEl_join() {
+  return document.getElementById('join-error');
+}
+
+function mostrarDesconexionFinal() {
+  const statusLine = document.getElementById('status-line');
+  if (statusLine) statusLine.textContent = 'Conexión perdida.';
+  setTimeout(() => {
+    volverAlInicio();
+    document.getElementById('join-error').textContent = 'La conexión se interrumpió y no se pudo reconectar. Intenta entrar de nuevo.';
+  }, 1000);
 }
 
 // --- Vuelve a la pantalla principal (paso "coloca tu nombre") ---
 function volverAlInicio() {
+  esSalidaIntencional = true;
+  currentRoomCode = null;
+  currentPlayerName = null;
+  if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
+  detenerHeartbeat();
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
   cerrarLobby();
