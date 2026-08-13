@@ -749,7 +749,12 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
             msg = json.loads(raw)
             mtype = msg.get("type")
 
-            if mtype == "start" and room.status == "waiting":
+            if mtype == "ping":
+                # Solo mantiene viva la conexión (heartbeat desde el celular);
+                # no requiere ninguna acción de juego.
+                continue
+
+            elif mtype == "start" and room.status == "waiting":
                 if room.mode == "solo" or len(room.players) >= MIN_PLAYERS:
                     room.start()
                     await broadcast(room)
