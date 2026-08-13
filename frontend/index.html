@@ -570,6 +570,7 @@
     white-space: nowrap;
   }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 </head>
 <body>
 
@@ -660,13 +661,22 @@
   <!-- PANTALLA DE UNIÓN -->
   <div id="join-screen" class="card">
 
-    <!-- Paso 1: solo pedimos el nombre -->
+    <!-- Paso 1: iniciar sesión o crear cuenta (Supabase Auth) -->
     <div id="join-step-name">
       <div class="hero-emoji">🎯💣</div>
       <h2 class="hero-title">¡Bienvenido, agente!</h2>
-      <div class="hero-hint">Coloca tu nombre para empezar</div>
-      <input id="name-input" type="text" placeholder="Tu nombre" maxlength="20" autofocus>
-      <button class="full" id="btn-continuar-nombre" style="font-size: 1.05rem;">Continuar ➜</button>
+      <div class="hero-hint" id="auth-hint">Inicia sesión para jugar</div>
+
+      <input id="auth-username-input" type="text" placeholder="Nombre de usuario" maxlength="20" autofocus autocomplete="username">
+      <input id="auth-password-input" type="password" placeholder="Contraseña" maxlength="72" autocomplete="current-password" style="margin-top:8px;">
+
+      <button class="full" id="btn-auth-submit" style="font-size: 1.05rem; margin-top:10px;">Iniciar sesión ➜</button>
+      <button class="full ghost" id="btn-auth-toggle" style="margin-top:8px; font-size:0.85rem;">
+        ¿No tienes cuenta? Regístrate
+      </button>
+      <!-- Guarda el nombre de usuario ya autenticado; el resto del código
+           original sigue leyendo este input, así no hubo que tocarlo todo. -->
+      <input id="name-input" type="hidden" value="">
     </div>
 
     <!-- Paso 2: elegir cómo jugar (aparece después del nombre) -->
@@ -708,7 +718,7 @@
         🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
       </button>
 
-      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cambiar nombre</button>
+      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cerrar sesión</button>
 
       <!-- Salas con partidas en curso: cualquiera puede entrar a ver como
            espectador, incluso si es una partida en solitario. -->
@@ -1199,6 +1209,149 @@ function procesarRondaMultijugador(nuevos, state) {
 
 let puntosActuales = 0;
 
+// ---------------------------------------------------------------------------
+// LOGIN / REGISTRO CON SUPABASE
+// ---------------------------------------------------------------------------
+// Reemplaza estos dos valores por los de tu propio proyecto de Supabase
+// (Project Settings → API). La "anon key" es pública, se puede exponer en
+// el frontend sin problema (la seguridad la dan las políticas de RLS).
+const SUPABASE_URL = "https://wfkkklkhrcuzdizsyyyd.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_KQzNaiz32jganmyCmzyucw_HVmCihXp";
+
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Supabase Auth pide un email, pero nosotros solo queremos usuario+contraseña,
+// así que fabricamos un email interno a partir del nombre de usuario.
+function usernameToEmail(username) {
+  return username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") + "@gotfive.local";
+}
+
+let authModo = "login"; // "login" o "registro"
+
+function setAuthModo(modo) {
+  authModo = modo;
+  const hint = document.getElementById("auth-hint");
+  const btn = document.getElementById("btn-auth-submit");
+  const toggle = document.getElementById("btn-auth-toggle");
+  const errEl = document.getElementById("join-error");
+  errEl.textContent = "";
+  if (modo === "registro") {
+    hint.textContent = "Crea tu cuenta para guardar tu progreso";
+    btn.textContent = "Crear cuenta ➜";
+    toggle.textContent = "¿Ya tienes cuenta? Inicia sesión";
+  } else {
+    hint.textContent = "Inicia sesión para jugar";
+    btn.textContent = "Iniciar sesión ➜";
+    toggle.textContent = "¿No tienes cuenta? Regístrate";
+  }
+}
+
+document.getElementById("btn-auth-toggle").onclick = () => {
+  setAuthModo(authModo === "login" ? "registro" : "login");
+};
+
+// Una vez que hay sesión válida (recién logueado, recién registrado, o
+// restaurada al abrir la página), continúa igual que antes hacia la
+// selección de modo de juego.
+async function continuarConSesion(username) {
+  document.getElementById('name-input').value = username;
+  localStorage.setItem('edc_name', username);
+
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = 'Comprobando si ya tenías una partida activa...';
+  try {
+    const resp = await fetch('/buscar-partida/' + encodeURIComponent(username));
+    const data = await resp.json();
+    if (data.found) {
+      errEl.textContent = '';
+      conectarSala(data.room, username, data.mode === 'solo');
+      return;
+    }
+  } catch (e) { /* seguimos normalmente */ }
+
+  errEl.textContent = '';
+  document.getElementById('nombre-confirmado').textContent = username;
+  document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+  conectarLobby(username);
+  cargarSalasEnCurso();
+}
+
+document.getElementById('btn-auth-submit').onclick = async () => {
+  const username = document.getElementById('auth-username-input').value.trim();
+  const password = document.getElementById('auth-password-input').value;
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = '';
+
+  if (!username || username.length < 3) {
+    errEl.textContent = 'El usuario debe tener al menos 3 caracteres.';
+    return;
+  }
+  if (!password || password.length < 6) {
+    errEl.textContent = 'La contraseña debe tener al menos 6 caracteres.';
+    return;
+  }
+
+  const email = usernameToEmail(username);
+
+  if (authModo === 'registro') {
+    const { data, error } = await supabaseClient.auth.signUp({
+      email, password,
+      options: { data: { username } }
+    });
+    if (error) {
+      errEl.textContent = error.message.includes('already registered')
+        ? 'Ese usuario ya existe. Inicia sesión.'
+        : 'No se pudo crear la cuenta: ' + error.message;
+      return;
+    }
+    await continuarConSesion(username);
+  } else {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) {
+      errEl.textContent = 'Usuario o contraseña incorrectos.';
+      return;
+    }
+    const realUsername = data.user?.user_metadata?.username || username;
+    await continuarConSesion(realUsername);
+  }
+};
+
+['auth-username-input', 'auth-password-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('btn-auth-submit').click();
+  });
+});
+
+async function cerrarSesion() {
+  await supabaseClient.auth.signOut();
+  localStorage.removeItem('edc_name');
+  localStorage.removeItem('edc_restart');
+  document.getElementById('auth-username-input').value = '';
+  document.getElementById('auth-password-input').value = '';
+  document.getElementById('join-error').textContent = '';
+  document.getElementById('join-step-modo').classList.add('hidden');
+  document.getElementById('join-step-name').classList.remove('hidden');
+  cerrarLobby();
+}
+
+// Al cargar la página: si Supabase ya tiene una sesión guardada en este
+// navegador, se salta el login y entra directo (misma sesión persiste
+// mientras sea el mismo dispositivo/navegador, gracias a supabase-js).
+async function restaurarSesion() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) return;
+  const username = session.user?.user_metadata?.username;
+  if (!username) return;
+  await continuarConSesion(username);
+
+  const reinicio = localStorage.getItem('edc_restart');
+  if (reinicio) {
+    localStorage.removeItem('edc_restart');
+    ejecutarReinicio(reinicio, username);
+  }
+}
+
 // Por ahora no hay login/registro: el "usuario" es simplemente el nombre que
 // la persona escribe. Igual consultamos el perfil por nombre para mostrar
 // puntos/rango acumulados si ya jugó antes con ese mismo nombre.
@@ -1491,49 +1644,8 @@ function irASeleccionModo(nombre) {
   conectarLobby(nombre);
   cargarSalasEnCurso();
 }
-document.getElementById('btn-continuar-nombre').onclick = async () => {
-  const name = document.getElementById('name-input').value.trim();
-  const errEl = document.getElementById('join-error');
-  errEl.textContent = '';
-  if (!name) {
-    errEl.textContent = 'Escribe tu nombre para poder entrar.';
-    return;
-  }
-
-  localStorage.setItem('edc_name', name);
-
-  errEl.textContent = 'Comprobando si ya tenías una partida activa...';
-  try {
-    const resp = await fetch('/buscar-partida/' + encodeURIComponent(name));
-    const data = await resp.json();
-    if (data.found) {
-      errEl.textContent = '';
-      conectarSala(data.room, name, data.mode === 'solo');
-      return;
-    }
-  } catch (e) {
-    // Si falla la búsqueda, seguimos normalmente a elegir modo de juego.
-  }
-
-  errEl.textContent = '';
-  document.getElementById('nombre-confirmado').textContent = name;
-  document.getElementById('join-step-name').classList.add('hidden');
-  document.getElementById('join-step-modo').classList.remove('hidden');
-  conectarLobby(name);
-  cargarSalasEnCurso();
-};
-
-document.getElementById('name-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('btn-continuar-nombre').click();
-});
-
 document.getElementById('btn-cambiar-nombre').onclick = () => {
-  localStorage.removeItem('edc_name');
-  localStorage.removeItem('edc_restart');
-  document.getElementById('join-error').textContent = '';
-  document.getElementById('join-step-modo').classList.add('hidden');
-  document.getElementById('join-step-name').classList.remove('hidden');
-  cerrarLobby();
+  cerrarSesion();
 };
 
 document.getElementById('join-btn').onclick = () => {
@@ -2002,25 +2114,12 @@ document.getElementById('esp-chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeEspectador();
 });
 
-// --- Al cargar la página: si hay un nombre guardado, salta directo a la
-// selección de modo (sin volver a pedirlo) y, si además había un pedido
-// de "jugar de nuevo", reingresa automáticamente a la misma modalidad. ---
+// --- Al cargar la página: si Supabase tiene una sesión guardada en este
+// navegador, salta directo a la selección de modo (sin pedir login de
+// nuevo) y, si además había un pedido de "jugar de nuevo", reingresa
+// automáticamente a la misma modalidad. Ver restaurarSesion() más arriba. ---
 window.addEventListener('DOMContentLoaded', () => {
-  const nombreGuardado = localStorage.getItem('edc_name');
-  if (!nombreGuardado) return;
-
-  document.getElementById('name-input').value = nombreGuardado;
-  document.getElementById('nombre-confirmado').textContent = nombreGuardado;
-  document.getElementById('join-step-name').classList.add('hidden');
-  document.getElementById('join-step-modo').classList.remove('hidden');
-  conectarLobby(nombreGuardado);
-  cargarSalasEnCurso();
-
-  const reinicio = localStorage.getItem('edc_restart');
-  if (reinicio) {
-    localStorage.removeItem('edc_restart');
-    ejecutarReinicio(reinicio, nombreGuardado);
-  }
+  restaurarSesion();
 });
 
 function queueAnimacionEvento(ev) {
