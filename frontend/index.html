@@ -1358,8 +1358,41 @@ function volverAlInicio() {
   actualizarBadgeChat();
 }
 
-// --- Paso 1 -> Paso 2: al continuar, primero revisamos si ese nombre ya
-// tenía una partida activa (para reconectarlo directo, sin pedir código) ---
+// --- Vuelve a la pantalla de "¿Cómo quieres jugar?" conservando el nombre
+// ya conocido, sin volver a pedirlo. Se usa al salir de una partida o al
+// terminarla (en vez de volverAlInicio, que resetea hasta el nombre). ---
+function irASeleccionModo(nombre) {
+  esSalidaIntencional = true;
+  currentRoomCode = null;
+  currentPlayerName = null;
+  if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
+  detenerHeartbeat();
+  cerrarCuentaRegresivaDesactivar();
+  cerrarCuentaRegresivaDesconexion();
+  if (ws) { try { ws.close(); } catch (e) {} }
+  ws = null;
+  lastState = null;
+
+  document.getElementById('game-screen').classList.add('hidden');
+  document.getElementById('wait-screen').classList.add('hidden');
+  document.getElementById('btn-salir').classList.add('hidden');
+  document.getElementById('join-screen').classList.remove('hidden');
+  document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+  document.getElementById('nombre-confirmado').textContent = nombre;
+  document.getElementById('name-input').value = nombre;
+
+  // Reset del chat flotante
+  document.getElementById('chat-mensajes').innerHTML = '';
+  document.getElementById('chat-panel').classList.remove('abierto');
+  document.getElementById('btn-chat').classList.add('hidden');
+  chatAbierto = false;
+  lastChatSeqMostrado = 0;
+  chatNoLeidos = 0;
+  actualizarBadgeChat();
+
+  conectarLobby(nombre);
+}
 document.getElementById('btn-continuar-nombre').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
   const errEl = document.getElementById('join-error');
@@ -1450,10 +1483,11 @@ document.getElementById('btn-solo').onclick = () => {
 // --- Botón "Salir" (visible durante la sala de espera o la partida) ---
 document.getElementById('btn-salir').onclick = () => {
   const status = lastState ? lastState.status : null;
+  const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
 
   if (!status || status === 'finished') {
-    // Ya no hay partida activa: solo volvemos a la pantalla principal.
-    volverAlInicio();
+    // Ya no hay partida activa: volvemos a elegir modo, sin pedir el nombre otra vez.
+    irASeleccionModo(nombre);
     return;
   }
 
@@ -1465,7 +1499,7 @@ document.getElementById('btn-salir').onclick = () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({type: 'leave'}));
   }
-  volverAlInicio();
+  irASeleccionModo(nombre);
 };
 
 document.getElementById('guess-btn').onclick = () => {
@@ -2005,14 +2039,10 @@ function renderGame(state) {
     `;
 
     document.getElementById('btn-reinicio').onclick = () => {
-      esSalidaIntencional = true;
-      if (ws) ws.close();
-      ws = null;
-      document.getElementById('game-screen').classList.add('hidden');
-      document.getElementById('btn-salir').classList.add('hidden');
-      document.getElementById('join-screen').classList.remove('hidden');
-      document.getElementById('join-step-name').classList.add('hidden');
-      document.getElementById('join-step-modo').classList.remove('hidden');
+      const nombre = currentPlayerName
+        || state.players.find(p => p.is_you)?.name
+        || document.getElementById('name-input').value.trim();
+      irASeleccionModo(nombre);
       if (state.mode === 'solo') {
         document.getElementById('btn-solo').click();
       } else {
