@@ -1369,6 +1369,13 @@ function irASeleccionModo(nombre) {
   detenerHeartbeat();
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
+  // Cierra cualquier otro overlay que pudiera haber quedado activo (animación
+  // de puntos, ficha de oponente, resultado de ronda) para no dejar nada
+  // superpuesto sobre la pantalla de selección de modo.
+  ['overlay-animacion', 'overlay-ficha-oponente', 'overlay-resultado-ronda'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('activo');
+  });
   if (ws) { try { ws.close(); } catch (e) {} }
   ws = null;
   lastState = null;
@@ -2028,7 +2035,7 @@ function renderGame(state) {
       mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
     }
 
-    const botonTexto = state.mode === 'solo' ? '🔄 Jugar otra vez en solitario' : '🔄 Buscar nueva partida';
+    const botonTexto = '🔄 Elegir cómo jugar';
 
     // Inyección del botón de Reinicio en el Resultado
     resultCard.innerHTML = `
@@ -2043,11 +2050,6 @@ function renderGame(state) {
         || state.players.find(p => p.is_you)?.name
         || document.getElementById('name-input').value.trim();
       irASeleccionModo(nombre);
-      if (state.mode === 'solo') {
-        document.getElementById('btn-solo').click();
-      } else {
-        document.getElementById('btn-auto-join').click();
-      }
     };
   }
 
