@@ -1253,26 +1253,30 @@ function detenerHeartbeat() {
 function abrirWebSocket(room, name, solo) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
+  const thisSocket = ws; // referencia fija a ESTA conexión concreta
 
   if (solo) {
     ws.onopen = () => {
+      if (ws !== thisSocket) return; // esta conexión ya fue reemplazada por otra, ignorar
       reconnectAttempts = 0;
       iniciarHeartbeat();
-      ws.send(JSON.stringify({type: 'start'}));
+      thisSocket.send(JSON.stringify({type: 'start'}));
     };
   } else {
     ws.onopen = () => {
+      if (ws !== thisSocket) return;
       reconnectAttempts = 0;
       iniciarHeartbeat();
     };
   }
 
   ws.onmessage = (event) => {
+    if (ws !== thisSocket) return; // mensaje de una conexión vieja ya descartada
     const msg = JSON.parse(event.data);
     if (msg.type === 'error') {
       errEl_join().textContent = msg.message;
       esSalidaIntencional = true;
-      ws.close();
+      thisSocket.close();
       return;
     }
     if (msg.type === 'state') {
@@ -1282,6 +1286,7 @@ function abrirWebSocket(room, name, solo) {
   };
 
   ws.onclose = () => {
+    if (ws !== thisSocket) return; // conexión vieja ya reemplazada: no debe reconectar ni resetear la pantalla
     detenerHeartbeat();
 
     if (esSalidaIntencional) return;
@@ -2000,6 +2005,7 @@ function renderGame(state) {
     `;
 
     document.getElementById('btn-reinicio').onclick = () => {
+      esSalidaIntencional = true;
       if (ws) ws.close();
       ws = null;
       document.getElementById('game-screen').classList.add('hidden');
