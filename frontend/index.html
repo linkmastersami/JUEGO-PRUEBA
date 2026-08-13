@@ -645,6 +645,11 @@
   <!-- Ficha boca arriba / acciones (arriba del todo, dentro de la pantalla de juego) -->
   <div class="card hidden" id="action-card">
     <div class="board-title">
+      <span>Tu código <span class="badge you">TÚ</span> <span class="badge" id="turn-badge-you"></span></span>
+    </div>
+    <div class="stand" id="your-stand"></div>
+
+    <div class="board-title" style="margin-top: 14px;">
       <span id="action-card-title">Fichas junto a la reserva</span>
       <span class="badge" id="deck-count-badge">Mazo: --</span>
     </div>
@@ -737,27 +742,9 @@
           <input class="note-input" placeholder="#5">
         </div>
         <div id="ref-grid"></div>
-        <div class="action-hint">Toca una ficha para tacharla. Solo tú la ves — no se comparte con nadie.</div>
-      </div>
-    </div>
-
-    <!-- Tu código -->
-    <div class="card">
-      <div class="board-title">
-        <span>Tu código <span class="badge you">TÚ</span> <span class="badge" id="turn-badge-you"></span></span>
-      </div>
-      <div class="stand" id="your-stand"></div>
-
-      <div class="guess-section">
-        <div class="board-title">¡DESACTIVAR! — ¿cuál crees que es tu código? (menor a mayor)</div>
-        <div class="guess-grid">
-          <input type="number" class="g-input" placeholder="#1">
-          <input type="number" class="g-input" placeholder="#2">
-          <input type="number" class="g-input" placeholder="#3">
-          <input type="number" class="g-input" placeholder="#4">
-          <input type="number" class="g-input" placeholder="#5">
-        </div>
-        <button class="secondary full" id="guess-btn">DESACTIVAR</button>
+        <div class="action-hint">Toca una ficha para tacharla. Cuando en cada color quede sin tachar una sola ficha, esas 5 se convierten en tu respuesta.</div>
+        <button class="secondary full" id="guess-btn" style="margin-top: 10px;" disabled>DESACTIVAR</button>
+        <div class="action-hint" id="guess-ready-hint">Tacha fichas hasta dejar sin tachar solo 1 por color.</div>
       </div>
     </div>
 
@@ -1193,6 +1180,7 @@ let lastState = null;
 let selectedFaceupIndex = null;
 let compareMode = false;
 const crossedOut = new Set();
+let tableGuessReady = false;
 
 const soundTachar = new Audio('tachar.mp3');
 const soundCarta = new Audio('carta.mp3');
@@ -1394,14 +1382,39 @@ document.getElementById('btn-salir').onclick = () => {
 };
 
 document.getElementById('guess-btn').onclick = () => {
-  const inputs = document.querySelectorAll('.g-input');
-  const numbers = Array.from(inputs).map(i => parseInt(i.value, 10));
-  if (numbers.some(n => isNaN(n))) {
-    alert('Completa los 5 números.');
-    return;
-  }
+  const { ready, numbers } = computeTableGuess();
+  if (!ready) return;
   ws.send(JSON.stringify({type: 'guess', numbers}));
 };
+
+// Revisa la tabla de 60 fichas: si en cada color queda exactamente 1 ficha
+// SIN tachar, esas 5 (ordenadas de menor a mayor) son la respuesta del jugador.
+function computeTableGuess() {
+  const numbers = [];
+  for (const color of COLORS) {
+    const remaining = [];
+    for (let col = 1; col <= 12; col++) {
+      const n = COLORS.indexOf(color) + 1 + (col - 1) * 5;
+      if (!crossedOut.has(n)) remaining.push(n);
+    }
+    if (remaining.length !== 1) return { ready: false, numbers: [] };
+    numbers.push(remaining[0]);
+  }
+  numbers.sort((a, b) => a - b);
+  return { ready: true, numbers };
+}
+
+function updateGuessButtonState() {
+  const { ready } = computeTableGuess();
+  tableGuessReady = ready;
+  const hint = document.getElementById('guess-ready-hint');
+  if (hint) {
+    hint.textContent = ready
+      ? '✅ Tienes 1 ficha por color sin tachar. ¡Ya puedes desactivar!'
+      : 'Tacha fichas hasta dejar sin tachar solo 1 por color.';
+  }
+  if (lastState) renderGame(lastState);
+}
 
 function tileInfo(n) {
   const color = COLORS[(n - 1) % 5];
@@ -1451,6 +1464,7 @@ function buildRefGrid() {
         el.classList.toggle('crossed', crossedOut.has(n));
 
         localStorage.setItem(`crossed_${roomCode}`, JSON.stringify(Array.from(crossedOut)));
+        updateGuessButtonState();
       };
       row.appendChild(el);
     }
@@ -1458,6 +1472,7 @@ function buildRefGrid() {
   }
 }
 buildRefGrid();
+updateGuessButtonState();
 
 document.getElementById('reset-table-btn').onclick = () => {
   if (!confirm('¿Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
@@ -1465,6 +1480,7 @@ document.getElementById('reset-table-btn').onclick = () => {
   crossedOut.clear();
   localStorage.removeItem(`crossed_${roomCode}`);
   document.querySelectorAll('#ref-grid .ref-tile.crossed').forEach(el => el.classList.remove('crossed'));
+  updateGuessButtonState();
 };
 
 let lastEventSeq = 0;
@@ -1872,7 +1888,7 @@ function renderGame(state) {
     } else {
       statusLine.textContent = isYourTurn ? '¡Es tu turno!' : `Turno de ${state.current_turn_name}`;
     }
-    guessBtn.disabled = youDone || hayIntentoEnCurso;
+    guessBtn.disabled = youDone || hayIntentoEnCurso || !tableGuessReady;
   } else if (state.status === 'finished') {
     const won = state.winner === myId;
     statusLine.textContent = 'Partida terminada.';
@@ -1988,10 +2004,17 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
       <button class="full ghost" id="btn-cancel-compare" style="margin-top:8px;">Cancelar</button>
     `;
     const slotButtons = document.getElementById('slot-buttons');
+    const you = state.players.find(p => p.is_you);
     for (let i = 0; i < 5; i++) {
+      const slotColor = you?.secret?.[i]?.color;
       const btn = document.createElement('button');
-      btn.className = 'ghost';
       btn.textContent = `#${i + 1}`;
+      if (slotColor) {
+        btn.style.background = COLOR_HEX[slotColor];
+        btn.style.color = '#fff';
+      } else {
+        btn.className = 'ghost';
+      }
       btn.onclick = () => {
         ws.send(JSON.stringify({type: 'clue', action: 'compare', faceup_index: selectedFaceupIndex, slot: i}));
         selectedFaceupIndex = null;
