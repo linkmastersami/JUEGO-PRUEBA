@@ -221,14 +221,15 @@ class Player:
 
     def to_dict(self, viewer_id: str, for_spectator: bool = False) -> dict:
         is_owner = (not for_spectator) and viewer_id == self.id
-        if for_spectator:
-            # Los espectadores nunca ven el código de ningún jugador, ni
-            # siquiera el color: solo saben cuántas fichas tiene cada uno.
-            secret_view = [{"hidden": True} for _ in self.secret]
-        elif is_owner:
+        if is_owner:
+            # Ni siquiera el dueño ve el número ni los puntitos de su
+            # propio código: solo el color de cada ficha, en orden.
             secret_view = [{"hidden": True, "color": t["color"]} for t in self.secret]
         else:
-            secret_view = [{"hidden": False, **t} for t in self.secret]
+            # Nadie más —ni otros jugadores ni espectadores— puede ver el
+            # número real del código de otro jugador. Sí se ve el color y
+            # la cantidad de puntitos de cada ficha.
+            secret_view = [{"hidden": True, "color": t["color"], "dots": t["dots"]} for t in self.secret]
         return {
             "id": self.id,
             "name": self.name,
@@ -622,9 +623,10 @@ class Room:
         }
 
     def spectator_state_for(self) -> dict:
-        """Igual que state_for, pero sin revelar el código de ningún
-        jugador (ni siquiera el del dueño): un espectador solo ve nombres,
-        estado (eliminado/resuelto/en turno) y el historial/chat."""
+        """Igual que state_for, pero viendo a TODOS los jugadores como si
+        fueran oponentes (color + puntitos visibles, número siempre
+        oculto — la misma regla que ya aplica entre jugadores). Así el
+        espectador ve absolutamente todo lo que pasa en la partida."""
         base = self.state_for("__espectador__")
         base["players"] = [p.to_dict("__espectador__", for_spectator=True) for p in self.players]
         base["your_id"] = None
