@@ -101,6 +101,13 @@
   .result-banner.win { background: var(--good); }
   .result-banner.lose { background: var(--bad); }
   .error { color: var(--bad); font-size: 0.85rem; text-align: center; margin-top: 6px; }
+
+  /* --- Banner del Tutorial guiado (guion fijo, paso a paso) --- */
+  .tutorial-banner { background: linear-gradient(135deg, #2c2410, #1a1a1a); border: 2px solid var(--accent); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; transition: border-color 0.2s; }
+  .tutorial-banner .tb-head { display:flex; justify-content:space-between; align-items:center; font-size:0.72rem; color: var(--accent); font-weight:bold; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.03em; }
+  .tutorial-banner .tb-text { font-size:0.92rem; line-height:1.45; }
+  .tutorial-banner.aviso { border-color: var(--bad); }
+  .tutorial-banner.aviso .tb-text { color: #ffb3ad; }
   .log { max-height: 130px; overflow-y: auto; font-size: 0.8rem; color: var(--muted); }
   .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
 
@@ -913,6 +920,16 @@
       </div>
   </div>
 
+  <!-- BANNER DEL TUTORIAL GUIADO: guion fijo, un mensaje explicativo por
+       paso. Solo se muestra cuando state.mode === 'tutorial'. -->
+  <div class="tutorial-banner hidden" id="tutorial-banner">
+    <div class="tb-head">
+      <span>🎓 Tutorial guiado</span>
+      <span id="tutorial-banner-step"></span>
+    </div>
+    <div class="tb-text" id="tutorial-banner-text"></div>
+  </div>
+
   <!-- Ficha boca arriba / acciones (arriba del todo, dentro de la pantalla de juego) -->
   <div class="card hidden" id="action-card">
     <div class="board-title">
@@ -990,6 +1007,10 @@
 
       <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
         🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
+      </button>
+
+      <button class="full ghost" id="btn-tutorial" style="border-color: var(--accent2); margin-top: 10px;">
+        🎓 Tutorial guiado <span style="opacity:0.7;">(sin puntos ni monedas)</span>
       </button>
 
       <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cerrar sesión</button>
@@ -2412,7 +2433,11 @@ document.getElementById('btn-salir').onclick = () => {
   const status = lastState ? lastState.status : null;
   const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
 
-  if (status && status === 'playing') {
+  if (lastState && lastState.mode === 'tutorial' && status === 'playing') {
+    if (!confirm('¿Seguro que quieres salir del tutorial? Perderás el progreso del guion.')) return;
+    salirTutorial();
+    return;
+  } else if (status && status === 'playing') {
     const advertencia = 'Si sales ahora perderás automáticamente y la partida continuará sin ti. ¿Seguro que quieres salir?';
     if (!confirm(advertencia)) return;
   } else if (status === 'waiting') {
@@ -2529,6 +2554,389 @@ document.getElementById('reset-table-btn').onclick = () => {
   localStorage.removeItem(`crossed_${roomCode}`);
   document.querySelectorAll('#ref-grid .ref-tile.crossed').forEach(el => el.classList.remove('crossed'));
   updateGuessButtonState();
+};
+
+// =====================================================================
+// TUTORIAL GUIADO — sala especial de 1 solo jugador con guion fijo.
+// =====================================================================
+// No usa WebSocket real ni toca el backend/Supabase para nada: por eso
+// nunca se ganan puntos ni monedas jugándolo. En su lugar, sustituye la
+// variable global `ws` por un objeto "falso" cuyo .send() intercepta los
+// mismos mensajes que ya manda la interfaz normal (reveal/clue/guess) y,
+// en vez de mandarlos a un servidor, construye el siguiente estado de una
+// partida ya guionizada (fichas predefinidas, con victoria garantizada) y
+// lo pasa a handleState(), reusando toda la UI real del tablero.
+const TUTORIAL_PID = 'tutorial-agente';
+
+// El código secreto del tutorial (fijo, siempre el mismo): 1 ficha por
+// color, ya ordenadas de menor a mayor como exige el reglamento.
+const TUTORIAL_SECRET = [
+  { number: 8,  color: 'blue',   dots: 2 },
+  { number: 21, color: 'green',  dots: 2 },
+  { number: 30, color: 'orange', dots: 3 },
+  { number: 42, color: 'pink',   dots: 3 },
+  { number: 49, color: 'red',    dots: 1 },
+];
+
+// Guion fijo: 1 ficha revelada + 1 pista por ronda. Cada ronda indica
+// exactamente qué botón debe tocar la persona (color, tipo de pista y,
+// si aplica, con qué ficha propia comparar) y el mensaje explicativo que
+// se muestra antes y después de esa acción.
+const TUTORIAL_ROUNDS = [
+  {
+    color: 'blue',
+    tile: { number: 3, color: 'blue', dots: 1 },
+    clue: 'categorize',
+    revealBanner: '🎓 <b>Paso 1</b>. Es tu turno. Lo primero en cada turno es <b>revelar</b> una ficha de la reserva, para tener algo con qué comparar tu código secreto. Toca el botón <b>Azul</b>.',
+    clueBanner: 'Salió el <b>3</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>📍 Categorizar</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 3.',
+    afterClue: (clue) => `La pista de CATEGORIZAR dice: <b>${clue.notch}</b> de tus fichas son menores que 3. Como salió 0, ya sabes que <b>las 5 fichas de tu código son mayores que 3</b>.`,
+  },
+  {
+    color: 'green',
+    tile: { number: 11, color: 'green', dots: 3 },
+    clue: 'compare',
+    slot: 3,
+    revealBanner: '<b>Paso 2</b>. Turno nuevo: toca el botón <b>Verde</b> para revelar otra ficha.',
+    clueBanner: 'Salió el <b>11</b> (verde, ●●● 3 puntitos). Esta vez toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#4</b> para comparar sus puntitos con los del 11.',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Como el 11 tiene 3 puntitos, ahora sabes que tu ficha <b>#4 también tiene 3 puntitos</b>.`,
+  },
+  {
+    color: 'orange',
+    tile: { number: 25, color: 'orange', dots: 2 },
+    clue: 'categorize',
+    revealBanner: '<b>Paso 3</b>. Toca el botón <b>Naranja</b> para revelar otra ficha.',
+    clueBanner: 'Salió el <b>25</b> (naranja). Toca <b>📍 Categorizar</b> de nuevo para saber cuántas de tus fichas son menores que 25.',
+    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 25. Cada pista acorrala un poco más tu código.`,
+  },
+  {
+    color: 'pink',
+    tile: { number: 37, color: 'pink', dots: 2 },
+    clue: 'compare',
+    slot: 0,
+    revealBanner: '<b>Paso 4</b>. Toca el botón <b>Rosa</b> para revelar otra ficha.',
+    clueBanner: 'Salió el <b>37</b> (rosa, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#1</b>.',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}: tu ficha #1 también tiene 2 puntitos.`,
+  },
+  {
+    color: 'red',
+    tile: { number: 44, color: 'red', dots: 3 },
+    clue: 'categorize',
+    revealBanner: '<b>Paso 5</b>, el último: toca el botón <b>Rojo</b> para revelar la última ficha de este tutorial.',
+    clueBanner: 'Salió el <b>44</b> (rojo). Toca <b>📍 Categorizar</b> una vez más.',
+    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 44. ¡Con todas estas pistas ya alcanza para deducir tu código completo!`,
+  },
+];
+
+let tutorialActive = false;
+let tutorialPlayerName = '';
+let tutorialRoundIdx = 0;
+let tutorialPhaseWaiting = 'reveal'; // 'reveal' | 'clue' | 'solve' | 'done'
+let tutorialFaceup = [];
+let tutorialClues = [];
+let tutorialLogLines = [];
+let avisoTutorialTimeout = null;
+
+function soloColorAvailable(color) {
+  const o = { green: false, pink: false, blue: false, red: false, orange: false };
+  o[color] = true;
+  return o;
+}
+
+function tutorialStepLabel() {
+  const total = TUTORIAL_ROUNDS.length + 1;
+  if (tutorialPhaseWaiting === 'done') return '¡Completado! 🎉';
+  if (tutorialPhaseWaiting === 'solve') return `Paso ${total} de ${total}`;
+  return `Paso ${tutorialRoundIdx + 1} de ${total}`;
+}
+
+// Construye un "estado" con la misma forma que manda el servidor real
+// (ver Room.state_for en main.py), para poder reusar handleState/renderGame
+// sin cambiar nada de esa parte de la interfaz.
+function buildTutorialState(bannerText, extra) {
+  extra = extra || {};
+  return {
+    type: 'state',
+    status: extra.status || 'playing',
+    phase: extra.phase || (tutorialPhaseWaiting === 'clue' ? 'clue' : 'reveal'),
+    room: 'TUTORIAL',
+    mode: 'tutorial',
+    faceup: tutorialFaceup,
+    colors_available: extra.colorsAvailable || { green: false, pink: false, blue: false, red: false, orange: false },
+    color_hex: COLOR_HEX,
+    current_turn: TUTORIAL_PID,
+    current_turn_name: tutorialPlayerName,
+    players: [{
+      id: TUTORIAL_PID,
+      name: tutorialPlayerName,
+      is_you: true,
+      secret: TUTORIAL_SECRET.map(t => ({ hidden: true, color: t.color })),
+      clues: tutorialClues,
+      eliminated: false,
+      resolved: tutorialPhaseWaiting === 'done',
+      connected: true,
+      avatar: null,
+      rango: '🎓 Modo Tutorial',
+    }],
+    log: tutorialLogLines.slice(-16),
+    winner: extra.winner !== undefined ? extra.winner : null,
+    last_score_gained: 0,
+    deck_remaining: extra.deckRemaining != null ? extra.deckRemaining : 55,
+    // events SIEMPRE vacío: así nunca se disparan las animaciones de puntos
+    // ni la elección de caja fuerte (monedas) que sí existen en partidas
+    // reales — el tutorial nunca otorga puntos ni monedas.
+    event_seq: 0,
+    last_event: null,
+    events: [],
+    pending_guess: null,
+    disconnect_player_id: null,
+    disconnect_player_name: null,
+    disconnect_deadline_ms: null,
+    chat: [],
+    your_id: TUTORIAL_PID,
+    min_players: 1,
+    max_players: 1,
+    can_start: false,
+    is_spectator: false,
+    spectator_count: 0,
+    tutorial_banner: bannerText,
+    tutorial_step_label: tutorialStepLabel(),
+  };
+}
+
+// Marca en rojo (por 2.6s) el banner del tutorial cuando la persona toca
+// algo distinto de lo que indica el guion de este paso, sin cambiar el
+// estado del juego, y luego restaura el mensaje del paso actual.
+function avisoTutorial(text) {
+  const el = document.getElementById('tutorial-banner-text');
+  const box = document.getElementById('tutorial-banner');
+  if (!el) return;
+  el.innerHTML = '⚠️ ' + text;
+  if (box) box.classList.add('aviso');
+  clearTimeout(avisoTutorialTimeout);
+  avisoTutorialTimeout = setTimeout(() => {
+    el.innerHTML = (lastState && lastState.tutorial_banner) || '';
+    if (box) box.classList.remove('aviso');
+  }, 2600);
+}
+
+// Deshabilita en el panel de pistas el botón (o la ficha/casilla) que NO
+// corresponde al guion de esta ronda, para que solo se pueda seguir el
+// paso indicado. Se llama al final de cada renderGame() cuando el
+// tutorial está activo.
+function applyTutorialLock() {
+  if (!tutorialActive || tutorialPhaseWaiting !== 'clue') return;
+  const round = TUTORIAL_ROUNDS[tutorialRoundIdx];
+  if (!round) return;
+  const catBtn = document.getElementById('btn-categorize');
+  const cmpBtn = document.getElementById('btn-compare');
+  if (round.clue === 'categorize') {
+    if (cmpBtn) {
+      cmpBtn.disabled = true;
+      cmpBtn.style.opacity = '0.4';
+      cmpBtn.onclick = () => avisoTutorial('Para esta pista, usa <b>📍 Categorizar</b>.');
+    }
+  } else {
+    if (catBtn) {
+      catBtn.disabled = true;
+      catBtn.style.opacity = '0.4';
+      catBtn.onclick = () => avisoTutorial('Para esta pista, usa <b>⚖️ Comparar puntitos</b>.');
+    }
+    document.querySelectorAll('#slot-buttons button').forEach((btn, idx) => {
+      if (idx !== round.slot) {
+        btn.disabled = true;
+        btn.style.opacity = '0.4';
+        btn.onclick = () => avisoTutorial(`Compara con tu ficha oculta #${round.slot + 1}.`);
+      }
+    });
+  }
+}
+
+// Punto de entrada: sustituye `ws` por el motor local del tutorial y
+// arranca en el paso 1 (revelar la primera ficha).
+function iniciarTutorial() {
+  const nameInput = document.getElementById('name-input').value.trim();
+  const name = nameInput || localStorage.getItem('edc_name') || 'Agente';
+
+  tutorialPlayerName = name;
+  tutorialActive = true;
+  tutorialRoundIdx = 0;
+  tutorialPhaseWaiting = 'reveal';
+  tutorialFaceup = [];
+  tutorialClues = [];
+  tutorialLogLines = [`Comienza el tutorial guiado para ${name}. Esta partida es de práctica: no otorga puntos ni monedas.`];
+
+  cerrarLobby();
+  currentRoomCode = null;
+  currentPlayerName = name;
+  esModoSolo = false;
+  esSalidaIntencional = false;
+  reconnectAttempts = 0;
+  ws = { readyState: WebSocket.OPEN, send: tutorialSend, close: () => {} };
+
+  document.getElementById('join-screen').classList.add('hidden');
+  document.getElementById('wait-screen').classList.add('hidden');
+  document.getElementById('spectator-screen').classList.add('hidden');
+  document.getElementById('btn-salir').classList.remove('hidden');
+
+  const round = TUTORIAL_ROUNDS[0];
+  const state = buildTutorialState(round.revealBanner, {
+    phase: 'reveal',
+    colorsAvailable: soloColorAvailable(round.color),
+    deckRemaining: 55,
+  });
+  handleState(state);
+}
+
+// Vuelve a la pantalla "¿cómo quieres jugar?" sin recargar la página.
+function salirTutorial() {
+  tutorialActive = false;
+  tutorialPhaseWaiting = 'reveal';
+  const banner = document.getElementById('tutorial-banner');
+  if (banner) banner.classList.add('hidden');
+  ws = null;
+  lastState = null;
+  irASeleccionModo(tutorialPlayerName || currentPlayerName || document.getElementById('name-input').value.trim());
+}
+
+// Reemplaza a WebSocket.send() mientras el tutorial está activo: valida
+// que la acción coincida con el guion del paso actual y, si es así,
+// avanza a la siguiente escena predefinida. Si no coincide, solo muestra
+// un aviso y no cambia nada (así el guion nunca se puede "romper").
+function tutorialSend(raw) {
+  if (!tutorialActive) return;
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (msg.type === 'ping' || msg.type === 'leave' || msg.type === 'chat') return;
+
+  const round = TUTORIAL_ROUNDS[tutorialRoundIdx];
+
+  if (tutorialPhaseWaiting === 'reveal') {
+    if (msg.type !== 'reveal' || !round) return;
+    if (msg.color !== round.color) {
+      avisoTutorial(`En este paso del tutorial, toca el color <b>${COLOR_NAME[round.color]}</b>.`);
+      return;
+    }
+    doTutorialReveal(round);
+    return;
+  }
+
+  if (tutorialPhaseWaiting === 'clue') {
+    if (msg.type !== 'clue' || !round) return;
+    if (msg.action !== round.clue) {
+      avisoTutorial(round.clue === 'categorize'
+        ? 'Para esta pista, usa <b>📍 Categorizar</b>.'
+        : 'Para esta pista, usa <b>⚖️ Comparar puntitos</b>.');
+      return;
+    }
+    if (round.clue === 'compare' && msg.slot !== round.slot) {
+      avisoTutorial(`Compara con tu ficha oculta <b>#${round.slot + 1}</b>.`);
+      return;
+    }
+    doTutorialClue(round);
+    return;
+  }
+
+  if (tutorialPhaseWaiting === 'solve') {
+    if (msg.type !== 'guess') return;
+    doTutorialFinish();
+    return;
+  }
+
+  avisoTutorial('Todavía no has terminado este paso del tutorial.');
+}
+
+function doTutorialReveal(round) {
+  const tile = Object.assign({ used: false }, round.tile);
+  tutorialFaceup.push(tile);
+  tutorialLogLines.push(`${tutorialPlayerName} reveló el ${tile.number} y lo puso junto a la reserva.`);
+  tutorialPhaseWaiting = 'clue';
+
+  const state = buildTutorialState(round.clueBanner, {
+    phase: 'clue',
+    colorsAvailable: { green: false, pink: false, blue: false, red: false, orange: false },
+    deckRemaining: Math.max(0, 55 - tutorialFaceup.length * 2),
+  });
+  handleState(state);
+}
+
+function doTutorialClue(round) {
+  const tile = tutorialFaceup[tutorialFaceup.length - 1];
+  tile.used = true;
+
+  let clue;
+  if (round.clue === 'categorize') {
+    const notch = TUTORIAL_SECRET.filter(t => t.number < tile.number).length;
+    clue = { kind: 'categorize', tile: Object.assign({}, tile), notch };
+    tutorialLogLines.push(`${tutorialPlayerName} pidió CATEGORIZAR el ${tile.number} en su código.`);
+  } else {
+    const same = TUTORIAL_SECRET[round.slot].dots === tile.dots;
+    clue = { kind: 'compare', tile: Object.assign({}, tile), slot: round.slot, same };
+    tutorialLogLines.push(`${tutorialPlayerName} comparó el ${tile.number} con su ficha #${round.slot + 1}: los puntitos ${same ? 'sí coinciden' : 'no coinciden'}.`);
+  }
+  tutorialClues.push(clue);
+
+  const explicacion = round.afterClue(clue);
+  tutorialRoundIdx++;
+
+  if (tutorialRoundIdx < TUTORIAL_ROUNDS.length) {
+    tutorialPhaseWaiting = 'reveal';
+    const next = TUTORIAL_ROUNDS[tutorialRoundIdx];
+    const state = buildTutorialState(explicacion + '<br><br>' + next.revealBanner, {
+      phase: 'reveal',
+      colorsAvailable: soloColorAvailable(next.color),
+      deckRemaining: Math.max(0, 55 - tutorialFaceup.length * 2),
+    });
+    handleState(state);
+    return;
+  }
+
+  tutorialPhaseWaiting = 'solve';
+  const codigoTxt = TUTORIAL_SECRET.map(t => `${t.number} (${COLOR_NAME[t.color]})`).join(', ');
+  const banner = explicacion + '<br><br>🧩 Con estas pistas, tu código secreto completo es: <b>' + codigoTxt +
+    '</b>. En la tabla de abajo ya te dejamos marcada la respuesta (queda 1 sola ficha sin tachar por color). ' +
+    'Cuando quieras, presiona <b>DESACTIVAR</b> para confirmarla.';
+  const state = buildTutorialState(banner, {
+    phase: 'clue',
+    colorsAvailable: { green: false, pink: false, blue: false, red: false, orange: false },
+    deckRemaining: 45,
+  });
+  handleState(state);
+  prepararTablaSolucionTutorial();
+}
+
+// Tacha automáticamente en la tabla de 60 fichas todo excepto el código
+// secreto del tutorial, para que el botón DESACTIVAR quede listo sin que
+// la persona tenga que tachar las 55 fichas restantes a mano.
+function prepararTablaSolucionTutorial() {
+  const secretNumbers = new Set(TUTORIAL_SECRET.map(t => t.number));
+  crossedOut.clear();
+  for (let n = 1; n <= 60; n++) {
+    if (!secretNumbers.has(n)) crossedOut.add(n);
+  }
+  document.querySelectorAll('#ref-grid .ref-tile').forEach(el => {
+    const n = parseInt(el.dataset.n, 10);
+    el.classList.toggle('crossed', crossedOut.has(n));
+  });
+  updateGuessButtonState();
+}
+
+function doTutorialFinish() {
+  tutorialPhaseWaiting = 'done';
+  tutorialLogLines.push(`${tutorialPlayerName} gritó DESACTIVAR y acertó su código. Tutorial completado: no se otorgan puntos ni monedas.`);
+  const state = buildTutorialState(
+    '🎉 ¡Desactivaste tu código! Completaste el tutorial guiado. Recuerda: este modo es solo para practicar, así que no otorga puntos ni monedas.',
+    { status: 'finished', winner: TUTORIAL_PID, deckRemaining: 45 }
+  );
+  handleState(state);
+}
+
+document.getElementById('btn-tutorial').onclick = () => {
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) {
+    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+  iniciarTutorial();
 };
 
 let lastEventSeq = 0;
@@ -2954,8 +3362,25 @@ function handleState(state) {
     btnSalir.classList.remove('hidden');
   }
 
-  // El chat de sala ahora también está disponible en modo solitario.
-  document.getElementById('btn-chat').classList.remove('hidden');
+  // El chat de sala está disponible en modo solitario, pero no en el
+  // tutorial guiado (no hay rivales ni servidor real detrás). En su lugar,
+  // el tutorial usa su propio banner con el mensaje explicativo del paso
+  // actual (guion fijo, ver TUTORIAL_ROUNDS más abajo).
+  const tutorialBannerEl = document.getElementById('tutorial-banner');
+  if (state.mode === 'tutorial') {
+    document.getElementById('btn-chat').classList.add('hidden');
+    if (tutorialBannerEl) {
+      tutorialBannerEl.classList.remove('hidden');
+      tutorialBannerEl.classList.remove('aviso');
+      const stepEl = document.getElementById('tutorial-banner-step');
+      const textEl = document.getElementById('tutorial-banner-text');
+      if (stepEl) stepEl.textContent = state.tutorial_step_label || '';
+      if (textEl) textEl.innerHTML = state.tutorial_banner || '';
+    }
+  } else {
+    document.getElementById('btn-chat').classList.remove('hidden');
+    if (tutorialBannerEl) tutorialBannerEl.classList.add('hidden');
+  }
 
   if (state.status === 'waiting') {
     if (state.mode === 'solo') {
@@ -2988,9 +3413,11 @@ function handleState(state) {
 
   const subtitleEl = document.getElementById('game-subtitle');
   if (subtitleEl) {
-    subtitleEl.textContent = state.mode === 'solo'
-      ? '🎯 Modo Solitario · puntos a la mitad'
-      : '2-4 jugadores en línea · fiel al reglamento';
+    subtitleEl.textContent = state.mode === 'tutorial'
+      ? '🎓 Tutorial guiado · guion fijo · sin puntos ni monedas'
+      : state.mode === 'solo'
+        ? '🎯 Modo Solitario · puntos a la mitad'
+        : '2-4 jugadores en línea · fiel al reglamento';
   }
 
   renderGame(state);
@@ -3156,67 +3583,95 @@ function renderGame(state) {
     resultCard.classList.remove('hidden');
     resultCard.className = 'card result-banner ' + (won ? 'win' : 'lose');
 
-    let mensaje;
-    if (state.mode === 'solo') {
-      mensaje = won
-        ? '🎉 ¡DESACTIVADO! Descifraste tu código en solitario.'
-        : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
+    if (state.mode === 'tutorial') {
+      // El tutorial siempre termina en victoria (guion fijo) y nunca
+      // otorga puntos ni monedas: no hay animación de puntaje ni cajas
+      // fuertes (ver buildTutorialState: events siempre queda vacío), y
+      // este botón solo vuelve a la selección de modo, sin tocar Supabase.
+      resultCard.innerHTML = `
+        <div>🎓 ¡Tutorial completado! Desactivaste tu código correctamente.</div>
+        <div style="font-size:0.85rem; opacity:0.85; margin-top:6px;">
+          Este modo es solo para practicar: no otorga puntos ni monedas.
+        </div>
+        <button class="full" id="btn-salir-tutorial" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
+          🏠 Volver al menú
+        </button>
+      `;
+      document.getElementById('btn-salir-tutorial').onclick = () => salirTutorial();
     } else {
-      const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
-      mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
+      let mensaje;
+      if (state.mode === 'solo') {
+        mensaje = won
+          ? '🎉 ¡DESACTIVADO! Descifraste tu código en solitario.'
+          : '💥 Explotaste. No lograste descifrar tu código a tiempo.';
+      } else {
+        const winnerName = state.players.find(p => p.id === state.winner)?.name || '???';
+        mensaje = won ? '🎉 ¡Ganaste! ¡DESACTIVADO!' : `😞 Ganó ${winnerName}`;
+      }
+
+      // Inyección de los botones de reinicio en el Resultado.
+      resultCard.innerHTML = `
+        <div>${mensaje}</div>
+        <button class="full" id="btn-jugar-de-nuevo" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
+          🔁 Jugar de nuevo (misma modalidad)
+        </button>
+        <button class="full ghost" id="btn-reinicio" style="margin-top: 10px;">
+          🔄 Elegir cómo jugar
+        </button>
+      `;
+
+      const nombreParaReinicio = () => currentPlayerName
+        || state.players.find(p => p.is_you)?.name
+        || document.getElementById('name-input').value.trim();
+
+      // "Jugar de nuevo": recarga la página conservando el nombre y, al
+      // volver a cargar, entra directo a una sala disponible del mismo
+      // modo en el que estaba (solitario, partida rápida o sala privada).
+      document.getElementById('btn-jugar-de-nuevo').onclick = () => {
+        const nombre = nombreParaReinicio();
+        if (nombre) localStorage.setItem('edc_name', nombre);
+        localStorage.setItem('edc_restart', tipoDeSala(currentRoomCode));
+        esSalidaIntencional = true;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+        }
+        setTimeout(() => location.reload(), 80);
+      };
+
+      // "Elegir cómo jugar": recarga la página conservando el nombre, pero
+      // sin reingresar automáticamente a ninguna partida.
+      document.getElementById('btn-reinicio').onclick = () => {
+        const nombre = nombreParaReinicio();
+        if (nombre) localStorage.setItem('edc_name', nombre);
+        localStorage.removeItem('edc_restart');
+        esSalidaIntencional = true;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+        }
+        setTimeout(() => location.reload(), 80);
+      };
     }
-
-    // Inyección de los botones de reinicio en el Resultado.
-    resultCard.innerHTML = `
-      <div>${mensaje}</div>
-      <button class="full" id="btn-jugar-de-nuevo" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
-        🔁 Jugar de nuevo (misma modalidad)
-      </button>
-      <button class="full ghost" id="btn-reinicio" style="margin-top: 10px;">
-        🔄 Elegir cómo jugar
-      </button>
-    `;
-
-    const nombreParaReinicio = () => currentPlayerName
-      || state.players.find(p => p.is_you)?.name
-      || document.getElementById('name-input').value.trim();
-
-    // "Jugar de nuevo": recarga la página conservando el nombre y, al
-    // volver a cargar, entra directo a una sala disponible del mismo
-    // modo en el que estaba (solitario, partida rápida o sala privada).
-    document.getElementById('btn-jugar-de-nuevo').onclick = () => {
-      const nombre = nombreParaReinicio();
-      if (nombre) localStorage.setItem('edc_name', nombre);
-      localStorage.setItem('edc_restart', tipoDeSala(currentRoomCode));
-      esSalidaIntencional = true;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
-      }
-      setTimeout(() => location.reload(), 80);
-    };
-
-    // "Elegir cómo jugar": recarga la página conservando el nombre, pero
-    // sin reingresar automáticamente a ninguna partida.
-    document.getElementById('btn-reinicio').onclick = () => {
-      const nombre = nombreParaReinicio();
-      if (nombre) localStorage.setItem('edc_name', nombre);
-      localStorage.removeItem('edc_restart');
-      esSalidaIntencional = true;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
-      }
-      setTimeout(() => location.reload(), 80);
-    };
   }
 
   const logEl = document.getElementById('log');
   logEl.innerHTML = state.log.map(l => `<div>${l}</div>`).join('');
   logEl.scrollTop = logEl.scrollHeight;
+  applyTutorialLock();
 }
 
 function renderActionPanel(state, isYourTurn, youEliminated) {
   const content = document.getElementById('action-content');
   const titleEl = document.getElementById('action-card-title');
+
+  // Último paso del tutorial guiado: ya no quedan más fichas por revelar
+  // ni pistas por pedir, así que el panel de acciones deja de mostrar
+  // "revela"/"pide una pista" y en su lugar señala la tabla de abajo,
+  // donde ya se dejó marcada la respuesta correcta automáticamente.
+  if (state.mode === 'tutorial' && state.status === 'playing' && tutorialPhaseWaiting === 'solve') {
+    titleEl.textContent = '3. ¡Desactiva tu código!';
+    content.innerHTML = `<div class="action-hint">Ya tienes todas las pistas de este tutorial. Baja hasta la tabla de 60 fichas: ya te dejamos marcada tu respuesta (queda 1 sola ficha sin tachar por color). Presiona el botón <b>DESACTIVAR</b> para confirmarla.</div>`;
+    return;
+  }
 
   if (state.pending_guess) {
     titleEl.textContent = '💣 Desactivación en curso';
