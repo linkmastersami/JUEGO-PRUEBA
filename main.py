@@ -294,6 +294,7 @@ async def tienda(username: str):
         "catalogo": catalogo,
         "monedas": perfil["monedas"],
         "es_cuenta_nueva": len(comprados) == 0,
+        "precio_avatar_gratis": PRECIO_AVATAR_GRATIS,
     }
 
 
