@@ -874,25 +874,101 @@
     color: #fff;
   }
 
-  /* --- Chat grupal (lobby) --- */
-  #lobby-online-badge { background: #2a2e3d; }
-  #lobby-online-badge .dot-verde { color: var(--good); }
-  #lobby-chat-mensajes {
-    /* Ventana chica: solo se alcanzan a ver ~3 mensajes, el resto deslizando */
-    max-height: 140px;
-    overflow-y: auto;
+  /* --- Chat global (lobby): mismo patrón flotante que el chat de sala,
+       pero del lado opuesto de la pantalla y con ícono/color distintos
+       para no confundirlos a simple vista --- */
+  #btn-lobby-chat {
+    position: fixed;
+    bottom: 18px;
+    left: 18px;
+    z-index: 600;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: #2a2e3d;
+    color: #fff;
+    font-size: 1.4rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    padding: 0;
+    border: 1px solid #3a3f52;
+  }
+  #lobby-chat-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: var(--bad);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 800;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+  }
+  #lobby-chat-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 700;
+    max-width: 520px;
+    margin: 0 auto;
+    background: var(--card);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.45);
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    padding: 4px 2px;
-    margin-bottom: 8px;
+    height: 260px;
+    max-height: 60vh;
+    transform: translateY(100%);
+    transition: transform 0.28s ease;
+  }
+  #lobby-chat-panel.abierto { transform: translateY(0); }
+  #lobby-chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid #2a2d3a;
+    font-weight: 700;
+    gap: 8px;
+  }
+  #lobby-chat-header .lch-titulo { display: flex; align-items: center; gap: 8px; }
+  #lobby-online-badge { background: #2a2e3d; }
+  #lobby-online-badge .dot-verde { color: var(--good); }
+  #lobby-chat-cerrar {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.3rem;
+    padding: 0 4px;
+    cursor: pointer;
+  }
+  #lobby-chat-mensajes {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
   #lobby-chat-mensajes:empty::after {
     content: 'Sé el primero en saludar 👋';
     color: var(--muted);
     font-size: 0.8rem;
   }
-  #lobby-chat-input-row { display: flex; gap: 8px; }
+  #lobby-chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    border-top: 1px solid #2a2d3a;
+  }
   #lobby-chat-input-row input { flex: 1; margin-bottom: 0; min-width: 0; }
   #lobby-chat-enviar {
     padding: 10px 16px;
@@ -1009,10 +1085,34 @@
   </div>
 </div>
 
+<!-- Chat global (lobby): flotante igual que el de sala, pero con ícono 🌐
+     y del lado opuesto de la pantalla para diferenciarlo a simple vista.
+     Solo visible mientras hay conexión al lobby (ver conectarLobby /
+     cerrarLobby), o sea en el menú "¿Cómo quieres jugar?". -->
+<button id="btn-lobby-chat" class="hidden" title="Chat global">
+  🌐
+  <span id="lobby-chat-badge" class="hidden">0</span>
+</button>
+
+<div id="lobby-chat-panel">
+  <div id="lobby-chat-header">
+    <span class="lch-titulo">
+      🌐 Chat global
+      <span class="badge" id="lobby-online-badge">🟢 -- en línea</span>
+    </span>
+    <button id="lobby-chat-cerrar">✕</button>
+  </div>
+  <div id="lobby-chat-mensajes"></div>
+  <div id="lobby-chat-input-row">
+    <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
+    <button id="lobby-chat-enviar">Enviar</button>
+  </div>
+</div>
+
 <!-- CONTENEDOR DEL JUEGO -->
 <div class="wrap" id="pantallaJuego" style="position:relative;">
   <button id="btn-mute" title="Silenciar sonido" aria-label="Silenciar sonido"
-    style="position:absolute; top:14px; right:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
+    style="position:absolute; top:14px; left:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
   <h1>🎯 Estratega de Códigos</h1>
   <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
@@ -1087,19 +1187,9 @@
         ¡Hola, <span id="nombre-confirmado"></span>! ¿Cómo quieres jugar?
       </div>
 
-      <!-- Chat grupal: solo visible después de poner el nombre. No se limpia
-           solo, guarda como máximo los últimos 50 mensajes. -->
-      <div class="card" id="lobby-chat-card" style="background:#171a24; margin: 4px 0 16px;">
-        <div class="board-title" style="margin-bottom:6px;">
-          <span>💬 Chat grupal</span>
-          <span class="badge" id="lobby-online-badge">🟢 -- en línea</span>
-        </div>
-        <div id="lobby-chat-mensajes"></div>
-        <div id="lobby-chat-input-row">
-          <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
-          <button id="lobby-chat-enviar">Enviar</button>
-        </div>
-      </div>
+      <!-- El chat grupal ya no va aquí incrustado: ahora es la ventana
+           flotante 🌐 (#btn-lobby-chat / #lobby-chat-panel), mismo patrón
+           que el chat de sala pero del otro lado de la pantalla. -->
 
       <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
         🔍 Encontrar Partida Rápida
@@ -3420,17 +3510,25 @@ function renderMensajeChat(msg) {
   cont.scrollTop = cont.scrollHeight;
 }
 
-// --- Chat grupal (lobby): aparece apenas se pone el nombre, es independiente
-// de cualquier sala/partida, no se limpia solo y guarda máx. 50 mensajes ---
+// --- Chat global (lobby): aparece apenas se pone el nombre, es independiente
+// de cualquier sala/partida, no se limpia solo y guarda máx. 50 mensajes.
+// Es una ventana flotante (🌐, botón abajo a la izquierda) con el mismo
+// patrón que el chat de sala (💬, abajo a la derecha), para no confundirlos.
+// El botón solo se muestra mientras hay conexión de lobby activa (se
+// engancha a conectarLobby/cerrarLobby), así nunca queda huérfano en una
+// pantalla donde no aplica. ---
 let lobbyWs = null;
 let lobbyChatSeqMostrado = 0;
 let miNombreLobby = '';
+let lobbyChatAbierto = false;
+let lobbyChatNoLeidos = 0;
 
 function conectarLobby(name) {
   cerrarLobby();
   miNombreLobby = name;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   lobbyWs = new WebSocket(`${proto}://${location.host}/ws/lobby/${encodeURIComponent(name)}`);
+  document.getElementById('btn-lobby-chat').classList.remove('hidden');
 
   lobbyWs.onmessage = (event) => {
     const msg = JSON.parse(event.data);
@@ -3442,9 +3540,13 @@ function conectarLobby(name) {
     const chat = msg.chat || [];
     const nuevos = chat.filter(m => m.seq > lobbyChatSeqMostrado);
     nuevos.sort((a, b) => a.seq - b.seq);
-    nuevos.forEach(m => renderMensajeLobbyChat(m));
+    nuevos.forEach(m => {
+      renderMensajeLobbyChat(m);
+      if (!lobbyChatAbierto && m.player_name !== miNombreLobby) lobbyChatNoLeidos++;
+    });
     if (nuevos.length) {
       lobbyChatSeqMostrado = chat[chat.length - 1].seq;
+      actualizarBadgeLobbyChat();
     }
   };
 }
@@ -3455,6 +3557,12 @@ function cerrarLobby() {
   lobbyChatSeqMostrado = 0;
   const cont = document.getElementById('lobby-chat-mensajes');
   if (cont) cont.innerHTML = '';
+
+  document.getElementById('btn-lobby-chat').classList.add('hidden');
+  document.getElementById('lobby-chat-panel').classList.remove('abierto');
+  lobbyChatAbierto = false;
+  lobbyChatNoLeidos = 0;
+  actualizarBadgeLobbyChat();
 }
 
 function renderMensajeLobbyChat(msg) {
@@ -3479,6 +3587,31 @@ document.getElementById('lobby-chat-enviar').onclick = enviarMensajeLobbyChat;
 document.getElementById('lobby-chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeLobbyChat();
 });
+
+function actualizarBadgeLobbyChat() {
+  const badge = document.getElementById('lobby-chat-badge');
+  if (lobbyChatNoLeidos > 0) {
+    badge.textContent = lobbyChatNoLeidos > 9 ? '9+' : String(lobbyChatNoLeidos);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+document.getElementById('btn-lobby-chat').onclick = () => {
+  lobbyChatAbierto = !lobbyChatAbierto;
+  document.getElementById('lobby-chat-panel').classList.toggle('abierto', lobbyChatAbierto);
+  if (lobbyChatAbierto) {
+    lobbyChatNoLeidos = 0;
+    actualizarBadgeLobbyChat();
+    document.getElementById('lobby-chat-input').focus();
+  }
+};
+
+document.getElementById('lobby-chat-cerrar').onclick = () => {
+  lobbyChatAbierto = false;
+  document.getElementById('lobby-chat-panel').classList.remove('abierto');
+};
 
 function actualizarBadgeChat() {
   const badge = document.getElementById('chat-badge');
