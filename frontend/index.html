@@ -508,6 +508,76 @@
   #tienda-grid.carrusel .avatar-item .avatar-precio { font-size: 0.9rem; margin-top: 8px; }
   .avatar-precio.gratis { color: var(--good); }
 
+  /* Cuando el carrusel está activo, el carrusel + el botón "Cerrar" se
+     anclan al fondo REAL de la pantalla (fixed respecto al viewport, no
+     al flujo del overlay) para que queden a un toque del pulgar. No se usa
+     "100vh" + "margin-top:auto" porque en móvil el 100vh suele ser más
+     alto que el área visible real (por la barra del navegador) y el
+     carrusel terminaba viéndose arriba en vez de abajo. */
+  #overlay-tienda.carrusel-activo #tienda-grid.carrusel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 76px;
+    max-width: 480px;
+    margin-left: auto;
+    margin-right: auto;
+    z-index: 1;
+  }
+  #overlay-tienda.carrusel-activo #tienda-btn-cerrar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: max(18px, env(safe-area-inset-bottom));
+    width: max-content;
+    margin: 0 auto;
+    z-index: 1;
+  }
+
+  /* --- Confirmación de compra: evita que tocar un avatar mientras se
+       desliza el carrusel lo compre "de dedo". Siempre pide confirmar. --- */
+  #overlay-confirmar-compra {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10010;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    padding: 20px;
+  }
+  #overlay-confirmar-compra.activo { opacity: 1; pointer-events: auto; }
+  #confirmar-compra-card {
+    background: var(--card);
+    border: 2px solid var(--accent2);
+    border-radius: 16px;
+    padding: 22px 20px;
+    text-align: center;
+    max-width: 280px;
+    width: 100%;
+  }
+  #confirmar-compra-card img {
+    width: 120px; height: 120px; object-fit: contain;
+    border-radius: 12px; margin-bottom: 10px;
+    background: #0e1017;
+  }
+  #confirmar-compra-titulo { font-size: 0.9rem; color: var(--muted); margin-bottom: 8px; }
+  #confirmar-compra-precio { font-size: 1.15rem; font-weight: 800; color: gold; margin-bottom: 16px; }
+  #confirmar-compra-precio.gratis { color: var(--good); }
+  #btn-confirmar-compra {
+    width: 100%; padding: 12px; border-radius: 10px; border: none;
+    background: var(--good); color: #fff; font-weight: 800; font-size: 0.95rem;
+    cursor: pointer; margin-bottom: 8px;
+  }
+  #btn-cancelar-compra {
+    width: 100%; padding: 10px; border-radius: 10px; border: none;
+    background: transparent; color: var(--muted); font-weight: 600;
+    cursor: pointer;
+  }
+
   #overlay-ranking {
     position: fixed;
     top: 0; left: 0; width: 100vw; height: 100vh;
@@ -854,6 +924,18 @@
     <div id="tienda-error"></div>
     <div id="tienda-grid"></div>
     <button id="tienda-btn-cerrar">Cerrar</button>
+</div>
+
+<!-- Confirmación de compra: se muestra al tocar un avatar del carrusel,
+     antes de cobrar nada, para evitar compras accidentales al deslizar. -->
+<div id="overlay-confirmar-compra">
+  <div id="confirmar-compra-card">
+    <img id="confirmar-compra-img" src="" alt="avatar">
+    <div id="confirmar-compra-titulo">¿Quieres este avatar?</div>
+    <div id="confirmar-compra-precio"></div>
+    <button id="btn-confirmar-compra">✅ Confirmar compra</button>
+    <button id="btn-cancelar-compra">Cancelar</button>
+  </div>
 </div>
 
 <div id="overlay-solicitar">
@@ -1783,6 +1865,7 @@ async function actualizarPerfilHUD(name) {
 let tiendaForzada = false;
 let tiendaUsuarioActual = null;
 let tiendaModo = 'tienda'; // 'tienda' = comprar lo que falta · 'mis' = elegir lo ya comprado
+let carruselSetSize = 0; // nº de avatares "reales" por vuelta del carrusel en bucle
 
 async function abrirTienda(forzado = false) {
     tiendaModo = 'tienda';
@@ -1793,6 +1876,7 @@ async function abrirTienda(forzado = false) {
     document.getElementById('tienda-btn-cerrar').classList.toggle('hidden', forzado);
     document.getElementById('tienda-error').textContent = '';
     document.getElementById('tienda-grid').classList.add('carrusel');
+    document.getElementById('overlay-tienda').classList.add('carrusel-activo');
     document.getElementById('overlay-tienda').classList.add('activo');
     await cargarTienda();
 }
@@ -1806,6 +1890,7 @@ async function abrirSelectorAvatares() {
     document.getElementById('tienda-btn-cerrar').classList.remove('hidden');
     document.getElementById('tienda-error').textContent = '';
     document.getElementById('tienda-grid').classList.remove('carrusel');
+    document.getElementById('overlay-tienda').classList.remove('carrusel-activo');
     document.getElementById('overlay-tienda').classList.add('activo');
     await cargarTienda();
 }
@@ -1813,6 +1898,20 @@ async function abrirSelectorAvatares() {
 function cerrarTienda() {
     if (tiendaForzada) return; // no puede salir sin elegir su primer avatar
     document.getElementById('overlay-tienda').classList.remove('activo');
+}
+
+// Tarjeta de un avatar comprable (dentro del carrusel de la tienda). Al
+// tocarla NO compra directo: abre la confirmación (ver abrirConfirmarCompra)
+// para evitar compras accidentales mientras se desliza el carrusel.
+function crearAvatarItemCompra(item, esGratis) {
+    const div = document.createElement('div');
+    div.className = 'avatar-item';
+    div.innerHTML = `
+        <img src="/gif/${item.archivo}" alt="avatar">
+        <div class="avatar-precio${esGratis ? ' gratis' : ''}">${esGratis ? 'GRATIS' : `🪙 ${item.precio}`}</div>
+    `;
+    div.onclick = () => abrirConfirmarCompra(item, esGratis);
+    return div;
 }
 
 async function cargarTienda() {
@@ -1842,28 +1941,38 @@ async function cargarTienda() {
             const pendientes = (data.catalogo || []).filter(item => !item.comprado);
             if (pendientes.length === 0) {
                 grid.innerHTML = '<div style="color:var(--muted); grid-column: 1/-1; text-align:center;">¡Ya tienes todos los avatares disponibles!</div>';
+                carruselSetSize = 0;
                 return;
             }
             const precioGratis = data.precio_avatar_gratis || 150;
-            pendientes.forEach(item => {
-                // Cuenta nueva (sin ningún avatar todavía): los de precio
-                // "gratis" muestran GRATIS en vez del costo en monedas. En
-                // cuanto reclama el primero, es_cuenta_nueva pasa a false y
-                // todos vuelven a mostrar su precio normal.
-                const esGratis = data.es_cuenta_nueva && item.precio === precioGratis;
-                const div = document.createElement('div');
-                div.className = 'avatar-item';
-                div.innerHTML = `
-                    <img src="/gif/${item.archivo}" alt="avatar">
-                    <div class="avatar-precio${esGratis ? ' gratis' : ''}">${esGratis ? 'GRATIS' : '🪙 ' + item.precio}</div>
-                `;
-                div.onclick = () => onClickComprar(item.archivo);
-                grid.appendChild(div);
-            });
-            // Deja el carrusel centrado en el primer avatar y activa el
+
+            // Modo bucle infinito: si hay más de 1 avatar, triplicamos la
+            // lista (set anterior + set real + set siguiente) para que al
+            // llegar a una punta, revisarLoopCarrusel() pueda "teletransportar"
+            // el scroll al equivalente del set del medio sin que se note
+            // (el contenido es idéntico), dando la sensación de que el
+            // carrusel gira sin fin en ambos sentidos. Cada tarjeta guarda
+            // en qué copia (0/1/2) y en qué posición del set real está,
+            // para poder encontrar su equivalente en el set del medio.
+            const copias = pendientes.length > 1 ? 3 : 1;
+            carruselSetSize = pendientes.length > 1 ? pendientes.length : 0;
+            for (let copia = 0; copia < copias; copia++) {
+                pendientes.forEach((item, idx) => {
+                    const esGratis = data.es_cuenta_nueva && item.precio === precioGratis;
+                    const div = crearAvatarItemCompra(item, esGratis);
+                    div.dataset.copia = copia;
+                    div.dataset.idx = idx;
+                    grid.appendChild(div);
+                });
+            }
+
+            // Deja el carrusel centrado en el primer avatar del set del
+            // medio (o del único set, si solo hay 1 avatar) y activa el
             // resaltado del que queda en el centro al arrastrar.
             requestAnimationFrame(() => {
-                grid.scrollLeft = 0;
+                const items = grid.querySelectorAll('.avatar-item');
+                const inicio = carruselSetSize > 0 ? carruselSetSize : 0;
+                if (items[inicio]) centrarItemCarrusel(items[inicio], true);
                 actualizarCarruselTienda();
             });
         } else {
@@ -1907,6 +2016,36 @@ async function onClickComprar(archivo) {
     }
 }
 
+// --- Confirmación de compra (interrumpe antes de cobrar) ---
+let itemPendienteCompra = null;
+
+function abrirConfirmarCompra(item, esGratis) {
+    itemPendienteCompra = item;
+    document.getElementById('confirmar-compra-img').src = `/gif/${item.archivo}`;
+    const precioEl = document.getElementById('confirmar-compra-precio');
+    precioEl.textContent = esGratis ? '🎁 Es tu avatar gratis de bienvenida' : `🪙 ${item.precio} monedas`;
+    precioEl.classList.toggle('gratis', esGratis);
+    document.getElementById('btn-confirmar-compra').textContent = esGratis ? '✅ Reclamar gratis' : '✅ Confirmar compra';
+    document.getElementById('overlay-confirmar-compra').classList.add('activo');
+}
+
+function cerrarConfirmarCompra() {
+    itemPendienteCompra = null;
+    document.getElementById('overlay-confirmar-compra').classList.remove('activo');
+}
+
+document.getElementById('btn-confirmar-compra').onclick = () => {
+    if (!itemPendienteCompra) return;
+    const archivo = itemPendienteCompra.archivo;
+    cerrarConfirmarCompra();
+    onClickComprar(archivo);
+};
+document.getElementById('btn-cancelar-compra').onclick = cerrarConfirmarCompra;
+// Tocar el fondo oscuro (fuera de la tarjeta) también cancela.
+document.getElementById('overlay-confirmar-compra').onclick = (e) => {
+    if (e.target.id === 'overlay-confirmar-compra') cerrarConfirmarCompra();
+};
+
 async function onClickElegir(archivo) {
     const errEl = document.getElementById('tienda-error');
     errEl.textContent = '';
@@ -1923,6 +2062,51 @@ async function onClickElegir(archivo) {
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
     }
+}
+
+// Centra el carrusel en `item`. Con instante=true no anima (se usa para
+// el posicionamiento inicial y para los "saltos" invisibles del bucle
+// infinito); si no, desliza suavemente (se usa al elegir un item con tap).
+function centrarItemCarrusel(item, instante) {
+    const grid = document.getElementById('tienda-grid');
+    const destino = item.offsetLeft - (grid.clientWidth - item.clientWidth) / 2;
+    if (instante) {
+        const previo = grid.style.scrollBehavior;
+        grid.style.scrollBehavior = 'auto';
+        grid.scrollLeft = destino;
+        requestAnimationFrame(() => { grid.style.scrollBehavior = previo; });
+    } else {
+        grid.scrollTo({ left: destino, behavior: 'smooth' });
+    }
+}
+
+// Bucle infinito: si el avatar que quedó centrado pertenece a la copia
+// anterior (0) o siguiente (2) de las 3 que se dibujaron, "teletransporta"
+// el scroll al avatar equivalente de la copia del medio (1) sin animación.
+// Como las 3 copias son idénticas, el salto es invisible para el ojo y da
+// la sensación de que el carrusel gira sin fin en ambos sentidos.
+function revisarLoopCarrusel() {
+    const grid = document.getElementById('tienda-grid');
+    if (!grid.classList.contains('carrusel') || carruselSetSize <= 0) return;
+    const items = grid.querySelectorAll('.avatar-item');
+    if (!items.length) return;
+
+    const rect = grid.getBoundingClientRect();
+    const centro = rect.left + rect.width / 2;
+    let masCercano = null, menorDist = Infinity;
+    items.forEach(item => {
+        const r = item.getBoundingClientRect();
+        const dist = Math.abs((r.left + r.width / 2) - centro);
+        if (dist < menorDist) { menorDist = dist; masCercano = item; }
+    });
+    if (!masCercano) return;
+
+    const copia = masCercano.dataset.copia;
+    if (copia === '1') return; // ya está en la copia del medio, no hay nada que hacer
+
+    const idx = masCercano.dataset.idx;
+    const equivalente = grid.querySelector(`.avatar-item[data-copia="1"][data-idx="${idx}"]`);
+    if (equivalente) centrarItemCarrusel(equivalente, true);
 }
 
 // Carrusel de la tienda: el avatar más cercano al centro se ve completo
@@ -1949,7 +2133,11 @@ function actualizarCarruselTienda() {
     grid.addEventListener('scroll', () => {
         if (ticking) return;
         ticking = true;
-        requestAnimationFrame(() => { actualizarCarruselTienda(); ticking = false; });
+        requestAnimationFrame(() => {
+            actualizarCarruselTienda();
+            revisarLoopCarrusel();
+            ticking = false;
+        });
     });
 
     // Arrastre con mouse (en celular el scroll horizontal táctil ya
@@ -1975,6 +2163,13 @@ function actualizarCarruselTienda() {
 })();
 
 document.getElementById('tienda-btn-cerrar').onclick = cerrarTienda;
+// Tocar por fuera (el fondo oscuro, fuera del encabezado/carrusel/botón)
+// también cierra la tienda, igual que el botón "Cerrar" — respeta lo
+// mismo que ese botón: si es la tienda forzada del primer avatar gratis,
+// no se puede cerrar hasta elegir uno (ver cerrarTienda()).
+document.getElementById('overlay-tienda').onclick = (e) => {
+    if (e.target.id === 'overlay-tienda') cerrarTienda();
+};
 document.getElementById('btn-abrir-tienda').onclick = () => abrirTienda(false);
 document.getElementById('btn-mis-avatares').onclick = () => abrirSelectorAvatares();
 
