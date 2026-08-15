@@ -2978,6 +2978,7 @@ function buildRefGrid() {
       el.className = 'ref-tile';
       el.style.background = COLOR_HEX[color];
       el.dataset.n = n;
+      el.dataset.color = color;
 
       if (crossedOut.has(n)) {
         el.classList.add('crossed');
@@ -3001,14 +3002,22 @@ resetearTablaReferencia(claveTablaSala());
 // (sin arrastrar) sigue funcionando igual que antes. Cada ficha se
 // alterna una sola vez por arrastre, aunque el dedo pase de nuevo por
 // encima de ella. Usa Pointer Events para que funcione igual con dedo,
-// mouse o lápiz óptico. ---
+// mouse o lápiz óptico.
+//
+// El arrastre queda encerrado en la fila (color) donde empezó: las pistas
+// siempre descartan un tramo dentro de UN color a la vez, así que barrer
+// toda la tabla en cualquier dirección se sentía errático. Si el dedo se
+// va a otra fila mientras se arrastra, esas fichas simplemente no se
+// tocan (no hace falta soltar y volver a empezar). ---
 let arrastreRefActivo = false;
+let arrastreRefColor = null;
 let arrastreRefTocadas = null;
 
 document.getElementById('ref-grid').addEventListener('pointerdown', (e) => {
   const tile = e.target.closest('.ref-tile');
   if (!tile) return;
   arrastreRefActivo = true;
+  arrastreRefColor = tile.dataset.color;
   arrastreRefTocadas = new Set([tile.dataset.n]);
   alternarFichaRef(tile);
 });
@@ -3017,13 +3026,14 @@ document.addEventListener('pointermove', (e) => {
   if (!arrastreRefActivo) return;
   const bajoElDedo = document.elementFromPoint(e.clientX, e.clientY);
   const tile = bajoElDedo && bajoElDedo.closest('.ref-tile');
-  if (!tile || arrastreRefTocadas.has(tile.dataset.n)) return;
+  if (!tile || tile.dataset.color !== arrastreRefColor || arrastreRefTocadas.has(tile.dataset.n)) return;
   arrastreRefTocadas.add(tile.dataset.n);
   alternarFichaRef(tile);
 });
 
 function terminarArrastreRef() {
   arrastreRefActivo = false;
+  arrastreRefColor = null;
   arrastreRefTocadas = null;
 }
 document.addEventListener('pointerup', terminarArrastreRef);
