@@ -985,7 +985,9 @@
 </div>
 
 <!-- CONTENEDOR DEL JUEGO -->
-<div class="wrap" id="pantallaJuego">
+<div class="wrap" id="pantallaJuego" style="position:relative;">
+  <button id="btn-mute" title="Silenciar sonido" aria-label="Silenciar sonido"
+    style="position:absolute; top:14px; right:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
   <h1>🎯 Estratega de Códigos</h1>
   <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
@@ -1685,6 +1687,24 @@ const SUPABASE_ANON_KEY = "sb_publishable_KQzNaiz32jganmyCmzyucw_HVmCihXp";
 
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// El backend ya no confía en el "username" que le mande el body/URL: verifica
+// este token contra Supabase Auth. Sin esto, cualquiera podía comprar/cambiar
+// avatares o jugar partidas "a nombre de" otra persona con solo saber su
+// nombre (público en el ranking), sin necesitar su contraseña.
+async function obtenerAccessToken() {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return (session && session.access_token) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function authHeader() {
+  const token = await obtenerAccessToken();
+  return token ? { 'Authorization': 'Bearer ' + token } : {};
+}
+
 // Supabase Auth pide un email, pero nosotros solo queremos usuario+contraseña,
 // así que fabricamos un email interno a partir del nombre de usuario.
 function usernameToEmail(username) {
@@ -1761,6 +1781,10 @@ document.getElementById('btn-auth-submit').onclick = async () => {
 
   if (!username || username.length < 3) {
     errEl.textContent = 'El usuario debe tener al menos 3 caracteres.';
+    return;
+  }
+  if (username.length > 20 || !/^[a-zA-Z0-9_ áéíóúÁÉÍÓÚñÑ]+$/.test(username)) {
+    errEl.textContent = 'El usuario solo puede tener letras, números, espacios y "_" (máx. 20 caracteres).';
     return;
   }
   if (!password || password.length < 6) {
@@ -2004,7 +2028,7 @@ async function onClickComprar(archivo) {
     try {
         const r = await fetch('/tienda/comprar', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
             body: JSON.stringify({ username: tiendaUsuarioActual, archivo })
         });
         const d = await r.json();
@@ -2052,7 +2076,7 @@ async function onClickElegir(archivo) {
     try {
         const r = await fetch('/avatar/elegir', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
             body: JSON.stringify({ username: tiendaUsuarioActual, archivo })
         });
         const d = await r.json();
@@ -2262,7 +2286,7 @@ async function enviarSolicitudAvatar() {
     try {
         const r = await fetch('/avatar/solicitar', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
             body: JSON.stringify({ username, texto })
         });
         const d = await r.json();
@@ -2318,6 +2342,30 @@ const soundTachar = new Audio('tachar.mp3');
 const soundCarta = new Audio('carta.mp3');
 const soundTurno = new Audio('turno.mp3');
 
+// --- Silenciar sonido (persistido, para no reproducir tachar/carta/turno
+// sin que el jugador pueda apagarlos) ---
+let sonidoSilenciado = localStorage.getItem('edc_muted') === '1';
+
+function reproducirSonido(audio) {
+  if (sonidoSilenciado) return;
+  audio.currentTime = 0;
+  audio.play().catch(() => {});
+}
+
+function actualizarBotonMute() {
+  const btn = document.getElementById('btn-mute');
+  if (!btn) return;
+  btn.textContent = sonidoSilenciado ? '🔇' : '🔊';
+  btn.title = sonidoSilenciado ? 'Activar sonido' : 'Silenciar sonido';
+}
+
+document.getElementById('btn-mute').onclick = () => {
+  sonidoSilenciado = !sonidoSilenciado;
+  localStorage.setItem('edc_muted', sonidoSilenciado ? '1' : '0');
+  actualizarBotonMute();
+};
+actualizarBotonMute();
+
 const COLORS = ["green", "pink", "blue", "red", "orange"];
 const COLOR_HEX = { green: "#3f9142", pink: "#d17fae", blue: "#3f97a6", red: "#d1453f", orange: "#e8933f" };
 const COLOR_NAME = { green: "Verde", pink: "Rosa", blue: "Azul", red: "Rojo", orange: "Naranja" };
@@ -2335,7 +2383,9 @@ let esModoSolo = false;
 function tipoDeSala(code) {
   if (!code) return 'quick';
   if (code.startsWith('SOLO-')) return 'solo';
-  if (/^[0-9]+$/.test(code)) return 'quick';
+  // "MM-" = sala creada por /matchmake (partida rápida); antes esas salas
+  // usaban códigos numéricos secuenciales, ahora son aleatorias.
+  if (code.startsWith('MM-') || /^[0-9]+$/.test(code)) return 'quick';
   return 'private:' + code;
 }
 
@@ -2411,9 +2461,14 @@ function detenerHeartbeat() {
   }
 }
 
-function abrirWebSocket(room, name, solo) {
+async function abrirWebSocket(room, name, solo) {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}`);
+  // El WebSocket del navegador no permite mandar headers personalizados, así
+  // que el token de sesión va como query param; el backend lo verifica antes
+  // de dejar entrar a la sala (ver verify_supabase_token en main.py).
+  const token = await obtenerAccessToken();
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(room)}/${encodeURIComponent(name)}${tokenParam}`);
   const thisSocket = ws; // referencia fija a ESTA conexión concreta
 
   if (solo) {
@@ -2721,9 +2776,8 @@ function buildRefGrid() {
 
       el.innerHTML = `${n}<span class="rt-dots">${dotsStr(info.dots)}</span>`;
       el.onclick = () => {
-        soundTachar.currentTime = 0;
-        soundTachar.play().catch(e => console.log("Audio bloqueado:", e));
-        
+        reproducirSonido(soundTachar);
+
         if (crossedOut.has(n)) {
           crossedOut.delete(n);
         } else {
@@ -3484,12 +3538,10 @@ function handleState(state) {
   myId = state.your_id;
   if (lastState) {
     if (lastState.current_turn !== state.current_turn && state.status === 'playing') {
-      soundTurno.currentTime = 0;
-      soundTurno.play().catch(() => {});
+      reproducirSonido(soundTurno);
     }
     if (state.faceup && lastState.faceup && state.faceup.length > lastState.faceup.length) {
-      soundCarta.currentTime = 0;
-      soundCarta.play().catch(() => {});
+      reproducirSonido(soundCarta);
 
       const actorEsOponente = state.current_turn && state.current_turn !== myId;
       if (actorEsOponente) {
@@ -3593,7 +3645,7 @@ function handleState(state) {
         const avatarHtml = p.avatar
           ? `<img src="/gif/${p.avatar}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:5px;vertical-align:middle;margin-right:5px;">`
           : '';
-        return `<div>${avatarHtml}👤 ${p.name}${p.is_you ? ' (tú)' : ''}${p.rango ? ` · <span style="opacity:0.75;">${p.rango}</span>` : ''}</div>`;
+        return `<div>${avatarHtml}👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}${p.rango ? ` · <span style="opacity:0.75;">${escaparHtml(p.rango)}</span>` : ''}</div>`;
       }).join('');
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = !state.can_start;
@@ -3712,10 +3764,10 @@ function renderGame(state) {
     return `
     <div class="card">
       <div class="board-title">
-        <span>${avatarHtml}Código de ${opp.name}</span>
+        <span>${avatarHtml}Código de ${escaparHtml(opp.name)}</span>
         <span class="badge ${state.current_turn === opp.id ? 'turn' : ''}">${badgeText}</span>
       </div>
-      ${opp.rango ? `<div style="font-size:0.72rem; color:var(--muted); margin:-6px 0 8px 2px;">${opp.rango}</div>` : ''}
+      ${opp.rango ? `<div style="font-size:0.72rem; color:var(--muted); margin:-6px 0 8px 2px;">${escaparHtml(opp.rango)}</div>` : ''}
       <div class="stand">${renderStand(opp)}</div>
     </div>
   `;

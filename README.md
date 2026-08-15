@@ -1,33 +1,94 @@
-# Got Five! — Prototipo web (2 jugadores)
+# Estratega de Códigos — juego web 2-4 jugadores
+
+Juego de deducción tipo "desactivar la bomba": cada jugador tiene un código
+secreto de 5 números (ocultos incluso para sí mismo) y va revelando fichas
+del mazo para conseguir pistas sobre su propio código, hasta animarse a
+gritar "¡Desactivar!" y adivinarlo antes que se acabe el mazo.
 
 ## Qué incluye
-- `main.py`: servidor (Python + FastAPI + WebSockets) con toda la lógica del juego.
-- `frontend/index.html`: interfaz web de una sola página, pensada para celular.
-- `requirements.txt`: dependencias.
+- `main.py`: servidor (Python + FastAPI + WebSockets) con toda la lógica del
+  juego, autenticación (verificación de sesión de Supabase), tienda de
+  avatares, ranking y chat.
+- `frontend/index.html`: interfaz web de una sola página, pensada para
+  celular (login, lobby, partida, tienda, ranking, modo espectador).
+- `requirements.txt`: dependencias de Python.
+
+## Modos de juego
+- **Multijugador (2-4)**: por turnos, cada jugador revela una ficha del mazo
+  y la usa como pista sobre su propio código (categorizarla entre sus
+  fichas, o comparar sus puntitos con una de sus posiciones). El primero en
+  acertar su código gana puntos según cuánto quede del mazo; si falla,
+  queda eliminado.
+- **Solitario**: una sola persona contra el mazo, mismas reglas, puntaje a
+  la mitad.
+- **Tutorial guiado**: un guion fijo paso a paso, sin puntos ni monedas, para
+  aprender la mecánica.
+- **Espectador**: cualquiera puede entrar de solo lectura a ver una partida
+  en curso (no ve el código de nadie, solo color/puntitos como cualquier
+  rival) y usar el chat de la sala.
+
+También hay chat de sala, chat de lobby global, contador de "en línea",
+reconexión automática con reintentos si se corta la conexión, y una cuenta
+regresiva de gracia (20s) si a alguien le toca jugar y está desconectado.
+
+## Cuentas, tienda y ranking (requiere Supabase)
+El login es usuario+contraseña vía **Supabase Auth** (el frontend fabrica un
+email interno tipo `usuario@gotfive.local` para no pedir email real). El
+backend usa la **service role key** de Supabase solo para leer/escribir
+puntos, monedas y avatares en la tabla `profiles`, y para **verificar la
+sesión** de quien llama a los endpoints sensibles (comprar/cambiar avatar,
+pedir avatar nuevo, y al conectarse al WebSocket de una partida): el
+`username` nunca se toma de lo que manda el cliente, sale del token de
+Supabase ya verificado.
+
+Ganar una partida da puntos (rango) y una recompensa fija de monedas
+(caja fuerte). Las monedas se gastan en la tienda de avatares — el catálogo
+sale solo de los archivos en `frontend/gif/`, donde los primeros 3 dígitos
+del nombre son el precio (`15001.gif` → 150 monedas). El primer avatar de
+150 es gratis. Hay un ranking global por puntos.
+
+Si `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` no están configuradas, el
+servidor sigue funcionando para jugar partidas (sin verificar identidad),
+pero no guarda puntos/monedas/avatares ni sirve el ranking.
 
 ## Cómo probarlo en tu computadora
 ```bash
 pip install -r requirements.txt
+set SUPABASE_URL=https://tu-proyecto.supabase.co
+set SUPABASE_SERVICE_KEY=tu-service-role-key
 uvicorn main:app --reload
 ```
-Abre `http://localhost:8000` en **dos pestañas del navegador** (o desde tu celular usando la IP de tu compu en la misma red, ej: `http://192.168.1.5:8000`).
+(en PowerShell usa `$env:SUPABASE_URL = "..."` en vez de `set`)
 
-1. En ambas pestañas escribe el **mismo código de sala** (ej: `ABCD`) y un nombre distinto.
-2. En cuanto el segundo jugador entra, la partida arranca sola: a cada jugador se le asignan 5 números secretos (1–99), ocultos para él mismo pero visibles para el otro.
-3. En tu turno, presiona **"Robar ficha"**: el servidor saca una ficha del mazo y la coloca automáticamente en la posición correcta de tu propio atril (esto simula al oponente colocándola, ya que el servidor sabe tus números).
-4. Cuando creas saber tus 5 números, llena el formulario **GOT FIVE!** de menor a mayor y confirma. Si aciertas, ganas al instante; si fallas, quedas eliminado de la ronda.
+Abre `http://localhost:8000` en dos pestañas/dispositivos, regístrate (o
+inicia sesión) con un usuario distinto en cada una, y desde el lobby elige
+"Partida rápida" (matchmaking automático) o escribe el mismo código de sala
+privada en ambas para jugar juntos.
 
-## Qué simplifiqué para el prototipo (y se puede ajustar)
-- **Rango de números**: uso 1–99 en vez de fichas de colores físicas; fácil de cambiar.
-- **"Dar la pista a un oponente"**: en 2 jugadores no hay elección posible (solo hay un oponente), así que el servidor coloca la ficha automáticamente en tu atril al robarla. Con 3–4 jugadores habría que agregar un paso para elegir a quién dársela.
-- **Sin cuentas ni salas persistentes**: todo vive en memoria del servidor mientras corre; al reiniciarlo se pierden las partidas. Para producción real conviene una base de datos (Redis es buena opción para salas efímeras).
-- **Reconexión**: si alguien cierra la pestaña, el otro se entera en el log, pero no hay reintento automático de reconexión todavía.
+> Nota: el frontend trae su propia `SUPABASE_URL`/`SUPABASE_ANON_KEY`
+> (públicas, es normal exponerlas) apuntando a un proyecto de Supabase real
+> — para usar tu propio proyecto, reemplázalas en `frontend/index.html` y
+> asegúrate de tener una tabla `profiles` (columnas: `username`, `puntos`,
+> `victorias`, `monedas`, `avatar_actual`, `avatares_comprados`) y
+> `solicitudes_avatar` (columnas: `username`, `fecha`, `texto`).
 
-## Para desplegarlo de verdad (que funcione entre dos celulares en internet)
-Backends con soporte de WebSockets y plan gratuito: **Render**, **Railway** o **Fly.io**. Subes esta misma carpeta, defines `uvicorn main:app --host 0.0.0.0 --port $PORT` como comando de arranque, y listo: compartes el link con quien quieras jugar.
+## Para desplegarlo de verdad (que funcione entre celulares en internet)
+Backends con soporte de WebSockets y plan gratuito: **Render**, **Railway** o
+**Fly.io**. Subes esta misma carpeta, defines `uvicorn main:app --host
+0.0.0.0 --port $PORT` como comando de arranque, configuras las variables de
+entorno `SUPABASE_URL` y `SUPABASE_SERVICE_KEY`, y compartes el link.
+
+## Qué simplifica el prototipo (y se puede ajustar)
+- **Sin salas persistentes**: las partidas viven en memoria del servidor
+  mientras corre; al reiniciarlo se pierden (los puntos/monedas ya guardados
+  en Supabase no se pierden, solo la partida en curso). Para producción real
+  a mayor escala conviene mover el estado de salas a Redis.
+- **Verificación de token por request**: cada acción sensible llama a la API
+  de Supabase Auth para validar el token (no hay caché de sesión en el
+  servidor), lo cual es correcto pero agrega una llamada de red por acción.
 
 ## Siguientes pasos sugeridos
-- Agregar soporte para 3–4 jugadores (elegir a quién le das la pista).
-- Animaciones al colocar fichas.
-- Persistencia de salas (Redis) para que sobrevivan reinicios del servidor.
+- Recuperación de contraseña (hoy, si alguien la olvida, no hay forma de
+  recuperar la cuenta porque el email es inventado).
+- Animaciones adicionales al colocar fichas.
 - Modo "revancha" al terminar la partida.

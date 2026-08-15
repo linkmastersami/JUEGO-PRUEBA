@@ -12,13 +12,28 @@ import json
 import os
 import random
 import asyncio
+import string
+import sys
 import time
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
 from supabase import create_client, Client
+
+# ---------------------------------------------------------------------------
+# En Windows, la consola por defecto no es UTF-8 (usa cp1252 o similar). Como
+# el resto de este archivo usa emojis en los print() de log (⚠️ ✅ ❌ 🪙...),
+# sin esto el proceso truena con UnicodeEncodeError apenas intenta imprimir
+# el primer emoji y el servidor nunca llega a levantar.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
 
 class UTF8StaticFiles(StaticFiles):
@@ -55,6 +70,41 @@ if SUPABASE_URL and SUPABASE_SERVICE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 else:
     print("⚠️  SUPABASE_URL / SUPABASE_SERVICE_KEY no configuradas: los puntos no se guardarán.")
+
+
+def verify_supabase_token(token: Optional[str]) -> Optional[str]:
+    """Verifica un access_token de Supabase Auth contra el servidor de
+    Supabase y devuelve el username autenticado (el mismo con el que la
+    persona juega, guardado en user_metadata al registrarse), o None si no
+    hay token o no es válido.
+
+    Antes, cada endpoint que mueve monedas/avatares (y el WebSocket de
+    partida) confiaba ciegamente en el "username" que mandaba el cliente en
+    el body/URL: bastaba con conocer el nombre de otra persona (público en
+    el ranking) para comprar/cambiar sus avatares o jugar partidas "a
+    nombre de" ella y alterar sus puntos, sin necesitar su contraseña. Con
+    esto, la identidad siempre sale del token verificado, nunca de lo que
+    el cliente dice ser.
+
+    `token` puede venir como "Bearer <jwt>" (header Authorization) o como
+    el jwt pelado (query param del WebSocket, que no admite headers).
+    """
+    if supabase is None or not token:
+        return None
+    jwt = token[7:].strip() if token.lower().startswith("bearer ") else token.strip()
+    if not jwt:
+        return None
+    try:
+        resp = supabase.auth.get_user(jwt)
+    except Exception as e:
+        print(f"⚠️  Token de Supabase inválido/expirado: {e}")
+        return None
+    user = getattr(resp, "user", None) if resp else None
+    if user is None:
+        return None
+    username = (user.user_metadata or {}).get("username")
+    return str(username).strip() if username else None
+
 
 RANGOS = [
     "Adivino de Feria", "Curioso Empedernido", "Observador Casual", 
@@ -308,7 +358,7 @@ async def avatares_del_jugador(username: str):
 
 
 @app.post("/tienda/comprar")
-async def comprar_avatar(payload: dict):
+async def comprar_avatar(payload: dict, authorization: Optional[str] = Header(None)):
     """Compra (o reclama gratis la primera vez) un avatar del catálogo.
 
     Regla de "primer avatar gratis": si el jugador todavía no tiene ningún
@@ -319,10 +369,17 @@ async def comprar_avatar(payload: dict):
     if supabase is None:
         return {"ok": False, "error": "Supabase no configurado."}
 
-    username = str(payload.get("username", "")).strip()
+    # La identidad sale del token verificado, no del "username" del body:
+    # ese campo del body ya no se usa para nada (ver verify_supabase_token).
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
     archivo = str(payload.get("archivo", "")).strip()
-    if not username or not archivo:
-        return {"ok": False, "error": "Falta username o archivo."}
+    if not archivo:
+        return {"ok": False, "error": "Falta el archivo."}
 
     item = next((a for a in CATALOGO_AVATARES if a["archivo"] == archivo), None)
     if item is None:
@@ -359,15 +416,20 @@ async def comprar_avatar(payload: dict):
 
 
 @app.post("/avatar/elegir")
-async def elegir_avatar(payload: dict):
+async def elegir_avatar(payload: dict, authorization: Optional[str] = Header(None)):
     """Cambia el avatar_actual del jugador a uno que ya tiene comprado."""
     if supabase is None:
         return {"ok": False, "error": "Supabase no configurado."}
 
-    username = str(payload.get("username", "")).strip()
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
     archivo = str(payload.get("archivo", "")).strip()
-    if not username or not archivo:
-        return {"ok": False, "error": "Falta username o archivo."}
+    if not archivo:
+        return {"ok": False, "error": "Falta el archivo."}
 
     perfil = _obtener_perfil_avatares(username)
     if archivo not in perfil["avatares_comprados"]:
@@ -414,17 +476,22 @@ async def estado_solicitud_avatar(username: str):
 
 
 @app.post("/avatar/solicitar")
-async def solicitar_avatar(payload: dict):
+async def solicitar_avatar(payload: dict, authorization: Optional[str] = Header(None)):
     """Registra el pedido de un avatar nuevo. No se borran filas viejas: al
     chequear el cooldown simplemente se ignoran las de más de 15 días, así
     se conserva el historial completo de pedidos."""
     if supabase is None:
         return {"ok": False, "error": "Supabase no configurado."}
 
-    username = str(payload.get("username", "")).strip()
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
     texto = str(payload.get("texto", "")).strip()[:500]
-    if not username or not texto:
-        return {"ok": False, "error": "Falta username o el texto del pedido."}
+    if not texto:
+        return {"ok": False, "error": "Falta el texto del pedido."}
 
     estado = await estado_solicitud_avatar(username)
     if not estado["puede_solicitar"]:
@@ -443,7 +510,7 @@ async def solicitar_avatar(payload: dict):
 # Configuración del Juego y Salas WebSocket
 # ---------------------------------------------------------------------------
 rooms: Dict[str, "Room"] = {}
-room_counter = 1  # Contador global para emparejamiento automático
+MATCHMAKE_PREFIX = "MM-"  # distingue salas de emparejamiento automático de códigos privados
 
 MIN_PLAYERS = 2
 MAX_PLAYERS = 4
@@ -1033,19 +1100,19 @@ async def _watch_disconnect(room_code: str, pid: str, token: int):
 # ---------------------------------------------------------------------------
 @app.get("/matchmake")
 async def matchmake():
-    global room_counter
-    
     # 1. Buscar una sala existente que esté "waiting" y tenga espacio
     for room_id, room in rooms.items():
-        if room_id.isdigit(): 
+        if room_id.startswith(MATCHMAKE_PREFIX):
             if room.status == "waiting" and len(room.players) < MAX_PLAYERS:
                 return {"room": room_id}
-    
-    # 2. Si no hay, crear nueva
-    new_room_id = f"{room_counter:03d}"
-    room_counter += 1
-    
-    # Inicializamos la sala automáticamente (opcional, pero asegura que el diccionario la reciba)
+
+    # 2. Si no hay, crear nueva con un código aleatorio.
+    # Antes era un contador secuencial ("001", "002"...): cualquiera podía
+    # adivinar el código de una sala ajena con solo probar números seguidos.
+    new_room_id = MATCHMAKE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    while new_room_id in rooms:
+        new_room_id = MATCHMAKE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
     rooms[new_room_id] = Room(new_room_id)
     return {"room": new_room_id}
 
@@ -1126,12 +1193,28 @@ async def ws_lobby(websocket: WebSocket, player_name: str):
 
 
 @app.websocket("/ws/{room_code}/{player_name}")
-async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
+async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, token: Optional[str] = None):
     await websocket.accept()
+    clean_name = player_name.strip()
+
+    if supabase is not None:
+        # El navegador no puede mandar headers personalizados al abrir un
+        # WebSocket, así que el token viaja como query param (?token=...).
+        # Sin esta verificación, cualquiera podía conectarse con el nombre
+        # de otra persona (visible en el ranking/chat) y jugar partidas "a
+        # nombre de" ella, robándole o regalándole puntos y monedas reales.
+        verified_username = verify_supabase_token(token)
+        if verified_username is None or verified_username.strip().lower() != clean_name.lower():
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "message": "Sesión inválida o el nombre no coincide con tu cuenta: vuelve a iniciar sesión.",
+            }))
+            await websocket.close()
+            return
+
     room_mode = "solo" if room_code.upper().startswith("SOLO-") else "multi"
     room = rooms.setdefault(room_code, Room(room_code, mode=room_mode))
 
-    clean_name = player_name.strip()
     player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower()), None)
 
     if player:
@@ -1169,11 +1252,46 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
     _add_online(clean_name)
     await _broadcast_lobby()
 
+    async def _cleanup_desconexion():
+        """Limpieza compartida al perder la conexión, sea por un cierre
+        normal (WebSocketDisconnect) o por cualquier error inesperado. Antes
+        solo se ejecutaba para WebSocketDisconnect: un mensaje malformado
+        (JSON inválido, campos con el tipo equivocado, etc.) tiraba una
+        excepción distinta que no se capturaba, dejando al jugador con
+        "connected: True" para siempre — un jugador fantasma que ocupa su
+        cupo en la sala sin que nadie pueda reemplazarlo ni que la sala se
+        libere sola."""
+        player.connected = False
+        # No avisamos en el historial de inmediato: los demás jugadores no
+        # deben enterarse de la desconexión hasta que le toque su turno.
+        if room.status == "playing" and room.mode == "multi" and not player.eliminated and not player.resolved:
+            if room.players and room.current_player().id == player.id:
+                room._start_disconnect_timer(player)
+        try:
+            await broadcast(room)
+        except Exception:
+            pass
+
+        _remove_online(player.name)
+        try:
+            await _broadcast_lobby()
+        except Exception:
+            pass
+
+        # Limpieza de memoria (cierre de sala) si todos se desconectaron de esta sala
+        if not any(p.connected for p in room.players):
+            if room.code in rooms:
+                del rooms[room.code]
+
     try:
         while True:
             raw = await websocket.receive_text()
-            msg = json.loads(raw)
-            mtype = msg.get("type")
+            try:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+            except Exception as e:
+                print(f"⚠️  Mensaje ilegible de {player.name} en sala {room.code}: {e}")
+                continue
 
             if mtype == "ping":
                 # Solo mantiene viva la conexión (heartbeat desde el celular);
@@ -1272,27 +1390,16 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str):
                 return
 
     except WebSocketDisconnect:
-        player.connected = False
-        # No avisamos en el historial de inmediato: los demás jugadores no
-        # deben enterarse de la desconexión hasta que le toque su turno.
-        if room.status == "playing" and room.mode == "multi" and not player.eliminated and not player.resolved:
-            if room.players and room.current_player().id == player.id:
-                room._start_disconnect_timer(player)
+        await _cleanup_desconexion()
+    except Exception as e:
+        # Cualquier otro error (payload con forma inesperada, KeyError,
+        # TypeError, etc.) ya no debe dejar al jugador "conectado" para
+        # siempre: se limpia igual que un WebSocketDisconnect normal.
+        print(f"❌ Error inesperado en la conexión de {player.name} en sala {room.code}: {e}")
         try:
-            await broadcast(room)
+            await _cleanup_desconexion()
         except Exception:
             pass
-
-        _remove_online(player.name)
-        try:
-            await _broadcast_lobby()
-        except Exception:
-            pass
-        
-        # Limpieza de memoria (cierre de sala) si todos se desconectaron de esta sala
-        if not any(p.connected for p in room.players):
-            if room.code in rooms:
-                del rooms[room.code]
 
 
 @app.websocket("/ws/espectador/{room_code}/{viewer_name}")
