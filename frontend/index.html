@@ -2581,25 +2581,30 @@ function mostrarDesconexionFinal() {
   }, 1000);
 }
 
-// --- Vuelve a la pantalla principal (paso "coloca tu nombre") ---
-function volverAlInicio() {
-  esSalidaIntencional = true;
-  currentRoomCode = null;
-  currentPlayerName = null;
+// --- Limpieza compartida al salir de una partida (o de la sala de espera),
+// sin recargar la página: cierra el socket y cualquier overlay/cuenta
+// regresiva que hubiera quedado activa, y oculta todo lo que pertenece a
+// "estar jugando" (sala de espera, tablero, y la tarjeta "Tu código" — que
+// vive fuera de #game-screen y por eso hay que ocultarla aparte, o se queda
+// flotando sobre lo que sea que se muestre después). No decide a qué
+// pantalla ir después: eso lo arma quien la llama.
+function limpiarEstadoDePartida() {
   if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
   detenerHeartbeat();
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
-  cerrarLobby();
+  ['overlay-animacion', 'overlay-ficha-oponente', 'overlay-resultado-ronda', 'overlay-cajas'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('activo');
+  });
   if (ws) { try { ws.close(); } catch (e) {} }
   ws = null;
   lastState = null;
+
+  document.getElementById('action-card').classList.add('hidden');
   document.getElementById('game-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
-  document.getElementById('join-screen').classList.remove('hidden');
-  document.getElementById('join-step-modo').classList.add('hidden');
-  document.getElementById('join-step-name').classList.remove('hidden');
 
   // Reset del chat flotante
   document.getElementById('chat-mensajes').innerHTML = '';
@@ -2611,6 +2616,18 @@ function volverAlInicio() {
   actualizarBadgeChat();
 }
 
+// --- Vuelve a la pantalla principal (paso "coloca tu nombre") ---
+function volverAlInicio() {
+  esSalidaIntencional = true;
+  currentRoomCode = null;
+  currentPlayerName = null;
+  limpiarEstadoDePartida();
+  cerrarLobby();
+  document.getElementById('join-screen').classList.remove('hidden');
+  document.getElementById('join-step-modo').classList.add('hidden');
+  document.getElementById('join-step-name').classList.remove('hidden');
+}
+
 // --- Vuelve a la pantalla de "¿Cómo quieres jugar?" conservando el nombre
 // ya conocido, sin volver a pedirlo. Se usa al salir de una partida o al
 // terminarla (en vez de volverAlInicio, que resetea hasta el nombre). ---
@@ -2618,44 +2635,13 @@ function irASeleccionModo(nombre) {
   esSalidaIntencional = true;
   currentRoomCode = null;
   currentPlayerName = null;
-  if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
-  detenerHeartbeat();
-  cerrarCuentaRegresivaDesactivar();
-  cerrarCuentaRegresivaDesconexion();
-  // Cierra cualquier otro overlay que pudiera haber quedado activo (animación
-  // de puntos, ficha de oponente, resultado de ronda) para no dejar nada
-  // superpuesto sobre la pantalla de selección de modo.
-  ['overlay-animacion', 'overlay-ficha-oponente', 'overlay-resultado-ronda', 'overlay-cajas'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('activo');
-  });
-  if (ws) { try { ws.close(); } catch (e) {} }
-  ws = null;
-  lastState = null;
+  limpiarEstadoDePartida();
 
-  // "Tu código" (fichas, pista, botón CATEGORIZAR/COMPARAR) vive fuera de
-  // #game-screen y renderGame() solo lo oculta cuando status === 'waiting',
-  // así que si salimos sin pasar por location.reload() (p. ej. desde el
-  // tutorial) hay que ocultarlo a mano o se queda flotando sobre el menú.
-  document.getElementById('action-card').classList.add('hidden');
-
-  document.getElementById('game-screen').classList.add('hidden');
-  document.getElementById('wait-screen').classList.add('hidden');
-  document.getElementById('btn-salir').classList.add('hidden');
   document.getElementById('join-screen').classList.remove('hidden');
   document.getElementById('join-step-name').classList.add('hidden');
   document.getElementById('join-step-modo').classList.remove('hidden');
   document.getElementById('nombre-confirmado').textContent = nombre;
   document.getElementById('name-input').value = nombre;
-
-  // Reset del chat flotante
-  document.getElementById('chat-mensajes').innerHTML = '';
-  document.getElementById('chat-panel').classList.remove('abierto');
-  document.getElementById('btn-chat').classList.add('hidden');
-  chatAbierto = false;
-  lastChatSeqMostrado = 0;
-  chatNoLeidos = 0;
-  actualizarBadgeChat();
 
   conectarLobby(nombre);
   cargarSalasEnCurso();
@@ -2712,9 +2698,8 @@ document.getElementById('btn-solo').onclick = () => {
 };
 
 // --- Botón "Salir" (visible durante la sala de espera o la partida) ---
-// Recarga la página de verdad (no solo cambia de pantalla dentro de la SPA)
-// para evitar que quede algún estado colgado del navegador, pero conserva
-// el nombre guardado para no tener que volver a escribirlo.
+// Vuelve a la pantalla de selección de modo dentro de la misma SPA (sin
+// recargar la página), conservando el nombre para no tener que reescribirlo.
 document.getElementById('btn-salir').onclick = () => {
   const status = lastState ? lastState.status : null;
   const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
@@ -2736,8 +2721,7 @@ document.getElementById('btn-salir').onclick = () => {
   if (ws && ws.readyState === WebSocket.OPEN) {
     try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
   }
-  esSalidaIntencional = true;
-  setTimeout(() => location.reload(), 80);
+  irASeleccionModo(nombre);
 };
 
 document.getElementById('guess-btn').onclick = () => {
@@ -4104,31 +4088,35 @@ function renderGame(state) {
         || state.players.find(p => p.is_you)?.name
         || document.getElementById('name-input').value.trim();
 
-      // "Jugar de nuevo": recarga la página conservando el nombre y, al
-      // volver a cargar, entra directo a una sala disponible del mismo
-      // modo en el que estaba (solitario, partida rápida o sala privada).
+      // "Jugar de nuevo": sin recargar la página, entra directo a una sala
+      // disponible del mismo modo en el que estaba (solitario, partida
+      // rápida o sala privada) — mismo destino que antes armaba con
+      // localStorage + reload, resuelto ahora dentro de la misma SPA.
       document.getElementById('btn-jugar-de-nuevo').onclick = () => {
         const nombre = nombreParaReinicio();
-        if (nombre) localStorage.setItem('edc_name', nombre);
-        localStorage.setItem('edc_restart', tipoDeSala(currentRoomCode));
-        esSalidaIntencional = true;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
-        }
-        setTimeout(() => location.reload(), 80);
-      };
-
-      // "Elegir cómo jugar": recarga la página conservando el nombre, pero
-      // sin reingresar automáticamente a ninguna partida.
-      document.getElementById('btn-reinicio').onclick = () => {
-        const nombre = nombreParaReinicio();
+        const tipo = tipoDeSala(currentRoomCode);
         if (nombre) localStorage.setItem('edc_name', nombre);
         localStorage.removeItem('edc_restart');
         esSalidaIntencional = true;
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
         }
-        setTimeout(() => location.reload(), 80);
+        currentRoomCode = null;
+        currentPlayerName = null;
+        limpiarEstadoDePartida();
+        ejecutarReinicio(tipo, nombre);
+      };
+
+      // "Elegir cómo jugar": vuelve a la pantalla de selección de modo sin
+      // reingresar automáticamente a ninguna partida, sin recargar la página.
+      document.getElementById('btn-reinicio').onclick = () => {
+        const nombre = nombreParaReinicio();
+        if (nombre) localStorage.setItem('edc_name', nombre);
+        localStorage.removeItem('edc_restart');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+        }
+        irASeleccionModo(nombre);
       };
     }
   }
