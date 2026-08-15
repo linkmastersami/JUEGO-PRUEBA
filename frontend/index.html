@@ -108,6 +108,31 @@
   .tutorial-banner .tb-text { font-size:0.92rem; line-height:1.45; }
   .tutorial-banner.aviso { border-color: var(--bad); }
   .tutorial-banner.aviso .tb-text { color: #ffb3ad; }
+  .tb-progress-track { height: 6px; border-radius: 4px; background: rgba(255,255,255,0.12); margin: 8px 0 10px; overflow: hidden; }
+  .tb-progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.35s ease; }
+  .tb-subtext { font-size: 0.78rem; color: var(--muted); margin-top: 8px; }
+
+  /* --- Resaltado "toca aquí" del tutorial: solo se activa dentro de
+       #pantallaJuego.tutorial-modo, para no afectar partidas reales --- */
+  @keyframes tutorialPulso {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 196, 0, 0.55); transform: scale(1); }
+    50% { box-shadow: 0 0 0 8px rgba(255, 196, 0, 0); transform: scale(1.05); }
+  }
+  #pantallaJuego.tutorial-modo .color-buttons button:not(:disabled),
+  #pantallaJuego.tutorial-modo #btn-categorize:not(:disabled),
+  #pantallaJuego.tutorial-modo #btn-compare:not(:disabled),
+  #pantallaJuego.tutorial-modo #slot-buttons button:not(:disabled) {
+    animation: tutorialPulso 1.3s ease-in-out infinite;
+    outline: 2px solid #ffc400;
+    outline-offset: 2px;
+  }
+  #pantallaJuego.tutorial-modo .ref-tile.tutorial-target {
+    animation: tutorialPulso 1.3s ease-in-out infinite;
+    outline: 2px solid #ffc400;
+    outline-offset: 1px;
+    z-index: 1;
+    position: relative;
+  }
   .log { max-height: 130px; overflow-y: auto; font-size: 0.8rem; color: var(--muted); }
   .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
 
@@ -1011,7 +1036,9 @@
       <span>🎓 Tutorial guiado</span>
       <span id="tutorial-banner-step"></span>
     </div>
+    <div class="tb-progress-track"><div class="tb-progress-fill" id="tutorial-banner-progress" style="width:0%;"></div></div>
     <div class="tb-text" id="tutorial-banner-text"></div>
+    <div class="tb-subtext hidden" id="tutorial-banner-subtext"></div>
   </div>
 
   <!-- Ficha boca arriba / acciones (arriba del todo, dentro de la pantalla de juego) -->
@@ -2440,6 +2467,9 @@ function conectarSala(room, name, solo = false) {
   currentRoomCode = room;
   currentPlayerName = name;
   esSalidaIntencional = false;
+  // Carga la tabla tachada de ESTA sala (o la deja en blanco si es nueva),
+  // en vez de arrastrar lo que haya quedado tachado de la partida anterior.
+  resetearTablaReferencia(claveTablaSala());
   reconnectAttempts = 0;
 
   abrirWebSocket(room, name, solo);
@@ -2747,17 +2777,39 @@ function tileInfo(n) {
 }
 function dotsStr(n) { return '●'.repeat(n); }
 
-function buildRefGrid() {
-  const grid = document.getElementById('ref-grid');
-  grid.innerHTML = '';
+// Clave de guardado de la tabla tachada: siempre la sala REAL en la que
+// se está jugando (currentRoomCode), nunca lo que haya escrito el campo de
+// texto — antes se usaba ese campo, que queda vacío al entrar por "Partida
+// rápida" o al reconectarse, así que la tabla se guardaba/leía bajo la
+// llave equivocada ("default") para esas partidas.
+function claveTablaSala() {
+  return (currentRoomCode || 'default').toString().toUpperCase();
+}
 
-  const roomCode = document.getElementById('room-input').value.trim().toUpperCase() || 'default';
+// Limpia la tabla de 60 fichas en memoria y en pantalla, y carga lo que
+// haya guardado para ESA sala específica (para que un refresh de página en
+// medio de una partida no te haga perder lo ya tachado). Se debe llamar
+// cada vez que arranca una partida nueva — antes nada hacía esto, así que
+// la tabla de una sesión previa se quedaba pegada (fichas ya tachadas) al
+// entrar a otra partida o al tutorial.
+function resetearTablaReferencia(roomCode) {
+  crossedOut.clear();
   const savedCrossed = localStorage.getItem(`crossed_${roomCode}`);
   if (savedCrossed) {
     try {
       JSON.parse(savedCrossed).forEach(n => crossedOut.add(n));
     } catch (e) {}
   }
+  document.querySelectorAll('#ref-grid .ref-tile').forEach(el => {
+    const n = parseInt(el.dataset.n, 10);
+    el.classList.toggle('crossed', crossedOut.has(n));
+  });
+  updateGuessButtonState();
+}
+
+function buildRefGrid() {
+  const grid = document.getElementById('ref-grid');
+  grid.innerHTML = '';
 
   for (const color of COLORS) {
     const row = document.createElement('div');
@@ -2785,8 +2837,11 @@ function buildRefGrid() {
         }
         el.classList.toggle('crossed', crossedOut.has(n));
 
-        localStorage.setItem(`crossed_${roomCode}`, JSON.stringify(Array.from(crossedOut)));
+        if (!tutorialActive) {
+          localStorage.setItem(`crossed_${claveTablaSala()}`, JSON.stringify(Array.from(crossedOut)));
+        }
         updateGuessButtonState();
+        intentarAvanzarTutorialCross();
       };
       row.appendChild(el);
     }
@@ -2794,13 +2849,12 @@ function buildRefGrid() {
   }
 }
 buildRefGrid();
-updateGuessButtonState();
+resetearTablaReferencia(claveTablaSala());
 
 document.getElementById('reset-table-btn').onclick = () => {
   if (!confirm('¿Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
-  const roomCode = document.getElementById('room-input').value.trim().toUpperCase() || 'default';
   crossedOut.clear();
-  localStorage.removeItem(`crossed_${roomCode}`);
+  localStorage.removeItem(`crossed_${claveTablaSala()}`);
   document.querySelectorAll('#ref-grid .ref-tile.crossed').forEach(el => el.classList.remove('crossed'));
   updateGuessButtonState();
 };
@@ -2827,18 +2881,36 @@ const TUTORIAL_SECRET = [
   { number: 49, color: 'red',    dots: 1 },
 ];
 
-// Guion fijo: 1 ficha revelada + 1 pista por ronda. Cada ronda indica
-// exactamente qué botón debe tocar la persona (color, tipo de pista y,
-// si aplica, con qué ficha propia comparar) y el mensaje explicativo que
-// se muestra antes y después de esa acción.
+// Las 12 fichas posibles de un color, en orden (columna 1 a 12 de la tabla
+// de referencia) — mismo cálculo que usa el servidor real en tile_info().
+function candidatosDeColor(color) {
+  const base = COLORS.indexOf(color) + 1;
+  const out = [];
+  for (let col = 1; col <= 12; col++) out.push(base + (col - 1) * 5);
+  return out;
+}
+// Del total de 12 fichas de un color, solo las que comparten esa cantidad
+// de puntitos (siempre son 4: los puntitos se repiten en ciclos de 3).
+function candidatosPorPuntitos(color, dots) {
+  return candidatosDeColor(color).filter(n => tileInfo(n).dots === dots);
+}
+
+// Guion fijo: 1 ficha revelada + 1 pista por ronda, en 8 rondas (más que
+// antes, para que se use bastante más el mazo y la tabla). Cada ronda
+// indica exactamente qué botón debe tocar la persona (color, tipo de
+// pista y, si aplica, con qué ficha propia comparar), el mensaje
+// explicativo, y luego el propio jugador tacha en la tabla lo que esa
+// pista permite descartar — ver celdasRequeridasParaCross() más abajo.
 const TUTORIAL_ROUNDS = [
   {
     color: 'blue',
     tile: { number: 3, color: 'blue', dots: 1 },
     clue: 'categorize',
-    revealBanner: '🎓 <b>Paso 1</b>. Es tu turno. Lo primero en cada turno es <b>revelar</b> una ficha de la reserva, para tener algo con qué comparar tu código secreto. Toca el botón <b>Azul</b>.',
+    revealBanner: '🎓 <b>Bienvenido al tutorial.</b> Así se juega, en 3 pasos que vas a repetir toda la partida:<br>' +
+      '① <b>Revela</b> una ficha de la reserva. ② <b>Pide una pista</b> sobre ella. ③ <b>Tacha</b> en la tabla de abajo lo que esa pista te permite descartar.<br><br>' +
+      'Repitiendo esto vas a ir acorralando tu propio código secreto, hasta dejar <b>1 sola ficha sin tachar por color</b>. Empecemos: toca el botón <b>Azul</b> para revelar tu primera ficha.',
     clueBanner: 'Salió el <b>3</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>📍 Categorizar</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 3.',
-    afterClue: (clue) => `La pista de CATEGORIZAR dice: <b>${clue.notch}</b> de tus fichas son menores que 3. Como salió 0, ya sabes que <b>las 5 fichas de tu código son mayores que 3</b>.`,
+    afterClue: (clue) => `La pista de CATEGORIZAR dice: <b>${clue.notch}</b> de tus fichas son menores que 3. Como salió 0, ya sabes que <b>las 5 fichas de tu código son mayores que 3</b>. Esta pista es "global" (compara las 5 fichas de tu código, sin importar el color), así que por ahora solo te sirve para descartar la ficha que acaba de salir a la mesa.`,
   },
   {
     color: 'green',
@@ -2846,8 +2918,8 @@ const TUTORIAL_ROUNDS = [
     clue: 'compare',
     slot: 3,
     revealBanner: '<b>Paso 2</b>. Turno nuevo: toca el botón <b>Verde</b> para revelar otra ficha.',
-    clueBanner: 'Salió el <b>11</b> (verde, ●●● 3 puntitos). Esta vez toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#4</b> para comparar sus puntitos con los del 11.',
-    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Como el 11 tiene 3 puntitos, ahora sabes que tu ficha <b>#4 también tiene 3 puntitos</b>.`,
+    clueBanner: 'Salió el <b>11</b> (verde, ●●● 3 puntitos). Esta vez toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#4</b> (ya sabes que es rosa) para comparar sus puntitos con los del 11.',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Como el 11 tiene 3 puntitos, ahora sabes que tu ficha rosa <b>#4 también tiene 3 puntitos</b>. Esta pista SÍ te sirve para tachar en la tabla: descarta de un saque toda la fila rosa que NO tenga 3 puntitos.`,
   },
   {
     color: 'orange',
@@ -2855,7 +2927,7 @@ const TUTORIAL_ROUNDS = [
     clue: 'categorize',
     revealBanner: '<b>Paso 3</b>. Toca el botón <b>Naranja</b> para revelar otra ficha.',
     clueBanner: 'Salió el <b>25</b> (naranja). Toca <b>📍 Categorizar</b> de nuevo para saber cuántas de tus fichas son menores que 25.',
-    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 25. Cada pista acorrala un poco más tu código.`,
+    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 25. Cada pista de este tipo te va acorralando el orden de tu código completo, aunque no marque una sola fila — la usarás más adelante para elegir, dentro del grupito que ya acotaste con "comparar", cuál número exacto es el tuyo.`,
   },
   {
     color: 'pink',
@@ -2863,26 +2935,89 @@ const TUTORIAL_ROUNDS = [
     clue: 'compare',
     slot: 0,
     revealBanner: '<b>Paso 4</b>. Toca el botón <b>Rosa</b> para revelar otra ficha.',
-    clueBanner: 'Salió el <b>37</b> (rosa, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#1</b>.',
-    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}: tu ficha #1 también tiene 2 puntitos.`,
+    clueBanner: 'Salió el <b>37</b> (rosa, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#1</b> (azul).',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}: tu ficha azul <b>#1</b> también tiene 2 puntitos. Igual que antes, esto descarta de la fila azul todo lo que no tenga 2 puntitos.`,
   },
   {
     color: 'red',
-    tile: { number: 44, color: 'red', dots: 3 },
+    tile: { number: 4, color: 'red', dots: 1 },
     clue: 'categorize',
-    revealBanner: '<b>Paso 5</b>, el último: toca el botón <b>Rojo</b> para revelar la última ficha de este tutorial.',
-    clueBanner: 'Salió el <b>44</b> (rojo). Toca <b>📍 Categorizar</b> una vez más.',
-    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 44. ¡Con todas estas pistas ya alcanza para deducir tu código completo!`,
+    revealBanner: '<b>Paso 5</b>. Toca el botón <b>Rojo</b> para revelar otra ficha.',
+    clueBanner: 'Salió el <b>4</b> (rojo). Toca <b>📍 Categorizar</b> otra vez.',
+    afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> fichas tuyas son menores que 4.`,
+  },
+  {
+    color: 'blue',
+    tile: { number: 13, color: 'blue', dots: 3 },
+    clue: 'compare',
+    slot: 1,
+    revealBanner: '<b>Paso 6</b>. Toca el botón <b>Azul</b> de nuevo para revelar otra ficha.',
+    clueBanner: 'Salió el <b>13</b> (azul, ●●● 3 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#2</b> (verde).',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Aunque no coincidan, igual sirve: ya sabes que tu ficha verde <b>#2</b> NO tiene 3 puntitos, así que puedes tachar ese grupo de la fila verde.`,
+  },
+  {
+    color: 'orange',
+    tile: { number: 40, color: 'orange', dots: 2 },
+    clue: 'compare',
+    slot: 2,
+    revealBanner: '<b>Paso 7</b>. Toca el botón <b>Naranja</b> otra vez.',
+    clueBanner: 'Salió el <b>40</b> (naranja, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#3</b> (naranja también).',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Tu ficha naranja <b>#3</b> ${clue.same ? 'sí tiene 2 puntitos' : 'NO tiene 2 puntitos'} — tacha en consecuencia en la fila naranja.`,
+  },
+  {
+    color: 'red',
+    tile: { number: 54, color: 'red', dots: 2 },
+    clue: 'compare',
+    slot: 4,
+    revealBanner: '<b>Paso 8</b>, el último: toca el botón <b>Rojo</b> una vez más.',
+    clueBanner: 'Salió el <b>54</b> (rojo, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#5</b> (roja también).',
+    afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Con esto ya tachaste con tus propias manos gran parte de la tabla.`,
   },
 ];
+
+// Dada una ronda ya resuelta (con su pista calculada), devuelve exactamente
+// qué números de la tabla de 60 fichas se pueden tachar con esa pista:
+// - Regla 1 (siempre): la ficha que acaba de salir a la mesa nunca puede
+//   ser tuya (salió del mazo compartido, separado de tu mano desde el
+//   reparto), así que siempre se puede tachar.
+// - "Comparar" además descarta, en la fila del color comparado, todo un
+//   grupo de puntitos: el resto de la fila si coincidió, o el grupo
+//   igualado si no coincidió.
+function celdasRequeridasParaCross(round, tile, clue) {
+  const celdas = new Set([tile.number]);
+  if (round.clue === 'compare') {
+    const colorSlot = TUTORIAL_SECRET[round.slot].color;
+    if (clue.same) {
+      const grupo = new Set(candidatosPorPuntitos(colorSlot, tile.dots));
+      candidatosDeColor(colorSlot).forEach(n => { if (!grupo.has(n)) celdas.add(n); });
+    } else {
+      candidatosPorPuntitos(colorSlot, tile.dots).forEach(n => celdas.add(n));
+    }
+  }
+  return Array.from(celdas);
+}
+
+// Texto que le indica a la persona qué ir a tachar (se muestra debajo de
+// la explicación de la pista).
+function textoCrossParaClue(round, tile, clue) {
+  if (round.clue === 'categorize') {
+    return `Baja a la tabla de 60 fichas y toca el <b>${tile.number}</b> (fila ${COLOR_NAME[tile.color].toLowerCase()}) para tacharlo: ya sabes que no es tuyo porque acaba de salir a la mesa.`;
+  }
+  const colorSlot = TUTORIAL_SECRET[round.slot].color;
+  if (clue.same) {
+    return `Baja a la tabla: tacha el <b>${tile.number}</b> (no es tuyo, acaba de salir) y además tacha, en la fila <b>${COLOR_NAME[colorSlot].toLowerCase()}</b>, todo lo que NO tenga ${dotsStr(tile.dots)} — ya sabes que tu ficha de ese color sí tiene esos puntitos.`;
+  }
+  return `Baja a la tabla: tacha el <b>${tile.number}</b> (no es tuyo, acaba de salir) y además tacha, en la fila <b>${COLOR_NAME[colorSlot].toLowerCase()}</b>, todo lo que tenga ${dotsStr(tile.dots)} — ya sabes que tu ficha de ese color NO tiene esos puntitos.`;
+}
 
 let tutorialActive = false;
 let tutorialPlayerName = '';
 let tutorialRoundIdx = 0;
-let tutorialPhaseWaiting = 'reveal'; // 'reveal' | 'clue' | 'solve' | 'done'
+let tutorialPhaseWaiting = 'reveal'; // 'reveal' | 'clue' | 'cross' | 'solve' | 'done'
 let tutorialFaceup = [];
 let tutorialClues = [];
 let tutorialLogLines = [];
+let tutorialCrossRequired = [];
 let avisoTutorialTimeout = null;
 
 function soloColorAvailable(color) {
@@ -2895,7 +3030,18 @@ function tutorialStepLabel() {
   const total = TUTORIAL_ROUNDS.length + 1;
   if (tutorialPhaseWaiting === 'done') return '¡Completado! 🎉';
   if (tutorialPhaseWaiting === 'solve') return `Paso ${total} de ${total}`;
-  return `Paso ${tutorialRoundIdx + 1} de ${total}`;
+  const base = `Paso ${tutorialRoundIdx + 1} de ${total}`;
+  return tutorialPhaseWaiting === 'cross' ? base + ' · tachando en la tabla' : base;
+}
+
+function tutorialProgressPercent() {
+  const total = TUTORIAL_ROUNDS.length + 1;
+  if (tutorialPhaseWaiting === 'done') return 100;
+  if (tutorialPhaseWaiting === 'solve') return Math.round(((total - 1) / total) * 100);
+  let avance = tutorialRoundIdx;
+  if (tutorialPhaseWaiting === 'clue') avance += 0.33;
+  else if (tutorialPhaseWaiting === 'cross') avance += 0.66;
+  return Math.min(100, Math.round((avance / total) * 100));
 }
 
 // Construye un "estado" con la misma forma que manda el servidor real
@@ -2906,7 +3052,7 @@ function buildTutorialState(bannerText, extra) {
   return {
     type: 'state',
     status: extra.status || 'playing',
-    phase: extra.phase || (tutorialPhaseWaiting === 'clue' ? 'clue' : 'reveal'),
+    phase: extra.phase || (tutorialPhaseWaiting === 'clue' ? 'clue' : tutorialPhaseWaiting === 'cross' ? 'cross' : 'reveal'),
     room: 'TUTORIAL',
     mode: 'tutorial',
     faceup: tutorialFaceup,
@@ -2949,6 +3095,8 @@ function buildTutorialState(bannerText, extra) {
     spectator_count: 0,
     tutorial_banner: bannerText,
     tutorial_step_label: tutorialStepLabel(),
+    tutorial_progress: tutorialProgressPercent(),
+    tutorial_subtext: extra.subtext || '',
   };
 }
 
@@ -2970,9 +3118,11 @@ function avisoTutorial(text) {
 
 // Deshabilita en el panel de pistas el botón (o la ficha/casilla) que NO
 // corresponde al guion de esta ronda, para que solo se pueda seguir el
-// paso indicado. Se llama al final de cada renderGame() cuando el
-// tutorial está activo.
+// paso indicado. El botón/casilla que SÍ corresponde queda resaltado con
+// un pulso (ver CSS #pantallaJuego.tutorial-modo). Se llama al final de
+// cada renderGame() cuando el tutorial está activo.
 function applyTutorialLock() {
+  actualizarResaltadoCrossTutorial();
   if (!tutorialActive || tutorialPhaseWaiting !== 'clue') return;
   const round = TUTORIAL_ROUNDS[tutorialRoundIdx];
   if (!round) return;
@@ -3000,6 +3150,17 @@ function applyTutorialLock() {
   }
 }
 
+// Resalta con un pulso, en la tabla de 60 fichas, las casillas que faltan
+// tachar en el paso actual del tutorial (ver celdasRequeridasParaCross).
+function actualizarResaltadoCrossTutorial() {
+  document.querySelectorAll('#ref-grid .ref-tile').forEach(el => {
+    const n = parseInt(el.dataset.n, 10);
+    const esObjetivo = tutorialActive && tutorialPhaseWaiting === 'cross'
+      && tutorialCrossRequired.includes(n) && !crossedOut.has(n);
+    el.classList.toggle('tutorial-target', esObjetivo);
+  });
+}
+
 // Punto de entrada: sustituye `ws` por el motor local del tutorial y
 // arranca en el paso 1 (revelar la primera ficha).
 function iniciarTutorial() {
@@ -3012,6 +3173,7 @@ function iniciarTutorial() {
   tutorialPhaseWaiting = 'reveal';
   tutorialFaceup = [];
   tutorialClues = [];
+  tutorialCrossRequired = [];
   tutorialLogLines = [`Comienza el tutorial guiado para ${name}. Esta partida es de práctica: no otorga puntos ni monedas.`];
 
   cerrarLobby();
@@ -3021,6 +3183,12 @@ function iniciarTutorial() {
   esSalidaIntencional = false;
   reconnectAttempts = 0;
   ws = { readyState: WebSocket.OPEN, send: tutorialSend, close: () => {} };
+
+  // Arranca con la tabla de 60 fichas completamente en blanco, nunca con
+  // lo que haya quedado tachado de una partida anterior en este navegador.
+  resetearTablaReferencia('TUTORIAL');
+  const pantalla = document.getElementById('pantallaJuego');
+  if (pantalla) pantalla.classList.add('tutorial-modo');
 
   document.getElementById('join-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
@@ -3042,6 +3210,8 @@ function salirTutorial() {
   tutorialPhaseWaiting = 'reveal';
   const banner = document.getElementById('tutorial-banner');
   if (banner) banner.classList.add('hidden');
+  const pantalla = document.getElementById('pantallaJuego');
+  if (pantalla) pantalla.classList.remove('tutorial-modo');
   ws = null;
   lastState = null;
   irASeleccionModo(tutorialPlayerName || currentPlayerName || document.getElementById('name-input').value.trim());
@@ -3085,6 +3255,11 @@ function tutorialSend(raw) {
     return;
   }
 
+  if (tutorialPhaseWaiting === 'cross') {
+    avisoTutorial('Baja a la tabla de 60 fichas y toca las que están resaltadas para tacharlas.');
+    return;
+  }
+
   if (tutorialPhaseWaiting === 'solve') {
     if (msg.type !== 'guess') return;
     doTutorialFinish();
@@ -3124,13 +3299,52 @@ function doTutorialClue(round) {
   }
   tutorialClues.push(clue);
 
+  // A partir de ahora, en vez de saltar solo al siguiente paso, se espera
+  // a que la persona tache ella misma en la tabla lo que esta pista
+  // permite descartar (ver actualizarResaltadoCrossTutorial /
+  // intentarAvanzarTutorialCross, enganchados al click de cada casilla).
+  tutorialCrossRequired = celdasRequeridasParaCross(round, tile, clue);
+  tutorialPhaseWaiting = 'cross';
+
   const explicacion = round.afterClue(clue);
+  const banner = explicacion + '<br><br>👇 ' + textoCrossParaClue(round, tile, clue);
+  const state = buildTutorialState(banner, {
+    phase: 'cross',
+    colorsAvailable: { green: false, pink: false, blue: false, red: false, orange: false },
+    deckRemaining: Math.max(0, 55 - tutorialFaceup.length * 2),
+    subtext: `Tachadas 0/${tutorialCrossRequired.length} fichas de este paso.`,
+  });
+  handleState(state);
+}
+
+// Enganchado al click de cada casilla de la tabla (ver buildRefGrid): si
+// el tutorial está esperando que se tachen fichas concretas, revisa si ya
+// se tachó todo lo pedido y, en ese caso, avanza sola al siguiente paso.
+function intentarAvanzarTutorialCross() {
+  if (!tutorialActive || tutorialPhaseWaiting !== 'cross') return;
+  actualizarResaltadoCrossTutorial();
+
+  const faltan = tutorialCrossRequired.filter(n => !crossedOut.has(n));
+  const subtextEl = document.getElementById('tutorial-banner-subtext');
+  if (subtextEl) {
+    const hechas = tutorialCrossRequired.length - faltan.length;
+    subtextEl.classList.remove('hidden');
+    subtextEl.innerHTML = faltan.length > 0
+      ? `Tachadas ${hechas}/${tutorialCrossRequired.length} fichas de este paso.`
+      : '✅ ¡Listo! Pasando al siguiente paso...';
+  }
+  if (faltan.length > 0) return;
+  setTimeout(avanzarSiguienteRondaTutorial, 500);
+}
+
+function avanzarSiguienteRondaTutorial() {
+  if (!tutorialActive || tutorialPhaseWaiting !== 'cross') return;
   tutorialRoundIdx++;
 
   if (tutorialRoundIdx < TUTORIAL_ROUNDS.length) {
     tutorialPhaseWaiting = 'reveal';
     const next = TUTORIAL_ROUNDS[tutorialRoundIdx];
-    const state = buildTutorialState(explicacion + '<br><br>' + next.revealBanner, {
+    const state = buildTutorialState(next.revealBanner, {
       phase: 'reveal',
       colorsAvailable: soloColorAvailable(next.color),
       deckRemaining: Math.max(0, 55 - tutorialFaceup.length * 2),
@@ -3141,24 +3355,26 @@ function doTutorialClue(round) {
 
   tutorialPhaseWaiting = 'solve';
   const codigoTxt = TUTORIAL_SECRET.map(t => `${t.number} (${COLOR_NAME[t.color]})`).join(', ');
-  const banner = explicacion + '<br><br>🧩 Con estas pistas, tu código secreto completo es: <b>' + codigoTxt +
-    '</b>. En la tabla de abajo ya te dejamos marcada la respuesta (queda 1 sola ficha sin tachar por color). ' +
-    'Cuando quieras, presiona <b>DESACTIVAR</b> para confirmarla.';
+  const banner = '🧩 ¡Muy bien! Ya tachaste con tus propios toques gran parte de la tabla usando las pistas. ' +
+    'En una partida real seguirías pidiendo pistas hasta dejar exactamente <b>1 ficha sin tachar por color</b>. ' +
+    'Para no alargar más este tutorial de práctica, completamos el resto por ti: tu código secreto completo es <b>' + codigoTxt + '</b>. ' +
+    'Baja hasta la tabla, confirma que solo queda 1 ficha sin tachar por color, y presiona <b>DESACTIVAR</b> cuando quieras.';
   const state = buildTutorialState(banner, {
     phase: 'clue',
     colorsAvailable: { green: false, pink: false, blue: false, red: false, orange: false },
-    deckRemaining: 45,
+    deckRemaining: Math.max(0, 55 - tutorialFaceup.length * 2),
   });
   handleState(state);
   prepararTablaSolucionTutorial();
 }
 
-// Tacha automáticamente en la tabla de 60 fichas todo excepto el código
-// secreto del tutorial, para que el botón DESACTIVAR quede listo sin que
-// la persona tenga que tachar las 55 fichas restantes a mano.
+// Tacha automáticamente en la tabla de 60 fichas todo lo que aún falte
+// (fuera del código secreto del tutorial) para que el botón DESACTIVAR
+// quede listo. Como ahora la persona ya tachó buena parte de la tabla por
+// su cuenta en cada paso, esto solo completa lo que quedaba pendiente —
+// no le tacha absolutamente todo de sorpresa al final como antes.
 function prepararTablaSolucionTutorial() {
   const secretNumbers = new Set(TUTORIAL_SECRET.map(t => t.number));
-  crossedOut.clear();
   for (let n = 1; n <= 60; n++) {
     if (!secretNumbers.has(n)) crossedOut.add(n);
   }
@@ -3621,8 +3837,19 @@ function handleState(state) {
       tutorialBannerEl.classList.remove('aviso');
       const stepEl = document.getElementById('tutorial-banner-step');
       const textEl = document.getElementById('tutorial-banner-text');
+      const progressEl = document.getElementById('tutorial-banner-progress');
+      const subtextEl = document.getElementById('tutorial-banner-subtext');
       if (stepEl) stepEl.textContent = state.tutorial_step_label || '';
       if (textEl) textEl.innerHTML = state.tutorial_banner || '';
+      if (progressEl) progressEl.style.width = (state.tutorial_progress || 0) + '%';
+      if (subtextEl) {
+        if (state.tutorial_subtext) {
+          subtextEl.innerHTML = state.tutorial_subtext;
+          subtextEl.classList.remove('hidden');
+        } else {
+          subtextEl.classList.add('hidden');
+        }
+      }
     }
   } else {
     document.getElementById('btn-chat').classList.remove('hidden');
@@ -3917,6 +4144,16 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
   if (state.mode === 'tutorial' && state.status === 'playing' && tutorialPhaseWaiting === 'solve') {
     titleEl.textContent = '3. ¡Desactiva tu código!';
     content.innerHTML = `<div class="action-hint">Ya tienes todas las pistas de este tutorial. Baja hasta la tabla de 60 fichas: ya te dejamos marcada tu respuesta (queda 1 sola ficha sin tachar por color). Presiona el botón <b>DESACTIVAR</b> para confirmarla.</div>`;
+    return;
+  }
+
+  // Paso intermedio nuevo del tutorial: ya se pidió la pista, ahora hay
+  // que ir a tachar en la tabla de abajo (con las casillas resaltadas)
+  // antes de poder seguir a la siguiente ficha.
+  if (state.mode === 'tutorial' && state.status === 'playing' && tutorialPhaseWaiting === 'cross') {
+    const faltan = tutorialCrossRequired.filter(n => !crossedOut.has(n));
+    titleEl.textContent = '3. Tacha en la tabla';
+    content.innerHTML = `<div class="action-hint">👇 Baja hasta la tabla de 60 fichas (más abajo) y toca las casillas resaltadas para tacharlas.${faltan.length === 0 ? ' ¡Ya las tachaste todas!' : ''}</div>`;
     return;
   }
 
