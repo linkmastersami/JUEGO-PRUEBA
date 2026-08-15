@@ -2633,6 +2633,12 @@ function irASeleccionModo(nombre) {
   ws = null;
   lastState = null;
 
+  // "Tu código" (fichas, pista, botón CATEGORIZAR/COMPARAR) vive fuera de
+  // #game-screen y renderGame() solo lo oculta cuando status === 'waiting',
+  // así que si salimos sin pasar por location.reload() (p. ej. desde el
+  // tutorial) hay que ocultarlo a mano o se queda flotando sobre el menú.
+  document.getElementById('action-card').classList.add('hidden');
+
   document.getElementById('game-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
