@@ -70,18 +70,37 @@
   .badge.you { background: var(--accent2); color: #fff; }
   .status-line { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
 
-  /* --- Código / stand --- */
-  .stand { display: flex; align-items: flex-end; gap: 4px; overflow-x: auto; padding: 6px 2px 10px; }
-  .notch { min-width: 20px; display: flex; flex-direction: column; gap: 3px; align-items: center; }
-  .notch-tile { width: 34px; height: 34px; border-radius: 6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size: 0.75rem; font-weight: 700; color: #1a1a1a; }
+  /* --- Código / stand ---
+     Ojo con el ancho: una fila de "Tu código" son en realidad 11 columnas
+     (5 fichas propias + 6 separadores ".notch", uno antes de cada ficha y
+     uno más al final, donde se van apilando las pistas de "buscar mayor o
+     menor" según cuántas fichas descartan) — con los tamaños viejos eso no
+     entraba en una pantalla angosta sin scroll horizontal. Los tamaños de
+     acá son más chicos a propósito para que las 11 quepan sin recortarse. */
+  .stand { display: flex; align-items: flex-end; gap: 3px; overflow-x: auto; padding: 6px 2px 10px; }
+  .notch { min-width: 8px; display: flex; flex-direction: column; gap: 3px; align-items: center; }
+  .notch-tile { width: 26px; height: 26px; border-radius: 6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size: 0.62rem; font-weight: 700; color: #1a1a1a; }
   .slot-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-  .secret-tile { width: 52px; height: 52px; border-radius: 10px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight: 800; font-size: 1.1rem; color: #fff; flex-shrink:0; }
-  .secret-tile.hidden-tile { background: #2a2e3d; border: 2px dashed #555; color: var(--muted); font-size: 1.3rem; }
-  .dots { font-size: 0.6rem; letter-spacing: 1px; margin-top: 1px; }
+  .secret-tile { width: 44px; height: 44px; border-radius: 9px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight: 800; font-size: 0.95rem; color: #fff; flex-shrink:0; }
+  .secret-tile.hidden-tile { background: #2a2e3d; border: 2px dashed #555; color: var(--muted); font-size: 1.1rem; }
+  .dots { font-size: 0.55rem; letter-spacing: 1px; margin-top: 1px; }
   .compare-stack { display: flex; flex-direction: column; gap: 3px; align-items: center; }
-  .compare-tile { width: 30px; height: 30px; border-radius: 6px; display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:700; color:#1a1a1a; position: relative; }
-  .compare-tile .mark { position:absolute; bottom:-6px; right:-4px; font-size: 0.8rem; }
-  .slot-num { font-size: 0.65rem; color: var(--muted); }
+  .compare-tile { width: 24px; height: 24px; border-radius: 6px; display:flex; align-items:center; justify-content:center; font-size:0.58rem; font-weight:700; color:#1a1a1a; position: relative; }
+  .compare-tile .mark { position:absolute; bottom:-6px; right:-4px; font-size: 0.75rem; }
+  .slot-num { font-size: 0.6rem; color: var(--muted); }
+
+  /* --- "Eje" 1→60 debajo de "Tu código": deja clarísimo, de un vistazo,
+       que esas 5 fichas están ordenadas de menor a mayor a lo largo de esa
+       misma línea (no que sean 5 números cualquiera). Solo va en tu propio
+       código, no en el de los rivales, para no repetir la misma explicación
+       varias veces en pantalla. --- */
+  .stand-axis { display: flex; align-items: center; gap: 6px; padding: 0 4px 8px; margin-top: -2px; }
+  .stand-axis-num { font-size: 0.62rem; font-weight: 800; color: var(--muted); flex-shrink: 0; }
+  .stand-axis-line { flex: 1; height: 1px; background: var(--muted); opacity: 0.55; position: relative; }
+  .stand-axis-line::after {
+    content: ''; position: absolute; right: -1px; top: -3px;
+    border: 4px solid transparent; border-left-color: var(--muted); opacity: 0.75;
+  }
 
   /* --- Faceup row --- */
   .faceup-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
@@ -141,7 +160,11 @@
   .ref-notes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; }
   .ref-notes input { margin-bottom: 0; padding: 8px 4px; text-align: center; font-size: 0.85rem; }
   .ref-row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin-bottom: 3px; }
-  .ref-tile { border-radius: 6px; padding: 4px 0; text-align: center; font-weight: 700; font-size: 0.72rem; color: #fff; cursor: pointer; user-select: none; }
+  /* touch-action:none permite arrastrar el dedo por varias fichas seguidas
+     para tacharlas todas de un tirón (ver listeners de pointerdown/move en
+     JS) sin que el navegador interprete ese arrastre como scroll de
+     página — el scroll normal sigue funcionando fuera de las fichas. */
+  .ref-tile { border-radius: 6px; padding: 4px 0; text-align: center; font-weight: 700; font-size: 0.72rem; color: #fff; cursor: pointer; user-select: none; touch-action: none; }
   .ref-tile .rt-dots { font-size: 0.5rem; display:block; }
   .ref-tile.crossed { opacity: 0.25; text-decoration: line-through; }
 
@@ -1151,6 +1174,11 @@
     </div>
     <div id="tu-rango-mini" style="font-size:0.72rem; color:var(--muted); margin:-6px 0 8px 2px;"></div>
     <div class="stand" id="your-stand"></div>
+    <div class="stand-axis" aria-hidden="true">
+      <span class="stand-axis-num">1</span>
+      <span class="stand-axis-line"></span>
+      <span class="stand-axis-num">60</span>
+    </div>
 
     <div class="board-title" style="margin-top: 14px;">
       <span id="action-card-title">Fichas junto a la reserva</span>
@@ -2887,6 +2915,27 @@ function resetearTablaReferencia(roomCode) {
   updateGuessButtonState();
 }
 
+// Tacha/destacha una sola ficha de la tabla (usado tanto por un toque
+// suelto como por cada ficha nueva que el dedo va cruzando en un arrastre
+// — ver los listeners de pointerdown/pointermove más abajo).
+function alternarFichaRef(el) {
+  const n = parseInt(el.dataset.n, 10);
+  reproducirSonido(soundTachar);
+
+  if (crossedOut.has(n)) {
+    crossedOut.delete(n);
+  } else {
+    crossedOut.add(n);
+  }
+  el.classList.toggle('crossed', crossedOut.has(n));
+
+  if (!tutorialActive) {
+    localStorage.setItem(`crossed_${claveTablaSala()}`, JSON.stringify(Array.from(crossedOut)));
+  }
+  updateGuessButtonState();
+  intentarAvanzarTutorialCross();
+}
+
 function buildRefGrid() {
   const grid = document.getElementById('ref-grid');
   grid.innerHTML = '';
@@ -2901,28 +2950,16 @@ function buildRefGrid() {
       el.className = 'ref-tile';
       el.style.background = COLOR_HEX[color];
       el.dataset.n = n;
-      
+
       if (crossedOut.has(n)) {
         el.classList.add('crossed');
       }
 
       el.innerHTML = `${n}<span class="rt-dots">${dotsStr(info.dots)}</span>`;
-      el.onclick = () => {
-        reproducirSonido(soundTachar);
-
-        if (crossedOut.has(n)) {
-          crossedOut.delete(n);
-        } else {
-          crossedOut.add(n);
-        }
-        el.classList.toggle('crossed', crossedOut.has(n));
-
-        if (!tutorialActive) {
-          localStorage.setItem(`crossed_${claveTablaSala()}`, JSON.stringify(Array.from(crossedOut)));
-        }
-        updateGuessButtonState();
-        intentarAvanzarTutorialCross();
-      };
+      // El tap/arrastre se maneja con los listeners de pointerdown/move de
+      // más abajo (delegados en #ref-grid), no acá con onclick — así un
+      // mismo gesto sirve tanto para tocar una ficha suelta como para
+      // arrastrar el dedo por varias seguidas sin levantar.
       row.appendChild(el);
     }
     grid.appendChild(row);
@@ -2930,6 +2967,39 @@ function buildRefGrid() {
 }
 buildRefGrid();
 resetearTablaReferencia(claveTablaSala());
+
+// --- Deslizar el dedo por la tabla para tachar/destachar varias fichas de
+// un tirón, sin tener que soltar y volver a tocar cada una. Un toque suelto
+// (sin arrastrar) sigue funcionando igual que antes. Cada ficha se
+// alterna una sola vez por arrastre, aunque el dedo pase de nuevo por
+// encima de ella. Usa Pointer Events para que funcione igual con dedo,
+// mouse o lápiz óptico. ---
+let arrastreRefActivo = false;
+let arrastreRefTocadas = null;
+
+document.getElementById('ref-grid').addEventListener('pointerdown', (e) => {
+  const tile = e.target.closest('.ref-tile');
+  if (!tile) return;
+  arrastreRefActivo = true;
+  arrastreRefTocadas = new Set([tile.dataset.n]);
+  alternarFichaRef(tile);
+});
+
+document.addEventListener('pointermove', (e) => {
+  if (!arrastreRefActivo) return;
+  const bajoElDedo = document.elementFromPoint(e.clientX, e.clientY);
+  const tile = bajoElDedo && bajoElDedo.closest('.ref-tile');
+  if (!tile || arrastreRefTocadas.has(tile.dataset.n)) return;
+  arrastreRefTocadas.add(tile.dataset.n);
+  alternarFichaRef(tile);
+});
+
+function terminarArrastreRef() {
+  arrastreRefActivo = false;
+  arrastreRefTocadas = null;
+}
+document.addEventListener('pointerup', terminarArrastreRef);
+document.addEventListener('pointercancel', terminarArrastreRef);
 
 document.getElementById('reset-table-btn').onclick = () => {
   if (!confirm('¿Reiniciar la tabla? Esto va a desmarcar todas las fichas tachadas.')) return;
@@ -2989,8 +3059,8 @@ const TUTORIAL_ROUNDS = [
     revealBanner: '🎓 <b>Bienvenido al tutorial.</b> Así se juega, en 3 pasos que vas a repetir toda la partida:<br>' +
       '① <b>Revela</b> una ficha de la reserva. ② <b>Pide una pista</b> sobre ella. ③ <b>Tacha</b> en la tabla de abajo lo que esa pista te permite descartar.<br><br>' +
       'Repitiendo esto vas a ir acorralando tu propio código secreto, hasta dejar <b>1 sola ficha sin tachar por color</b>. Empecemos: toca el botón <b>Azul</b> para revelar tu primera ficha.',
-    clueBanner: 'Salió el <b>23</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>📍 Categorizar</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 23.',
-    afterClue: (clue) => `La pista de CATEGORIZAR dice: <b>${clue.notch}</b> de tus fichas son menores que 23 (y las otras <b>${5 - clue.notch}</b>, mayores). Mira arriba en "Tu código": tus 5 fichas ya están ordenadas de menor a mayor, y ahí ves el color de cada una aunque no el número. Como las <b>2 más chicas</b> son menores que 23, tu ficha <b>azul</b> (la 1ª) y tu ficha <b>verde</b> (la 2ª) son menores que 23. Y como las otras <b>3</b> son mayores, tu <b>naranja</b> (3ª), tu <b>rosa</b> (4ª) y tu <b>roja</b> (5ª) son mayores que 23. ¡Con una sola pista acabas de descartar fichas en las 5 filas de la tabla, no solo en una!`,
+    clueBanner: 'Salió el <b>23</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>🔍 Buscar mayor o menor</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 23.',
+    afterClue: (clue) => `La pista de BUSCAR MAYOR O MENOR dice: <b>${clue.notch}</b> de tus fichas son menores que 23 (y las otras <b>${5 - clue.notch}</b>, mayores). Mira arriba en "Tu código": tus 5 fichas ya están ordenadas de menor a mayor, y ahí ves el color de cada una aunque no el número. Como las <b>2 más chicas</b> son menores que 23, tu ficha <b>azul</b> (la 1ª) y tu ficha <b>verde</b> (la 2ª) son menores que 23. Y como las otras <b>3</b> son mayores, tu <b>naranja</b> (3ª), tu <b>rosa</b> (4ª) y tu <b>roja</b> (5ª) son mayores que 23. ¡Con una sola pista acabas de descartar fichas en las 5 filas de la tabla, no solo en una!`,
   },
   {
     color: 'green',
@@ -3006,7 +3076,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 25, color: 'orange', dots: 2 },
     clue: 'categorize',
     revealBanner: '<b>Paso 3</b>. Toca el botón <b>Naranja</b> para revelar otra ficha.',
-    clueBanner: 'Salió el <b>25</b> (naranja). Toca <b>📍 Categorizar</b> de nuevo para saber cuántas de tus fichas son menores que 25.',
+    clueBanner: 'Salió el <b>25</b> (naranja). Toca <b>🔍 Buscar mayor o menor</b> de nuevo para saber cuántas de tus fichas son menores que 25.',
     afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> de tus fichas son menores que 25 (y <b>${5 - clue.notch}</b> son mayores) — mismo truco que en el paso 1: tu <b>azul</b> y tu <b>verde</b> siguen siendo menores, tu <b>naranja</b>, tu <b>rosa</b> y tu <b>roja</b> siguen siendo mayores. Baja y tacha lo que todavía quede parpadeando (la mayoría ya la tachaste en el paso 1).`,
   },
   {
@@ -3023,7 +3093,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 4, color: 'red', dots: 1 },
     clue: 'categorize',
     revealBanner: '<b>Paso 5</b>. Toca el botón <b>Rojo</b> para revelar otra ficha.',
-    clueBanner: 'Salió el <b>4</b> (rojo). Toca <b>📍 Categorizar</b> otra vez.',
+    clueBanner: 'Salió el <b>4</b> (rojo). Toca <b>🔍 Buscar mayor o menor</b> otra vez.',
     afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> de tus fichas son menores que 4 — es decir, tus <b>5 fichas</b> (azul, verde, naranja, rosa y roja) son mayores que 4. Mismo truco de siempre: baja y tacha lo poco que todavía quede parpadeando en cada fila (son las fichas más bajitas de cada color).`,
   },
   {
@@ -3060,7 +3130,7 @@ const TUTORIAL_ROUNDS = [
 // - Regla 1 (siempre): la ficha que acaba de salir a la mesa nunca puede
 //   ser tuya (salió del mazo compartido, separado de tu mano desde el
 //   reparto), así que siempre se puede tachar.
-// - "Categorizar" no solo descarta la ficha que salió: como el jugador ya
+// - "Buscar mayor o menor" no solo descarta la ficha que salió: como el jugador ya
 //   ve el color (ordenado de menor a mayor) de sus 5 fichas ocultas en "Tu
 //   código", saber cuántas de esas 5 son menores que el número que salió
 //   equivale a saber, color por color, si esa ficha suya es menor o mayor
@@ -3232,7 +3302,7 @@ function applyTutorialLock() {
     if (cmpBtn) {
       cmpBtn.disabled = true;
       cmpBtn.style.opacity = '0.4';
-      cmpBtn.onclick = () => avisoTutorial('Para esta pista, usa <b>📍 Categorizar</b>.');
+      cmpBtn.onclick = () => avisoTutorial('Para esta pista, usa <b>🔍 Buscar mayor o menor</b>.');
     }
   } else {
     if (catBtn) {
@@ -3343,7 +3413,7 @@ function tutorialSend(raw) {
     if (msg.type !== 'clue' || !round) return;
     if (msg.action !== round.clue) {
       avisoTutorial(round.clue === 'categorize'
-        ? 'Para esta pista, usa <b>📍 Categorizar</b>.'
+        ? 'Para esta pista, usa <b>🔍 Buscar mayor o menor</b>.'
         : 'Para esta pista, usa <b>⚖️ Comparar puntitos</b>.');
       return;
     }
@@ -3391,7 +3461,7 @@ function doTutorialClue(round) {
   if (round.clue === 'categorize') {
     const notch = TUTORIAL_SECRET.filter(t => t.number < tile.number).length;
     clue = { kind: 'categorize', tile: Object.assign({}, tile), notch };
-    tutorialLogLines.push(`${tutorialPlayerName} pidió CATEGORIZAR el ${tile.number} en su código.`);
+    tutorialLogLines.push(`${tutorialPlayerName} pidió BUSCAR MAYOR O MENOR sobre el ${tile.number} en su código.`);
   } else {
     const same = TUTORIAL_SECRET[round.slot].dots === tile.dots;
     clue = { kind: 'compare', tile: Object.assign({}, tile), slot: round.slot, same };
@@ -3418,7 +3488,7 @@ function doTutorialClue(round) {
 
   // Como una pista de un paso anterior a veces ya deja tachado todo lo que
   // esta ronda pide (p. ej. "comparar" ya había descartado ese grupo de
-  // puntitos y ahora "categorizar" vuelve a marcar esas mismas fichas), no
+  // puntitos y ahora "buscar mayor o menor" vuelve a marcar esas mismas fichas), no
   // se puede asumir que siempre falta algo por tocar. Sin este chequeo el
   // tutorial se quedaba esperando un toque que nunca iba a llegar (nada
   // parpadea si ya está todo tachado) — se recalcula el subtexto real y,
@@ -4355,7 +4425,7 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
     content.innerHTML = `
       <div class="action-hint">Ficha elegida: <b>${state.faceup[selectedFaceupIndex]?.number ?? ''}</b>. ¿Qué pista pides?</div>
       <div class="row">
-        <button class="full" id="btn-categorize">📍 Categorizar (¿dónde encaja?)</button>
+        <button class="full" id="btn-categorize">🔍 Buscar mayor o menor</button>
         <button class="full secondary" id="btn-compare">⚖️ Comparar puntitos</button>
       </div>
     `;
