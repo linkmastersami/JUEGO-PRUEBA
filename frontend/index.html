@@ -1045,7 +1045,7 @@
       <div id="solicitar-sub">Cuéntanos qué avatar te gustaría ver en la tienda</div>
     </div>
     <div id="solicitar-cooldown" class="hidden"></div>
-    <textarea id="solicitar-texto" maxlength="500" rows="4" placeholder="Ej: un gato negro con capa de superhéroe..."></textarea>
+    <textarea id="solicitar-texto" maxlength="500" rows="4" placeholder="Ej: un gato negro con capa de superhéroe..." autocomplete="off"></textarea>
     <div id="solicitar-error"></div>
     <button id="solicitar-btn-enviar">Enviar pedido</button>
     <button id="solicitar-btn-cerrar">Cerrar</button>
@@ -1080,7 +1080,7 @@
   </div>
   <div id="chat-mensajes"></div>
   <div id="chat-input-row">
-    <input id="chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
+    <input id="chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" autocomplete="off">
     <button id="chat-enviar">Enviar</button>
   </div>
 </div>
@@ -1104,7 +1104,7 @@
   </div>
   <div id="lobby-chat-mensajes"></div>
   <div id="lobby-chat-input-row">
-    <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300">
+    <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" autocomplete="off">
     <button id="lobby-chat-enviar">Enviar</button>
   </div>
 </div>
@@ -1199,7 +1199,7 @@
         — o crea/únete a una sala privada —
       </div>
 
-      <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10">
+      <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
       <button class="full secondary" id="join-btn">Entrar a sala privada</button>
 
       <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
@@ -1285,7 +1285,7 @@
       <div class="board-title"><span>💬 Chat de la sala</span></div>
       <div id="esp-chat-mensajes" style="max-height:220px; overflow-y:auto;"></div>
       <div style="display:flex; gap:8px; margin-top:8px;">
-        <input id="esp-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" style="flex:1;">
+        <input id="esp-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" style="flex:1;" autocomplete="off">
         <button id="esp-chat-enviar">Enviar</button>
       </div>
     </div>
