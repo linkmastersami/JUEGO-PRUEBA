@@ -152,6 +152,17 @@
     z-index: 1;
     position: relative;
   }
+  /* El resto de la tabla queda bloqueado durante el tutorial (ver
+     tutorialPuedeAlternar() en JS, que es quien realmente impide tacharlas
+     — esto es solo la señal visual de que no responden). El botón de
+     reiniciar tabla también se oculta: reiniciar a mitad de guion dejaría
+     la tabla sin lo ya tachado en pasos anteriores. */
+  #pantallaJuego.tutorial-modo .ref-tile:not(.tutorial-target):not(.crossed) {
+    cursor: not-allowed;
+  }
+  #pantallaJuego.tutorial-modo #reset-table-btn {
+    display: none;
+  }
   .log { max-height: 130px; overflow-y: auto; font-size: 0.8rem; color: var(--muted); }
   .log div { padding: 3px 0; border-bottom: 1px solid #2a2d3a; }
 
@@ -2915,11 +2926,28 @@ function resetearTablaReferencia(roomCode) {
   updateGuessButtonState();
 }
 
+// Durante el tutorial, la tabla queda bloqueada salvo por las fichas que
+// el paso actual pide tachar (las que parpadean con .tutorial-target):
+// nada de tocar el resto ni destachar lo ya tachado, porque eso deja la
+// tabla en un estado que ya no coincide con el guion (por ejemplo, tachar
+// sin querer una de tus 5 fichas reales) y "rompe" el tutorial más
+// adelante. Fuera del tutorial la tabla es siempre libre.
+function tutorialPuedeAlternar(n) {
+  if (!tutorialActive) return true;
+  return tutorialPhaseWaiting === 'cross' && tutorialCrossRequired.includes(n) && !crossedOut.has(n);
+}
+
 // Tacha/destacha una sola ficha de la tabla (usado tanto por un toque
 // suelto como por cada ficha nueva que el dedo va cruzando en un arrastre
 // — ver los listeners de pointerdown/pointermove más abajo).
 function alternarFichaRef(el) {
   const n = parseInt(el.dataset.n, 10);
+
+  if (!tutorialPuedeAlternar(n)) {
+    avisoTutorial('Esa ficha no es la que toca en este paso. Fíjate cuáles están parpadeando 👇 y toca solo esas.');
+    return;
+  }
+
   reproducirSonido(soundTachar);
 
   if (crossedOut.has(n)) {
