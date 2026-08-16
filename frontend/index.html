@@ -85,7 +85,7 @@
   .secret-tile.hidden-tile { background: #2a2e3d; border: 2px dashed #555; color: var(--muted); font-size: 1.1rem; }
   .dots { font-size: 0.55rem; letter-spacing: 1px; margin-top: 1px; }
   .compare-stack { display: flex; flex-direction: column; gap: 3px; align-items: center; }
-  .compare-tile { width: 24px; height: 24px; border-radius: 6px; display:flex; align-items:center; justify-content:center; font-size:0.58rem; font-weight:700; color:#1a1a1a; position: relative; }
+  .compare-tile { width: 26px; height: 30px; border-radius: 6px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:0.58rem; font-weight:700; color:#1a1a1a; position: relative; }
   .compare-tile .mark { position:absolute; bottom:-6px; right:-4px; font-size: 0.75rem; }
   .slot-num { font-size: 0.6rem; color: var(--muted); }
 
@@ -108,9 +108,6 @@
   .faceup-tile.selectable { cursor: pointer; }
   .faceup-tile.selected { border-color: var(--accent); transform: scale(1.05); }
   .faceup-tile.used { opacity: 0.25; filter: grayscale(70%); cursor: default; }
-
-  .color-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-  .color-btn { width: 54px; height: 54px; border-radius: 10px; border: none; font-weight: 800; color: #fff; font-size: 0.75rem; }
 
   .action-hint { text-align:center; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
 
@@ -140,7 +137,7 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(255, 196, 0, 0.55); transform: scale(1); }
     50% { box-shadow: 0 0 0 8px rgba(255, 196, 0, 0); transform: scale(1.05); }
   }
-  #pantallaJuego.tutorial-modo .color-buttons button:not(:disabled),
+  #pantallaJuego.tutorial-modo #btn-sacar-ficha:not(:disabled),
   #pantallaJuego.tutorial-modo #btn-categorize:not(:disabled),
   #pantallaJuego.tutorial-modo #btn-compare:not(:disabled),
   #pantallaJuego.tutorial-modo #slot-buttons button:not(:disabled) {
@@ -371,6 +368,24 @@
   }
 
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
+
+  /* --- Copia volando de la ficha hacia "Tu código" al resolver una pista
+       (ver animarPistaHaciaCodigo): un clon con position:fixed que arranca
+       en la ficha elegida y termina exactamente en el tamaño/posición real
+       del marcador que le corresponde en la fila de tu código. ---*/
+  .copia-pista-volando {
+    position: fixed;
+    z-index: 9997;
+    border-radius: 8px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 800; color: #fff; font-size: 0.8rem;
+    box-shadow: 0 8px 22px rgba(0,0,0,0.4);
+    pointer-events: none;
+    transition: left 0.62s cubic-bezier(0.22, 1, 0.36, 1), top 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+                width 0.62s cubic-bezier(0.22, 1, 0.36, 1), height 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+                transform 0.62s ease;
+  }
+  .copia-pista-volando .dots { font-size: 0.55rem; letter-spacing: 1px; margin-top: 1px; }
 
   /* --- CAPA: CUENTA REGRESIVA DE DESACTIVACIÓN --- */
   #overlay-desactivar {
@@ -1556,15 +1571,18 @@ function mostrarCajasFuertes(monedas, callbackFin) {
 }
 
 
+// Muestra en grande la ficha que acaba de salir de la reserva, tanto si
+// la sacó un rival como si la sacaste vos (ver handleState): el titulo
+// cambia según quién fue, el resto del overlay es el mismo.
 let timeoutFichaOponente = null;
-function mostrarFichaOponente(nombre, tile) {
+function mostrarFichaGrande(titulo, tile) {
     const overlay = document.getElementById("overlay-ficha-oponente");
     const nombreEl = document.getElementById("of-nombre");
     const tileEl = document.getElementById("of-tile-grande");
     const numEl = document.getElementById("of-numero");
     const dotsEl = document.getElementById("of-dots");
 
-    nombreEl.textContent = `${nombre} robó una ficha`;
+    nombreEl.textContent = titulo;
     tileEl.style.background = COLOR_HEX[tile.color];
     numEl.textContent = tile.number;
     dotsEl.textContent = dotsStr(tile.dots);
@@ -3138,8 +3156,8 @@ const TUTORIAL_ROUNDS = [
     clue: 'categorize',
     revealBanner: '🎓 <b>Bienvenido al tutorial.</b> Así se juega, en 3 pasos que vas a repetir toda la partida:<br>' +
       '① <b>Revela</b> una ficha de la reserva. ② <b>Pide una pista</b> sobre ella. ③ <b>Tacha</b> en la tabla de abajo lo que esa pista te permite descartar.<br><br>' +
-      'Repitiendo esto vas a ir acorralando tu propio código secreto, hasta dejar <b>1 sola ficha sin tachar por color</b>. Empecemos: toca el botón <b>Azul</b> para revelar tu primera ficha.',
-    clueBanner: 'Salió el <b>23</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>🔍 Buscar mayor o menor</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 23.',
+      'Repitiendo esto vas a ir acorralando tu propio código secreto, hasta dejar <b>1 sola ficha sin tachar por color</b>. Empecemos: toca <b>🎲 Sacar ficha</b> — no se elige color, sale una al azar de toda la reserva.',
+    clueBanner: '🍀 ¡Felicidades, sacaste una muy buena ficha! Esta pista nos va a hacer tachar muchas fichas a la vez — eso sí es suerte.<br><br>Salió el <b>23</b> (azul). Ahora pide una pista sobre esa ficha: toca <b>🔍 Buscar mayor o menor</b> para saber cuántas de tus 5 fichas ocultas son <b>menores</b> que 23.',
     afterClue: (clue) => `La pista de BUSCAR MAYOR O MENOR dice: <b>${clue.notch}</b> de tus fichas son menores que 23 (y las otras <b>${5 - clue.notch}</b>, mayores). Mira arriba en "Tu código": tus 5 fichas ya están ordenadas de menor a mayor, y ahí ves el color de cada una aunque no el número. Como las <b>2 más chicas</b> son menores que 23, tu ficha <b>azul</b> (la 1ª) y tu ficha <b>verde</b> (la 2ª) son menores que 23. Y como las otras <b>3</b> son mayores, tu <b>naranja</b> (3ª), tu <b>rosa</b> (4ª) y tu <b>roja</b> (5ª) son mayores que 23. ¡Con una sola pista acabas de descartar fichas en las 5 filas de la tabla, no solo en una!`,
     audioReveal: '/tutorial-audio/paso1-revelar.mp3',
     audioClue: '/tutorial-audio/paso1-pista.mp3',
@@ -3150,7 +3168,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 11, color: 'green', dots: 3 },
     clue: 'compare',
     slot: 3,
-    revealBanner: '<b>Paso 2</b>. Turno nuevo: toca el botón <b>Verde</b> para revelar otra ficha.',
+    revealBanner: '<b>Paso 2</b>. Turno nuevo: toca <b>🎲 Sacar ficha</b> para revelar otra.',
     clueBanner: 'Salió el <b>11</b> (verde, ●●● 3 puntitos). Esta vez toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#4</b> (ya sabes que es rosa) para comparar sus puntitos con los del 11.',
     afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Como el 11 tiene 3 puntitos, ahora sabes que tu ficha rosa <b>#4 también tiene 3 puntitos</b>. Esta pista SÍ te sirve para tachar en la tabla: descarta de un saque toda la fila rosa que NO tenga 3 puntitos.`,
     audioReveal: '/tutorial-audio/paso2-revelar.mp3',
@@ -3161,7 +3179,7 @@ const TUTORIAL_ROUNDS = [
     color: 'orange',
     tile: { number: 25, color: 'orange', dots: 2 },
     clue: 'categorize',
-    revealBanner: '<b>Paso 3</b>. Toca el botón <b>Naranja</b> para revelar otra ficha.',
+    revealBanner: '<b>Paso 3</b>. Toca <b>🎲 Sacar ficha</b> de nuevo.',
     clueBanner: 'Salió el <b>25</b> (naranja). Toca <b>🔍 Buscar mayor o menor</b> de nuevo para saber cuántas de tus fichas son menores que 25.',
     afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> de tus fichas son menores que 25 (y <b>${5 - clue.notch}</b> son mayores) — mismo truco que en el paso 1: tu <b>azul</b> y tu <b>verde</b> siguen siendo menores, tu <b>naranja</b>, tu <b>rosa</b> y tu <b>roja</b> siguen siendo mayores. Baja y tacha lo que todavía quede parpadeando (la mayoría ya la tachaste en el paso 1).`,
     audioReveal: '/tutorial-audio/paso3-revelar.mp3',
@@ -3173,7 +3191,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 37, color: 'pink', dots: 2 },
     clue: 'compare',
     slot: 0,
-    revealBanner: '<b>Paso 4</b>. Toca el botón <b>Rosa</b> para revelar otra ficha.',
+    revealBanner: '<b>Paso 4</b>. Toca <b>🎲 Sacar ficha</b> otra vez.',
     clueBanner: 'Salió el <b>37</b> (rosa, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#1</b> (azul).',
     afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}: tu ficha azul <b>#1</b> también tiene 2 puntitos. Igual que antes, esto descarta de la fila azul todo lo que no tenga 2 puntitos.`,
     audioReveal: '/tutorial-audio/paso4-revelar.mp3',
@@ -3184,7 +3202,7 @@ const TUTORIAL_ROUNDS = [
     color: 'red',
     tile: { number: 4, color: 'red', dots: 1 },
     clue: 'categorize',
-    revealBanner: '<b>Paso 5</b>. Toca el botón <b>Rojo</b> para revelar otra ficha.',
+    revealBanner: '<b>Paso 5</b>. Toca <b>🎲 Sacar ficha</b> de nuevo.',
     clueBanner: 'Salió el <b>4</b> (rojo). Toca <b>🔍 Buscar mayor o menor</b> otra vez.',
     afterClue: (clue) => `La pista dice: <b>${clue.notch}</b> de tus fichas son menores que 4 — es decir, tus <b>5 fichas</b> (azul, verde, naranja, rosa y roja) son mayores que 4. Mismo truco de siempre: baja y tacha lo poco que todavía quede parpadeando en cada fila (son las fichas más bajitas de cada color).`,
     audioReveal: '/tutorial-audio/paso5-revelar.mp3',
@@ -3196,7 +3214,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 13, color: 'blue', dots: 3 },
     clue: 'compare',
     slot: 1,
-    revealBanner: '<b>Paso 6</b>. Toca el botón <b>Azul</b> de nuevo para revelar otra ficha.',
+    revealBanner: '<b>Paso 6</b>. Toca <b>🎲 Sacar ficha</b> otra vez.',
     clueBanner: 'Salió el <b>13</b> (azul, ●●● 3 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#2</b> (verde).',
     afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Aunque no coincidan, igual sirve: ya sabes que tu ficha verde <b>#2</b> NO tiene 3 puntitos, así que puedes tachar ese grupo de la fila verde.`,
     audioReveal: '/tutorial-audio/paso6-revelar.mp3',
@@ -3208,7 +3226,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 40, color: 'orange', dots: 2 },
     clue: 'compare',
     slot: 2,
-    revealBanner: '<b>Paso 7</b>. Toca el botón <b>Naranja</b> otra vez.',
+    revealBanner: '<b>Paso 7</b>. Toca <b>🎲 Sacar ficha</b> de nuevo.',
     clueBanner: 'Salió el <b>40</b> (naranja, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#3</b> (naranja también).',
     afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Tu ficha naranja <b>#3</b> ${clue.same ? 'sí tiene 2 puntitos' : 'NO tiene 2 puntitos'} — tacha en consecuencia en la fila naranja.`,
     audioReveal: '/tutorial-audio/paso7-revelar.mp3',
@@ -3220,7 +3238,7 @@ const TUTORIAL_ROUNDS = [
     tile: { number: 54, color: 'red', dots: 2 },
     clue: 'compare',
     slot: 4,
-    revealBanner: '<b>Paso 8</b>, el último: toca el botón <b>Rojo</b> una vez más.',
+    revealBanner: '<b>Paso 8</b>, el último: toca <b>🎲 Sacar ficha</b> una vez más.',
     clueBanner: 'Salió el <b>54</b> (rojo, ●● 2 puntitos). Toca <b>⚖️ Comparar puntitos</b> y elige tu ficha oculta <b>#5</b> (roja también).',
     afterClue: (clue) => `Los puntitos ${clue.same ? '<b>SÍ coinciden ✅</b>' : '<b>NO coinciden ❌</b>'}. Con esto ya tachaste con tus propias manos gran parte de la tabla.`,
     audioReveal: '/tutorial-audio/paso8-revelar.mp3',
@@ -3516,10 +3534,6 @@ function tutorialSend(raw) {
 
   if (tutorialPhaseWaiting === 'reveal') {
     if (msg.type !== 'reveal' || !round) return;
-    if (msg.color !== round.color) {
-      avisoTutorial(`En este paso del tutorial, toca el color <b>${COLOR_NAME[round.color]}</b>.`);
-      return;
-    }
     doTutorialReveal(round);
     return;
   }
@@ -4093,6 +4107,14 @@ function procesarColaAnimEventos() {
 
 function handleState(state) {
   myId = state.your_id;
+  // Si esta actualización te agrega una pista nueva a VOS (no a un rival),
+  // se guarda acá para animar la ficha volando hacia "Tu código" una vez
+  // que el DOM ya esté al día (ver el final de esta función). No se puede
+  // usar current_turn para saber quién pidió la pista: el turno ya avanzó
+  // al siguiente jugador para cuando llega este estado (ver _end_clue_step
+  // en main.py), así que se compara directamente cuántas pistas tenía tu
+  // propio jugador antes contra ahora.
+  let pistaPropiaNueva = null;
   if (lastState) {
     if (lastState.current_turn !== state.current_turn && state.status === 'playing') {
       reproducirSonido(soundTurno);
@@ -4100,11 +4122,21 @@ function handleState(state) {
     if (state.faceup && lastState.faceup && state.faceup.length > lastState.faceup.length) {
       reproducirSonido(soundCarta);
 
+      const nuevaFicha = state.faceup[state.faceup.length - 1];
       const actorEsOponente = state.current_turn && state.current_turn !== myId;
       if (actorEsOponente) {
-        const nuevaFicha = state.faceup[state.faceup.length - 1];
-        mostrarFichaOponente(state.current_turn_name, nuevaFicha);
+        mostrarFichaGrande(`${state.current_turn_name} robó una ficha`, nuevaFicha);
+      } else {
+        mostrarFichaGrande('¡Sacaste esta ficha!', nuevaFicha);
       }
+    }
+
+    const vosAntes = lastState.players && lastState.players.find(p => p.is_you);
+    const vosAhora = state.players && state.players.find(p => p.is_you);
+    if (vosAntes && vosAhora && vosAhora.clues.length > vosAntes.clues.length) {
+      const clueNueva = vosAhora.clues[vosAhora.clues.length - 1];
+      const faceupIdx = state.faceup.findIndex(t => t.number === clueNueva.tile.number);
+      if (faceupIdx !== -1) pistaPropiaNueva = { faceupIdx, clue: clueNueva };
     }
 
     if (state.events && state.events.length) {
@@ -4246,6 +4278,13 @@ function handleState(state) {
   }
 
   renderGame(state);
+
+  // La animación necesita que el DOM ya tenga el marcador nuevo en su
+  // posición final (recién puesto por renderGame de arriba), así que se
+  // dispara después, en el próximo frame.
+  if (pistaPropiaNueva) {
+    requestAnimationFrame(() => animarPistaHaciaCodigo(pistaPropiaNueva.faceupIdx, pistaPropiaNueva.clue));
+  }
 }
 
 function secretTileHtml(entry) {
@@ -4263,7 +4302,7 @@ function notchTileHtml(tile) {
 
 function compareTileHtml(clue) {
   const mark = clue.same ? '✅' : '❌';
-  return `<div class="compare-tile" style="background:${COLOR_HEX[clue.tile.color]}">${clue.tile.number}<span class="mark">${mark}</span></div>`;
+  return `<div class="compare-tile" style="background:${COLOR_HEX[clue.tile.color]}">${clue.tile.number}<span class="dots">${dotsStr(clue.tile.dots)}</span><span class="mark">${mark}</span></div>`;
 }
 
 function renderStand(player) {
@@ -4291,6 +4330,66 @@ function renderStand(player) {
     }
   }
   return html;
+}
+
+// Ubica, dentro de #your-stand, el marcador que representa una pista ya
+// resuelta (el chip que aparece en la fila "Tu código"): el último hijo
+// del separador .notch que corresponde (categorize) o de la pila
+// .compare-stack que corresponde (compare). Como renderStand() arma esas
+// listas en el mismo orden en que se pidieron las pistas (solo se agregan,
+// nunca se reordenan ni se borran), el último hijo de ese contenedor
+// siempre es la pista que se acaba de resolver — sirve como punto de
+// llegada para animarPistaHaciaCodigo().
+function ubicarMarcadorNuevo(clue) {
+  const standEl = document.getElementById('your-stand');
+  if (!standEl) return null;
+  if (clue.kind === 'categorize') {
+    const notchEl = standEl.querySelectorAll(':scope > .notch')[clue.notch];
+    return notchEl ? notchEl.lastElementChild : null;
+  }
+  const slotColEl = standEl.querySelectorAll(':scope > .slot-col')[clue.slot];
+  const stack = slotColEl ? slotColEl.querySelector('.compare-stack') : null;
+  return stack ? stack.lastElementChild : null;
+}
+
+// Anima una copia de la ficha elegida "volando" desde la reserva hasta el
+// lugar que le corresponde en "Tu código", apenas se resuelve una pista
+// sobre ella. Es puramente decorativo (clon con position:fixed que se
+// mueve por CSS transition): el marcador real ya está en su lugar final
+// desde que renderGame() terminó, acá solo se lo tapa un instante para
+// que la copia "aterrice" encima antes de mostrarlo.
+function animarPistaHaciaCodigo(faceupIdx, clue) {
+  const origen = document.querySelector(`#faceup-row .faceup-tile[data-idx="${faceupIdx}"]`);
+  const destino = ubicarMarcadorNuevo(clue);
+  if (!origen || !destino) return;
+
+  const rOrigen = origen.getBoundingClientRect();
+  const rDestino = destino.getBoundingClientRect();
+  if (rOrigen.width === 0 || rDestino.width === 0) return;
+
+  const copia = document.createElement('div');
+  copia.className = 'copia-pista-volando';
+  copia.style.background = COLOR_HEX[clue.tile.color];
+  copia.innerHTML = `${clue.tile.number}<span class="dots">${dotsStr(clue.tile.dots)}</span>`;
+  copia.style.width = rOrigen.width + 'px';
+  copia.style.height = rOrigen.height + 'px';
+  copia.style.left = rOrigen.left + 'px';
+  copia.style.top = rOrigen.top + 'px';
+  document.body.appendChild(copia);
+  destino.style.visibility = 'hidden';
+
+  requestAnimationFrame(() => {
+    copia.style.left = rDestino.left + 'px';
+    copia.style.top = rDestino.top + 'px';
+    copia.style.width = rDestino.width + 'px';
+    copia.style.height = rDestino.height + 'px';
+    copia.style.transform = 'rotate(360deg)';
+  });
+
+  setTimeout(() => {
+    copia.remove();
+    if (destino.isConnected) destino.style.visibility = 'visible';
+  }, 640);
 }
 
 function renderGame(state) {
@@ -4527,19 +4626,12 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
   if (state.phase === 'reveal') {
     titleEl.textContent = '1. Revela una ficha';
     content.innerHTML = `
-      <div class="action-hint">Elige de qué color robar una ficha de la reserva.</div>
-      <div class="color-buttons" id="color-buttons"></div>
+      <div class="action-hint">Saca una ficha al azar de la reserva — no se elige el color, cualquiera puede salir.</div>
+      <button class="full" id="btn-sacar-ficha">🎲 Sacar ficha</button>
     `;
-    const colorButtons = document.getElementById('color-buttons');
-    COLORS.forEach(c => {
-      const btn = document.createElement('button');
-      btn.className = 'color-btn';
-      btn.style.background = COLOR_HEX[c];
-      btn.textContent = COLOR_NAME[c];
-      btn.disabled = !state.colors_available[c];
-      btn.onclick = () => ws.send(JSON.stringify({type: 'reveal', color: c}));
-      colorButtons.appendChild(btn);
-    });
+    const btnSacar = document.getElementById('btn-sacar-ficha');
+    btnSacar.disabled = !state.deck_remaining;
+    btnSacar.onclick = () => ws.send(JSON.stringify({type: 'reveal'}));
     return;
   }
 

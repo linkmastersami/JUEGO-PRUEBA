@@ -745,11 +745,23 @@ class Room:
     def colors_available(self) -> Dict[str, bool]:
         return {c: len(self.color_piles[c]) > 0 for c in COLORS}
 
-    def reveal_tile(self, color: str) -> Optional[dict]:
-        pile = self.color_piles.get(color, [])
-        if not pile:
+    def reveal_tile(self) -> Optional[dict]:
+        """Saca una ficha al azar del mazo restante (ya no se elige color).
+
+        Cada color_piles[c] ya viene barajado (ver start()), así que para
+        que la probabilidad sea uniforme sobre TODAS las fichas restantes
+        -no solo "1 de 5 colores por igual"- el color se sortea con peso
+        según cuántas fichas le quedan a cada uno, y recién ahí se saca la
+        de arriba de ese color. Con eso, un color con más fichas restantes
+        tiene proporcionalmente más chances, igual que si todo el mazo
+        estuviera mezclado en un solo montón.
+        """
+        colores_con_fichas = [c for c in COLORS if self.color_piles[c]]
+        if not colores_con_fichas:
             return None
-        n = pile.pop()
+        pesos = [len(self.color_piles[c]) for c in colores_con_fichas]
+        color = random.choices(colores_con_fichas, weights=pesos, k=1)[0]
+        n = self.color_piles[color].pop()
         tile = tile_info(n)
         tile["used"] = False
         self.faceup.append(tile)
@@ -1305,8 +1317,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
 
             elif mtype == "reveal" and room.status == "playing" and room.phase == "reveal" and room.pending_guess is None:
                 if room.current_player().id == player.id:
-                    color = msg.get("color")
-                    if room.reveal_tile(color) is not None:
+                    if room.reveal_tile() is not None:
                         await broadcast(room)
 
             elif mtype == "clue" and room.status == "playing" and room.phase == "clue" and room.pending_guess is None:
