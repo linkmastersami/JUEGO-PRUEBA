@@ -2,8 +2,18 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Estratega de Códigos</title>
+<meta name="description" content="Juego de deducción tipo &quot;desactivar la bomba&quot; para 2-4 jugadores, en línea.">
+<meta name="theme-color" content="#12141c">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icons/favicon.ico" sizes="any">
+<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Estratega">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
   :root {
     --bg: #12141c;
@@ -28,7 +38,11 @@
     color: var(--text);
     min-height: 100vh;
   }
-  .wrap { max-width: 520px; margin: 0 auto; padding: 16px; }
+  .wrap {
+    max-width: 520px; margin: 0 auto;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) calc(16px + env(safe-area-inset-right, 0px))
+             calc(16px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
+  }
   h1 { text-align: center; font-size: 1.6rem; margin: 8px 0 4px; }
   .subtitle { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
   .card {
@@ -368,6 +382,11 @@
   }
 
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
+
+  #confetti-canvas {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 9999; pointer-events: none;
+  }
 
   /* --- Copia volando de la ficha hacia "Tu código" al resolver una pista
        (ver animarPistaHaciaCodigo): un clon con position:fixed que arranca
@@ -817,8 +836,8 @@
   .hero-hint { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
   #btn-salir {
     position: fixed;
-    top: 10px;
-    right: 10px;
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    right: calc(10px + env(safe-area-inset-right, 0px));
     z-index: 500;
     padding: 8px 14px;
     font-size: 0.78rem;
@@ -830,8 +849,8 @@
   /* --- Chat flotante --- */
   #btn-chat {
     position: fixed;
-    bottom: 18px;
-    right: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    right: calc(18px + env(safe-area-inset-right, 0px));
     z-index: 600;
     width: 56px;
     height: 56px;
@@ -913,7 +932,7 @@
   #chat-input-row {
     display: flex;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid #2a2d3a;
   }
   #chat-input {
@@ -931,8 +950,8 @@
        para no confundirlos a simple vista --- */
   #btn-lobby-chat {
     position: fixed;
-    bottom: 18px;
-    left: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    left: calc(18px + env(safe-area-inset-left, 0px));
     z-index: 600;
     width: 56px;
     height: 56px;
@@ -1018,7 +1037,7 @@
   #lobby-chat-input-row {
     display: flex;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
     border-top: 1px solid #2a2d3a;
   }
   #lobby-chat-input-row input { flex: 1; margin-bottom: 0; min-width: 0; }
@@ -1027,6 +1046,38 @@
     background: var(--accent2);
     color: #fff;
     white-space: nowrap;
+  }
+
+  /* --- Transición suave entre pantallas ---
+       Antes cada pantalla (join/wait/spectator/game) aparecía de golpe al
+       sacarle la clase .hidden. No hace falta tocar el JS que las
+       muestra/oculta: alcanza con animar la versión ":not(.hidden)", que
+       el navegador dispara solo cada vez que la pantalla pasa de
+       display:none a visible. */
+  @keyframes pantallaFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  #join-screen:not(.hidden),
+  #wait-screen:not(.hidden),
+  #spectator-screen:not(.hidden),
+  #game-screen:not(.hidden) {
+    animation: pantallaFadeIn 0.32s ease;
+  }
+
+  /* --- Accesibilidad: menos movimiento ---
+       Para quien haya pedido "reducir movimiento" en su sistema, se
+       apagan todas las animaciones/transiciones del juego de un saque
+       (los cambios de estado siguen pasando, solo que sin animar el
+       paso intermedio). El confeti de victoria además ni se dispara
+       (ver lanzarConfeti en JS). */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -1083,7 +1134,7 @@
      antes de cobrar nada, para evitar compras accidentales al deslizar. -->
 <div id="overlay-confirmar-compra">
   <div id="confirmar-compra-card">
-    <img id="confirmar-compra-img" src="" alt="avatar">
+    <img id="confirmar-compra-img" src="" alt="avatar" loading="lazy">
     <div id="confirmar-compra-titulo">¿Quieres este avatar?</div>
     <div id="confirmar-compra-precio"></div>
     <button id="btn-confirmar-compra">✅ Confirmar compra</button>
@@ -1117,6 +1168,10 @@
     <div id="dc-contador">20</div>
     <div id="dc-barra-wrap"><div id="dc-barra"></div></div>
 </div>
+
+<!-- Confeti de victoria (ver lanzarConfeti): canvas a pantalla completa,
+     puramente decorativo, nunca intercepta toques. -->
+<canvas id="confetti-canvas"></canvas>
 
 <button id="btn-salir" class="ghost hidden">🚪 Salir</button>
 
@@ -1170,7 +1225,7 @@
 
   <!-- HUD DEL JUGADOR -->
   <div id="perfilJugador" class="card hidden" style="text-align: center; border: 2px solid var(--accent2);">
-      <img id="uiAvatarImg" src="" alt="avatar" style="width:64px; height:64px; object-fit:contain; border-radius:12px; border:2px solid var(--accent2); cursor:pointer; display:none;">
+      <img id="uiAvatarImg" src="" alt="avatar" loading="lazy" style="width:64px; height:64px; object-fit:contain; border-radius:12px; border:2px solid var(--accent2); cursor:pointer; display:none;">
       <h2 id="uiNombre" style="margin: 0;"></h2>
       <h3 id="uiRango" style="color: var(--accent); margin: 5px 0;"></h3>
       <div style="font-size: 1.1rem; font-weight: bold;">
@@ -1200,7 +1255,7 @@
   <div class="card hidden" id="action-card">
     <div class="board-title">
       <span>
-        <img id="tu-avatar-mini" src="" alt="" style="width:26px;height:26px;object-fit:contain;border-radius:6px;vertical-align:middle;margin-right:6px;display:none;">
+        <img id="tu-avatar-mini" src="" alt="" loading="lazy" style="width:26px;height:26px;object-fit:contain;border-radius:6px;vertical-align:middle;margin-right:6px;display:none;">
         Tu código <span class="badge you">TÚ</span> <span class="badge" id="turn-badge-you"></span>
       </span>
     </div>
@@ -2111,7 +2166,7 @@ function crearAvatarItemCompra(item, esGratis) {
     const div = document.createElement('div');
     div.className = 'avatar-item';
     div.innerHTML = `
-        <img src="/gif/${item.archivo}" alt="avatar">
+        <img src="/gif/${item.archivo}" alt="avatar" loading="lazy">
         <div class="avatar-precio${esGratis ? ' gratis' : ''}">${esGratis ? 'GRATIS' : `🪙 ${item.precio}`}</div>
     `;
     div.onclick = () => abrirConfirmarCompra(item, esGratis);
@@ -2190,7 +2245,7 @@ async function cargarTienda() {
                 const div = document.createElement('div');
                 div.className = 'avatar-item' + (archivo === actual ? ' activo' : '');
                 div.innerHTML = `
-                    <img src="/gif/${archivo}" alt="avatar">
+                    <img src="/gif/${archivo}" alt="avatar" loading="lazy">
                     ${archivo === actual ? '<div class="avatar-check">✓ Puesto</div>' : '<div class="avatar-check">Elegir</div>'}
                 `;
                 div.onclick = () => onClickElegir(archivo);
@@ -2398,7 +2453,7 @@ async function abrirRanking() {
             const div = document.createElement('div');
             div.className = 'ranking-fila' + (fila.username === miUsuario ? ' tu-fila' : '');
             const avatarHtml = fila.avatar
-                ? `<img class="ranking-avatar" src="/gif/${fila.avatar}" alt="">`
+                ? `<img class="ranking-avatar" src="/gif/${fila.avatar}" alt="" loading="lazy">`
                 : `<div class="ranking-avatar"></div>`;
             div.innerHTML = `
                 <div class="ranking-pos">${fila.posicion}</div>
@@ -2530,6 +2585,84 @@ function reproducirSonido(audio) {
   if (sonidoSilenciado) return;
   audio.currentTime = 0;
   audio.play().catch(() => {});
+}
+
+// --- Vibración táctil (feedback háptico) ---
+// No todos los navegadores la soportan (iOS Safari no tiene
+// navigator.vibrate), así que si no existe simplemente no pasa nada. Se
+// apaga junto con el botón de silenciar sonido, para no sumar un segundo
+// interruptor solo para esto.
+function vibrar(patron) {
+  if (sonidoSilenciado) return;
+  if (navigator.vibrate) {
+    try { navigator.vibrate(patron); } catch (e) {}
+  }
+}
+
+// --- Confeti de victoria ---
+// Se dispara una sola vez, justo en el instante en que la partida pasa a
+// "finished" y la ganaste vos (ver el chequeo en handleState). Dibuja con
+// Canvas en vez de crear un montón de elementos DOM: más liviano y más
+// fácil de animar a 60fps en un celular. Respeta prefers-reduced-motion:
+// si la persona pidió menos movimiento en su sistema, no se lanza nada.
+const CONFETTI_COLORES = ['#3f9142', '#d17fae', '#3f97a6', '#d1453f', '#e8933f', '#ffb703'];
+let confettiAnimId = null;
+
+function lanzarConfeti() {
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const canvas = document.getElementById('confetti-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = window.innerWidth * dpr;
+  canvas.height = window.innerHeight * dpr;
+  canvas.style.width = window.innerWidth + 'px';
+  canvas.style.height = window.innerHeight + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const W = window.innerWidth, H = window.innerHeight;
+  const piezas = Array.from({ length: 140 }, () => ({
+    x: Math.random() * W,
+    y: -20 - Math.random() * H * 0.5,
+    w: 6 + Math.random() * 6,
+    h: 8 + Math.random() * 8,
+    color: CONFETTI_COLORES[Math.floor(Math.random() * CONFETTI_COLORES.length)],
+    velY: 2.2 + Math.random() * 2.6,
+    velX: (Math.random() - 0.5) * 2.2,
+    rot: Math.random() * Math.PI * 2,
+    velRot: (Math.random() - 0.5) * 0.25,
+  }));
+
+  const inicio = performance.now();
+  const DURACION = 3200;
+
+  if (confettiAnimId) cancelAnimationFrame(confettiAnimId);
+
+  function frame(t) {
+    const transcurrido = t - inicio;
+    ctx.clearRect(0, 0, W, H);
+    let algunaVisible = false;
+    for (const p of piezas) {
+      p.x += p.velX;
+      p.y += p.velY;
+      p.velY += 0.028; // gravedad suave
+      p.rot += p.velRot;
+      if (p.y < H + 20) algunaVisible = true;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    if (transcurrido < DURACION && algunaVisible) {
+      confettiAnimId = requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, W, H);
+      confettiAnimId = null;
+    }
+  }
+  confettiAnimId = requestAnimationFrame(frame);
 }
 
 function actualizarBotonMute() {
@@ -3009,6 +3142,7 @@ function alternarFichaRef(el) {
   }
 
   reproducirSonido(soundTachar);
+  vibrar(12);
 
   if (crossedOut.has(n)) {
     crossedOut.delete(n);
@@ -3990,7 +4124,7 @@ function renderEspectador(state) {
     else if (state.current_turn === p.id) emoji = '🎯';
     const activo = p.id === espectadorPlayerId;
     const avatarHtml = p.avatar
-      ? `<img src="/gif/${p.avatar}" alt="" style="width:18px;height:18px;object-fit:contain;border-radius:4px;vertical-align:middle;margin-right:4px;">`
+      ? `<img src="/gif/${p.avatar}" alt="" loading="lazy" style="width:18px;height:18px;object-fit:contain;border-radius:4px;vertical-align:middle;margin-right:4px;">`
       : '';
     return `<button class="ghost esp-tab-btn ${activo ? 'selected' : ''}" data-id="${p.id}"
       style="padding:8px 12px; font-size:0.85rem; ${activo ? 'border-color: var(--accent); background: #232838;' : ''}">
@@ -4118,9 +4252,11 @@ function handleState(state) {
   if (lastState) {
     if (lastState.current_turn !== state.current_turn && state.status === 'playing') {
       reproducirSonido(soundTurno);
+      if (state.current_turn === myId) vibrar([30, 40, 30]);
     }
     if (state.faceup && lastState.faceup && state.faceup.length > lastState.faceup.length) {
       reproducirSonido(soundCarta);
+      vibrar(18);
 
       const nuevaFicha = state.faceup[state.faceup.length - 1];
       const actorEsOponente = state.current_turn && state.current_turn !== myId;
@@ -4137,6 +4273,15 @@ function handleState(state) {
       const clueNueva = vosAhora.clues[vosAhora.clues.length - 1];
       const faceupIdx = state.faceup.findIndex(t => t.number === clueNueva.tile.number);
       if (faceupIdx !== -1) pistaPropiaNueva = { faceupIdx, clue: clueNueva };
+    }
+
+    // Confeti: justo en el instante en que la partida termina y ganaste
+    // vos (no en cada re-render mientras se sigue mostrando la pantalla
+    // final). Cubre multijugador, solitario y el tutorial por igual, los
+    // 3 marcan status:'finished' + winner con el mismo criterio.
+    if (lastState.status !== 'finished' && state.status === 'finished' && state.winner === myId) {
+      lanzarConfeti();
+      vibrar([100, 60, 100, 60, 220]);
     }
 
     if (state.events && state.events.length) {
@@ -4253,7 +4398,7 @@ function handleState(state) {
     document.getElementById('wait-players').innerHTML = state.players
       .map(p => {
         const avatarHtml = p.avatar
-          ? `<img src="/gif/${p.avatar}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:5px;vertical-align:middle;margin-right:5px;">`
+          ? `<img src="/gif/${p.avatar}" alt="" loading="lazy" style="width:20px;height:20px;object-fit:contain;border-radius:5px;vertical-align:middle;margin-right:5px;">`
           : '';
         return `<div>${avatarHtml}👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}${p.rango ? ` · <span style="opacity:0.75;">${escaparHtml(p.rango)}</span>` : ''}</div>`;
       }).join('');
@@ -4436,7 +4581,7 @@ function renderGame(state) {
     else if (opp.eliminated) badgeText = 'ELIMINADO';
     else if (opp.resolved) badgeText = 'RESUELTO';
     const avatarHtml = opp.avatar
-      ? `<img src="/gif/${opp.avatar}" alt="" style="width:26px;height:26px;object-fit:contain;border-radius:6px;vertical-align:middle;margin-right:6px;">`
+      ? `<img src="/gif/${opp.avatar}" alt="" loading="lazy" style="width:26px;height:26px;object-fit:contain;border-radius:6px;vertical-align:middle;margin-right:6px;">`
       : '';
     return `
     <div class="card">
