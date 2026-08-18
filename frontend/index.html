@@ -2793,6 +2793,15 @@ function conectarSala(room, name, solo = false) {
   // en vez de arrastrar lo que haya quedado tachado de la partida anterior.
   resetearTablaReferencia(claveTablaSala());
   reconnectAttempts = 0;
+  // El contador de eventos de la sala (victorias/derrotas/monedas) arranca
+  // de 0 en cada partida nueva del lado del servidor (ver Room.start() en
+  // main.py), así que acá también hay que reiniciarlo — si no, un evento
+  // con seq=1 de esta partida nueva se confunde con el seq=1 ya visto de
+  // la partida anterior y se descarta sin mostrar la caja fuerte ni sumar
+  // las monedas en el HUD (aunque el servidor sí las haya sumado de
+  // verdad). Esto es lo que hacía que "Jugar de nuevo" pareciera dejar de
+  // dar monedas al ganar por segunda vez.
+  lastEventSeq = 0;
 
   abrirWebSocket(room, name, solo);
 }
