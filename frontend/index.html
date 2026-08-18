@@ -265,6 +265,19 @@
   .caja-fuerte.elegible:active { transform: scale(0.92); }
   .caja-fuerte.abierta { border-color: gold; transform: scale(1.15); animation: none; }
   .caja-fuerte.descartada { opacity: 0.25; animation: none; }
+  /* "Revolver" las cajas antes de poder elegir: como las 3 se ven idénticas
+     (mismo candado 🔒), no tiene sentido animar un intercambio de posición
+     de verdad -sería invisible-, así que en cambio cada una se sacude con
+     un pequeño desfasaje entre sí, para que se sienta como que las están
+     mezclando. */
+  @keyframes cajaRevolver {
+    0%, 100% { transform: translateX(0) rotate(0deg); }
+    25% { transform: translateX(-9px) rotate(-9deg); }
+    75% { transform: translateX(9px) rotate(9deg); }
+  }
+  .caja-fuerte.revolviendo { animation: cajaRevolver 0.42s ease-in-out infinite; }
+  .caja-fuerte.revolviendo:nth-child(2) { animation-delay: 0.14s; }
+  .caja-fuerte.revolviendo:nth-child(3) { animation-delay: 0.28s; }
   @keyframes cajaFlota { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
   #cajas-resultado {
     margin-top: 24px;
@@ -1565,7 +1578,7 @@ function mostrarCajasFuertes(monedas, callbackFin) {
     const titulo = document.getElementById('cajas-titulo');
     const resultado = document.getElementById('cajas-resultado');
 
-    titulo.textContent = '¡Revisando la sala fuerte!';
+    titulo.textContent = '¡Revolviendo las cajas fuertes!';
     resultado.textContent = '';
     resultado.classList.remove('activo');
     fila.innerHTML = '';
@@ -1573,7 +1586,7 @@ function mostrarCajasFuertes(monedas, callbackFin) {
     const cajas = [];
     for (let i = 0; i < 3; i++) {
         const caja = document.createElement('div');
-        caja.className = 'caja-fuerte';
+        caja.className = 'caja-fuerte revolviendo';
         caja.innerHTML = '🔒';
         fila.appendChild(caja);
         cajas.push(caja);
@@ -1583,31 +1596,24 @@ function mostrarCajasFuertes(monedas, callbackFin) {
     void overlay.offsetWidth;
     overlay.classList.add('activo');
 
+    // Las 3 cajas son indistinguibles (mismo candado), así que "revolverlas"
+    // de verdad -moverlas de posición- se vería exactamente igual a no
+    // hacer nada. En cambio se sacuden con la animación .revolviendo un
+    // rato, para que se sienta que se están mezclando, y recién ahí quedan
+    // habilitadas para elegir.
     let elegido = false;
-    let vueltas = 0;
-    const intervaloRevuelto = setInterval(() => {
-        const a = Math.floor(Math.random() * 3);
-        let b = Math.floor(Math.random() * 3);
-        while (b === a) b = Math.floor(Math.random() * 3);
-        const nodoA = fila.children[a], nodoB = fila.children[b];
-        const marcador = document.createComment('');
-        nodoA.parentNode.insertBefore(marcador, nodoA);
-        nodoB.parentNode.insertBefore(nodoA, nodoB);
-        marcador.parentNode.insertBefore(nodoB, marcador);
-        marcador.remove();
-        vueltas++;
-        if (vueltas >= 6) {
-            clearInterval(intervaloRevuelto);
-            titulo.textContent = '¡Elige una caja fuerte!';
-            cajas.forEach(c => c.classList.add('elegible'));
-        }
-    }, 220);
+    let listo = false;
+    const timeoutRevuelto = setTimeout(() => {
+        listo = true;
+        titulo.textContent = '¡Elige una caja fuerte!';
+        cajas.forEach(c => { c.classList.remove('revolviendo'); c.classList.add('elegible'); });
+    }, 1300);
 
     cajas.forEach(caja => {
         caja.onclick = () => {
-            if (elegido) return;
+            if (elegido || !listo) return;
             elegido = true;
-            clearInterval(intervaloRevuelto);
+            clearTimeout(timeoutRevuelto);
             cajas.forEach(c => c.classList.remove('elegible'));
             cajas.forEach(c => { if (c !== caja) c.classList.add('descartada'); });
 
@@ -1781,10 +1787,12 @@ function procesarRondaSolo(nuevos) {
   if (!ev) return;
 
   if (ev.type === 'correct') {
-    const monedasTxt = ev.coins ? ` y ${ev.coins.toLocaleString()} monedas` : '';
+    // Las monedas NO se mencionan acá a propósito: el monto se revela recién
+    // al elegir una caja fuerte (ver mostrarCajasFuertes) — si ya lo decimos
+    // acá, elegir la caja deja de tener sentido porque ya sabés cuánto es.
     mostrarResultadoRonda({
       icono: '🎯',
-      titulo: `¡Bien hecho! Cada día eres un mejor decodificador. Ganaste ${ev.points.toLocaleString()} puntos${monedasTxt}.`,
+      titulo: `¡Bien hecho! Cada día eres un mejor decodificador. Ganaste ${ev.points.toLocaleString()} puntos.`,
       chips: [],
     }, () => queueAnimacionEvento(ev));
     return;
@@ -1874,11 +1882,12 @@ function procesarRondaMultijugador(nuevos, state) {
 
   if (ev.type === 'correct') {
     const esMio = ev.player_id === myId;
-    const monedasTxt = ev.coins ? ` y ${ev.coins.toLocaleString()} monedas` : '';
+    // Igual que en solitario: las monedas no se mencionan acá, se revelan
+    // al elegir una caja fuerte.
     mostrarResultadoRonda({
       icono: '🎯',
       titulo: esMio
-        ? `¡Acertaste tu código! Ganaste ${ev.points.toLocaleString()} puntos${monedasTxt}.`
+        ? `¡Acertaste tu código! Ganaste ${ev.points.toLocaleString()} puntos.`
         : `¡${ev.player_name} acertó su código! Ganó ${ev.points.toLocaleString()} puntos.`,
       chips: [],
     }, () => {
