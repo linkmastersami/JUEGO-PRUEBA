@@ -396,6 +396,45 @@
 
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
 
+  /* --- Batalla de Avatares --- */
+  .batalla-escuadron { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 4px 0; }
+  .batalla-personaje {
+    position: relative; width: 58px; height: 58px; border-radius: 12px;
+    background: #2a2e3d; border: 2px solid #454a5e; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.25s ease, border-color 0.2s ease, transform 0.15s ease;
+  }
+  .batalla-personaje img { width: 100%; height: 100%; object-fit: contain; }
+  .batalla-personaje.caido { opacity: 0.3; filter: grayscale(100%); }
+  .batalla-personaje.caido::after {
+    content: '✕'; position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 1.6rem; font-weight: 900; color: var(--bad);
+  }
+  .batalla-personaje .badges-proteccion {
+    position: absolute; bottom: 1px; left: 1px; right: 1px; display: flex;
+    gap: 1px; justify-content: center; font-size: 0.6rem; line-height: 1;
+    background: rgba(0,0,0,0.55); border-radius: 4px; padding: 1px 0;
+  }
+  .batalla-personaje.objetivo {
+    cursor: pointer; border-color: var(--accent2);
+    animation: batallaPulso 1.1s ease-in-out infinite;
+  }
+  @keyframes batallaPulso {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(33, 158, 188, 0.6); transform: scale(1); }
+    50% { box-shadow: 0 0 0 7px rgba(33, 158, 188, 0); transform: scale(1.06); }
+  }
+  .batalla-mano { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .batalla-carta {
+    width: 72px; padding: 8px 4px; border-radius: 10px; background: #2a2e3d;
+    border: 2px solid #454a5e; color: var(--text); display: flex; flex-direction: column;
+    align-items: center; gap: 3px; font-size: 0.68rem; font-weight: 700; text-align: center;
+    cursor: pointer;
+  }
+  .batalla-carta .emoji { font-size: 1.5rem; }
+  .batalla-carta.seleccionada { border-color: var(--accent); background: #3a3220; }
+  .batalla-carta.marcada-descarte { border-color: var(--bad); opacity: 0.75; }
+  .batalla-carta:disabled, .batalla-carta.deshabilitada { opacity: 0.35; cursor: not-allowed; }
+
   #confetti-canvas {
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 9999; pointer-events: none;
@@ -847,6 +886,21 @@
   .hero-emoji { font-size: 3.2rem; text-align: center; margin-bottom: 4px; filter: drop-shadow(0 0 18px rgba(255,183,3,0.35)); }
   .hero-title { text-align: center; margin: 0 0 4px; font-size: 1.3rem; }
   .hero-hint { text-align: center; color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+
+  /* --- Tarjetas de "¿A qué quieres jugar?" --- */
+  .juego-card {
+    display: flex; align-items: center; gap: 14px; text-align: left;
+    padding: 16px; background: var(--card); border: 2px solid #3a3f52;
+    color: var(--text);
+  }
+  .juego-card:active { transform: scale(0.98); }
+  .juego-card-emoji { font-size: 2.2rem; flex-shrink: 0; }
+  .juego-card-texto { display: flex; flex-direction: column; gap: 2px; }
+  .juego-card-texto b { font-size: 1.05rem; }
+  .juego-card-texto span { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
+  #btn-elegir-codigos:hover, #btn-elegir-codigos:focus-visible { border-color: var(--accent); }
+  #btn-elegir-batalla:hover, #btn-elegir-batalla:focus-visible { border-color: var(--bad); }
+  .ranking-tab.activo { background: var(--accent2); color: #fff; border-color: var(--accent2); }
   #btn-salir {
     position: fixed;
     top: calc(10px + env(safe-area-inset-top, 0px));
@@ -1171,6 +1225,10 @@
     <div id="ranking-header">
       <h2>🏆 Ranking de jugadores</h2>
     </div>
+    <div class="row" style="justify-content:center; margin-bottom:10px;">
+      <button class="ghost ranking-tab activo" id="ranking-tab-codigos" style="padding:6px 14px; font-size:0.8rem;">🎯 Estratega</button>
+      <button class="ghost ranking-tab" id="ranking-tab-batalla" style="padding:6px 14px; font-size:0.8rem;">⚔️ Batalla</button>
+    </div>
     <div id="ranking-lista"></div>
     <button id="ranking-btn-cerrar">Cerrar</button>
 </div>
@@ -1309,40 +1367,86 @@
       <input id="name-input" type="hidden" value="">
     </div>
 
-    <!-- Paso 2: elegir cómo jugar (aparece después del nombre) -->
+    <!-- Paso 2: elegir QUÉ juego (Estratega de Códigos o Batalla de
+         Avatares) — comparten cuenta, monedas, avatar y espacio de
+         códigos de sala, pero cada uno tiene su propio ranking. -->
+    <div id="join-step-juego" class="hidden">
+      <div class="board-title" style="justify-content:center; text-align:center;">
+        ¡Hola, <span id="nombre-confirmado-juego"></span>! ¿A qué quieres jugar?
+      </div>
+
+      <button class="full juego-card" id="btn-elegir-codigos" style="margin-bottom: 12px;">
+        <span class="juego-card-emoji">🎯</span>
+        <span class="juego-card-texto">
+          <b>Estratega de Códigos</b>
+          <span>Deducción por turnos · 2-4 jugadores</span>
+        </span>
+      </button>
+
+      <button class="full juego-card" id="btn-elegir-batalla">
+        <span class="juego-card-emoji">⚔️</span>
+        <span class="juego-card-texto">
+          <b>Batalla de Avatares</b>
+          <span>Duelo de cartas 1v1 · partidas rápidas</span>
+        </span>
+      </button>
+
+      <button class="full ghost" id="btn-cambiar-nombre-juego" style="margin-top: 16px; font-size: 0.8rem;">← Cerrar sesión</button>
+    </div>
+
+    <!-- Paso 3: elegir cómo jugar (aparece después de elegir el juego) -->
     <div id="join-step-modo" class="hidden">
       <div class="board-title" style="justify-content:center; text-align:center;">
-        ¡Hola, <span id="nombre-confirmado"></span>! ¿Cómo quieres jugar?
+        <span id="titulo-modo-juego">¿Cómo quieres jugar?</span>
       </div>
 
       <!-- El chat grupal ya no va aquí incrustado: ahora es la ventana
            flotante 🌐 (#btn-lobby-chat / #lobby-chat-panel), mismo patrón
            que el chat de sala pero del otro lado de la pantalla. -->
 
-      <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
-        🔍 Encontrar Partida Rápida
-      </button>
+      <!-- Acciones de Estratega de Códigos -->
+      <div id="modo-acciones-codigos">
+        <button class="full" id="btn-auto-join" style="margin-bottom: 15px; font-size: 1.1rem;">
+          🔍 Encontrar Partida Rápida
+        </button>
 
-      <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
-        — o crea/únete a una sala privada —
+        <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
+          — o crea/únete a una sala privada —
+        </div>
+
+        <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
+        <button class="full secondary" id="join-btn">Entrar a sala privada</button>
+
+        <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
+          — o practica sin rivales —
+        </div>
+
+        <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
+          🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
+        </button>
+
+        <button class="full ghost" id="btn-tutorial" style="border-color: var(--accent2); margin-top: 10px;">
+          🎓 Tutorial guiado <span style="opacity:0.7;">(sin puntos ni monedas)</span>
+        </button>
       </div>
 
-      <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
-      <button class="full secondary" id="join-btn">Entrar a sala privada</button>
+      <!-- Acciones de Batalla de Avatares: sin tutorial ni solitario, solo
+           partida rápida (con bot de relleno a los 10s) y sala privada. -->
+      <div id="modo-acciones-batalla" class="hidden">
+        <button class="full" id="btn-auto-join-batalla" style="margin-bottom: 15px; font-size: 1.1rem;">
+          ⚔️ Encontrar Rival
+        </button>
 
-      <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
-        — o practica sin rivales —
+        <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
+          — o crea/únete a una sala privada —
+        </div>
+
+        <input id="room-input-batalla" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
+        <button class="full secondary" id="join-btn-batalla">Entrar a sala privada</button>
       </div>
 
-      <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
-        🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
-      </button>
-
-      <button class="full ghost" id="btn-tutorial" style="border-color: var(--accent2); margin-top: 10px;">
-        🎓 Tutorial guiado <span style="opacity:0.7;">(sin puntos ni monedas)</span>
-      </button>
-
-      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 12px; font-size: 0.8rem;">← Cerrar sesión</button>
+      <button class="full ghost" id="btn-cambiar-juego" style="margin-top: 12px; font-size: 0.8rem;">← Elegir otro juego</button>
+      <button class="full ghost" id="btn-cambiar-nombre" style="margin-top: 6px; font-size: 0.8rem;">← Cerrar sesión</button>
 
       <!-- Salas con partidas en curso: cualquiera puede entrar a ver como
            espectador, incluso si es una partida en solitario. -->
@@ -1384,24 +1488,45 @@
     <div class="status-line" id="esp-status-line">👁️ Viendo como espectador · Sala <span id="esp-room-code"></span></div>
     <button class="ghost full" id="esp-btn-salir" style="margin: 10px 0;">⬅ Volver a la selección de modo</button>
 
-    <div class="card">
-      <div class="board-title">
-        <span>Fichas junto a la reserva</span>
-        <span class="badge" id="esp-deck-badge">Mazo: --</span>
+    <div id="esp-contenido-codigos">
+      <div class="card">
+        <div class="board-title">
+          <span>Fichas junto a la reserva</span>
+          <span class="badge" id="esp-deck-badge">Mazo: --</span>
+        </div>
+        <div class="faceup-row" id="esp-faceup-row"></div>
       </div>
-      <div class="faceup-row" id="esp-faceup-row"></div>
+
+      <div class="card">
+        <div class="board-title"><span>👥 Cambiar de pantalla · elige un jugador</span></div>
+        <div id="esp-player-tabs" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 12px;"></div>
+
+        <div class="board-title">
+          <span id="esp-selected-name">—</span>
+          <span class="badge" id="esp-selected-badge"></span>
+        </div>
+        <div class="stand" id="esp-selected-stand"></div>
+        <div class="action-hint">Nadie —ni siquiera el propio jugador— puede ver el número real de un código: solo su color y sus puntitos.</div>
+      </div>
     </div>
 
-    <div class="card">
-      <div class="board-title"><span>👥 Cambiar de pantalla · elige un jugador</span></div>
-      <div id="esp-player-tabs" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 12px;"></div>
-
-      <div class="board-title">
-        <span id="esp-selected-name">—</span>
-        <span class="badge" id="esp-selected-badge"></span>
+    <!-- Contenido de espectador para Batalla de Avatares: mismo cascarón
+         (título/salir/chat), cuerpo distinto. -->
+    <div id="esp-contenido-batalla" class="hidden">
+      <div class="card">
+        <div class="board-title">
+          <span id="esp-batalla-nombre-1">—</span>
+          <span class="badge" id="esp-batalla-turno-1"></span>
+        </div>
+        <div id="esp-batalla-escuadron-1" class="batalla-escuadron"></div>
       </div>
-      <div class="stand" id="esp-selected-stand"></div>
-      <div class="action-hint">Nadie —ni siquiera el propio jugador— puede ver el número real de un código: solo su color y sus puntitos.</div>
+      <div class="card">
+        <div class="board-title">
+          <span id="esp-batalla-nombre-2">—</span>
+          <span class="badge" id="esp-batalla-turno-2"></span>
+        </div>
+        <div id="esp-batalla-escuadron-2" class="batalla-escuadron"></div>
+      </div>
     </div>
 
     <div class="card">
@@ -1445,6 +1570,55 @@
     <div class="card">
       <div class="board-title">Historial</div>
       <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       BATALLA DE AVATARES — segundo juego, pantallas propias.
+       ============================================================ -->
+  <div id="wait-screen-batalla" class="card hidden">
+    <div class="board-title">Sala <span class="badge" id="wait-batalla-room-code"></span></div>
+    <div class="players-list" id="wait-batalla-players"></div>
+    <div id="wait-batalla-countdown" class="hidden" style="text-align:center; margin-top:16px;">
+      <div style="font-size:0.85rem; color:var(--muted); margin-bottom:6px;">⚔️ Buscando rival...</div>
+      <div id="wait-batalla-countdown-num" style="font-size:2.6rem; font-weight:900; color:var(--accent);">10</div>
+    </div>
+    <div id="wait-batalla-esperando" class="hidden" style="text-align:center; color:var(--muted); margin-top:16px; font-size:0.9rem;">
+      Esperando a que se una tu rival con el código de sala...
+    </div>
+  </div>
+
+  <div id="game-screen-batalla" class="hidden">
+    <div class="status-line" id="status-line-batalla">Conectando...</div>
+    <div id="result-card-batalla" class="card hidden"></div>
+
+    <div class="card">
+      <div class="board-title">
+        <span id="batalla-rival-nombre">⚔️ Rival</span>
+        <span class="badge" id="batalla-turno-rival-badge"></span>
+      </div>
+      <div id="batalla-escuadron-rival" class="batalla-escuadron"></div>
+    </div>
+
+    <div class="card">
+      <div class="board-title">
+        <span>Tu escuadrón <span class="badge you">TÚ</span></span>
+        <span class="badge" id="batalla-turno-badge"></span>
+      </div>
+      <div id="batalla-escuadron-propio" class="batalla-escuadron"></div>
+
+      <div class="board-title" style="margin-top:14px;">
+        <span>Tu mano</span>
+        <span class="badge" id="batalla-mazo-badge">Mazo: --</span>
+      </div>
+      <div id="batalla-mano" class="batalla-mano"></div>
+      <div id="batalla-accion-content" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- Historial -->
+    <div class="card">
+      <div class="board-title">Historial</div>
+      <div class="log" id="log-batalla"></div>
     </div>
   </div>
 </div>
@@ -1993,15 +2167,19 @@ async function continuarConSesion(username) {
     const data = await resp.json();
     if (data.found) {
       errEl.textContent = '';
-      conectarSala(data.room, username, data.mode === 'solo');
+      if (data.mode === 'batalla') {
+        conectarSalaBatalla(data.room, username);
+      } else {
+        conectarSala(data.room, username, data.mode === 'solo');
+      }
       return;
     }
   } catch (e) { /* seguimos normalmente */ }
 
   errEl.textContent = '';
-  document.getElementById('nombre-confirmado').textContent = username;
+  document.getElementById('nombre-confirmado-juego').textContent = username;
   document.getElementById('join-step-name').classList.add('hidden');
-  document.getElementById('join-step-modo').classList.remove('hidden');
+  document.getElementById('join-step-juego').classList.remove('hidden');
   conectarLobby(username);
   cargarSalasEnCurso();
   actualizarPerfilHUD(username);
@@ -2074,6 +2252,7 @@ async function cerrarSesion() {
   document.getElementById('auth-username-input').value = '';
   document.getElementById('auth-password-input').value = '';
   document.getElementById('join-error').textContent = '';
+  document.getElementById('join-step-juego').classList.add('hidden');
   document.getElementById('join-step-modo').classList.add('hidden');
   document.getElementById('join-step-name').classList.remove('hidden');
   cerrarLobby();
@@ -2444,13 +2623,16 @@ document.getElementById('btn-mis-avatares').onclick = () => abrirSelectorAvatare
 // ---------------------------------------------------------------------------
 // Ranking de jugadores (avatar, rango y puntos de todos)
 // ---------------------------------------------------------------------------
-async function abrirRanking() {
+async function abrirRanking(juego) {
+    juego = juego || 'codigos';
     document.getElementById('overlay-ranking').classList.add('activo');
+    document.getElementById('ranking-tab-codigos').classList.toggle('activo', juego === 'codigos');
+    document.getElementById('ranking-tab-batalla').classList.toggle('activo', juego === 'batalla');
     const lista = document.getElementById('ranking-lista');
     lista.innerHTML = '<div style="color:var(--muted); text-align:center;">Cargando...</div>';
     const miUsuario = document.getElementById('name-input').value;
     try {
-        const resp = await fetch('/ranking');
+        const resp = await fetch('/ranking?juego=' + encodeURIComponent(juego));
         const data = await resp.json();
         const ranking = data.ranking || [];
         if (ranking.length === 0) {
@@ -2481,8 +2663,10 @@ function cerrarRanking() {
     document.getElementById('overlay-ranking').classList.remove('activo');
 }
 
-document.getElementById('btn-ranking').onclick = abrirRanking;
+document.getElementById('btn-ranking').onclick = () => abrirRanking(juegoElegido);
 document.getElementById('ranking-btn-cerrar').onclick = cerrarRanking;
+document.getElementById('ranking-tab-codigos').onclick = () => abrirRanking('codigos');
+document.getElementById('ranking-tab-batalla').onclick = () => abrirRanking('batalla');
 
 // ---------------------------------------------------------------------------
 // Solicitar un avatar nuevo (con cooldown de 15 días, ver /avatar/solicitar)
@@ -2872,6 +3056,14 @@ async function abrirWebSocket(room, name, solo) {
       conectarEspectador(msg.room, nombre);
       return;
     }
+    if (msg.type === 'redirect_game') {
+      // Este código en realidad es de Batalla de Avatares: reconectar allá.
+      esSalidaIntencional = true;
+      thisSocket.close();
+      const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
+      conectarSalaBatalla(msg.room, nombre);
+      return;
+    }
     if (msg.type === 'state') {
       document.getElementById('join-screen').classList.add('hidden');
       handleState(msg);
@@ -2964,23 +3156,27 @@ function volverAlInicio() {
   limpiarEstadoDePartida();
   cerrarLobby();
   document.getElementById('join-screen').classList.remove('hidden');
+  document.getElementById('join-step-juego').classList.add('hidden');
   document.getElementById('join-step-modo').classList.add('hidden');
   document.getElementById('join-step-name').classList.remove('hidden');
 }
 
-// --- Vuelve a la pantalla de "¿Cómo quieres jugar?" conservando el nombre
-// ya conocido, sin volver a pedirlo. Se usa al salir de una partida o al
-// terminarla (en vez de volverAlInicio, que resetea hasta el nombre). ---
+// --- Vuelve a la pantalla de "¿Cómo quieres jugar [Estratega]?" conservando
+// el nombre ya conocido, sin volver a pedirlo ni pasar por el selector de
+// juego. Se usa al salir de una partida o al terminarla (en vez de
+// volverAlInicio, que resetea hasta el nombre). ---
 function irASeleccionModo(nombre) {
   esSalidaIntencional = true;
   currentRoomCode = null;
   currentPlayerName = null;
   limpiarEstadoDePartida();
+  juegoElegido = 'codigos';
 
   document.getElementById('join-screen').classList.remove('hidden');
   document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-juego').classList.add('hidden');
   document.getElementById('join-step-modo').classList.remove('hidden');
-  document.getElementById('nombre-confirmado').textContent = nombre;
+  mostrarModoParaJuego('codigos');
   document.getElementById('name-input').value = nombre;
 
   conectarLobby(nombre);
@@ -3041,6 +3237,14 @@ document.getElementById('btn-solo').onclick = () => {
 // Vuelve a la pantalla de selección de modo dentro de la misma SPA (sin
 // recargar la página), conservando el nombre para no tener que reescribirlo.
 document.getElementById('btn-salir').onclick = () => {
+  // El botón de salir es el mismo para los dos juegos (uno solo puede estar
+  // activo por pestaña a la vez): si hay una sala de Batalla en curso, se
+  // sale de esa en vez de la de Estratega de Códigos.
+  if (currentRoomCodeBatalla) {
+    salirDeBatalla();
+    return;
+  }
+
   const status = lastState ? lastState.status : null;
   const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
 
@@ -4051,16 +4255,16 @@ async function cargarSalasEnCurso() {
       return;
     }
     cont.innerHTML = salas.map(s => {
-      const modoTxt = s.mode === 'solo' ? 'Solitario' : 'Multijugador';
+      const juegoTxt = s.game === 'batalla' ? '⚔️ Batalla de Avatares' : (s.mode === 'solo' ? '🎯 Solitario' : '🎯 Estratega');
       const estadoTxt = s.status === 'playing' ? 'en juego' : 'esperando';
       const codeAttr = escaparHtml(s.code);
       return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #2a2e3d;">
-        <span>Sala <b>${codeAttr}</b> · ${modoTxt} · ${s.players} jugador(es) · ${estadoTxt}</span>
+        <span>Sala <b>${codeAttr}</b> · ${juegoTxt} · ${s.players} jugador(es) · ${estadoTxt}</span>
         <button class="ghost btn-ver-espectador" data-code="${codeAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>
       </div>`;
     }).join('');
-    cont.querySelectorAll('.btn-ver-espectador').forEach(btn => {
-      btn.onclick = () => verComoEspectador(btn.dataset.code);
+    cont.querySelectorAll('.btn-ver-espectador').forEach((btn, i) => {
+      btn.onclick = () => verComoEspectador(btn.dataset.code, salas[i].game);
     });
   } catch (e) {
     cont.innerHTML = 'No se pudo cargar la lista.';
@@ -4068,8 +4272,10 @@ async function cargarSalasEnCurso() {
 }
 document.getElementById('btn-refrescar-salas').onclick = cargarSalasEnCurso;
 
-function verComoEspectador(code) {
+let espectadorJuego = 'codigos';
+function verComoEspectador(code, juego) {
   const nombre = (currentPlayerName || document.getElementById('name-input').value.trim() || localStorage.getItem('edc_name') || 'Espectador');
+  espectadorJuego = juego || 'codigos';
   conectarEspectador(code, nombre);
 }
 
@@ -4111,11 +4317,37 @@ function volverDeEspectador() {
   cerrarWsEspectador();
   document.getElementById('spectator-screen').classList.add('hidden');
   const nombre = currentPlayerName || localStorage.getItem('edc_name') || document.getElementById('name-input').value.trim();
-  irASeleccionModo(nombre);
+  if (espectadorJuego === 'batalla') {
+    irASeleccionModoBatalla(nombre);
+  } else {
+    irASeleccionModo(nombre);
+  }
 }
 document.getElementById('esp-btn-salir').onclick = volverDeEspectador;
 
 function renderEspectador(state) {
+  const esBatalla = state.game === 'batalla';
+  document.getElementById('esp-contenido-codigos').classList.toggle('hidden', esBatalla);
+  document.getElementById('esp-contenido-batalla').classList.toggle('hidden', !esBatalla);
+
+  // El chat de espectador es genérico entre los dos juegos (mismo shape de
+  // mensaje, mismo endpoint de WS) — se pinta acá arriba para los dos.
+  const chatCont = document.getElementById('esp-chat-mensajes');
+  chatCont.innerHTML = (state.chat || []).map(m => {
+    const autor = m.is_spectator ? `${escaparHtml(m.player_name)} (espectador)` : escaparHtml(m.player_name);
+    return `<div class="chat-msg ajeno"><span class="chat-autor">${autor}</span>${escaparHtml(m.text)}</div>`;
+  }).join('');
+  chatCont.scrollTop = chatCont.scrollHeight;
+
+  const logEl = document.getElementById('esp-log');
+  logEl.innerHTML = (state.log || []).map(l => `<div>${l}</div>`).join('');
+  logEl.scrollTop = logEl.scrollHeight;
+
+  if (esBatalla) {
+    renderEspectadorBatalla(state);
+    return;
+  }
+
   document.getElementById('esp-deck-badge').textContent = `Mazo: ${state.deck_remaining ?? '--'}`;
 
   const faceupRow = document.getElementById('esp-faceup-row');
@@ -4181,17 +4413,6 @@ function renderEspectador(state) {
   } else {
     statusLine.textContent = `👁️ Turno de ${state.current_turn_name || '—'} · Sala ${state.room}`;
   }
-
-  const logEl = document.getElementById('esp-log');
-  logEl.innerHTML = (state.log || []).map(l => `<div>${l}</div>`).join('');
-  logEl.scrollTop = logEl.scrollHeight;
-
-  const chatCont = document.getElementById('esp-chat-mensajes');
-  chatCont.innerHTML = (state.chat || []).map(m => {
-    const autor = m.is_spectator ? `${escaparHtml(m.player_name)} (espectador)` : escaparHtml(m.player_name);
-    return `<div class="chat-msg ajeno"><span class="chat-autor">${autor}</span>${escaparHtml(m.text)}</div>`;
-  }).join('');
-  chatCont.scrollTop = chatCont.scrollHeight;
 }
 
 function enviarMensajeEspectador() {
@@ -4853,6 +5074,543 @@ function renderActionPanel(state, isYourTurn, youEliminated) {
     };
   }
 }
+
+// =============================================================================
+// BATALLA DE AVATARES — segundo juego. Conexión, estado y render totalmente
+// aparte de Estratega de Códigos (variables/funciones con sufijo "Batalla")
+// para no arriesgar tocar nada de la lógica ya probada del otro juego. Lo
+// que sí se reutiliza tal cual: overlays genéricos (mostrarResultadoRonda,
+// mostrarCajasFuertes), lanzarConfeti/vibrar, reproducirSonido, escaparHtml,
+// conectarLobby/cargarSalasEnCurso, y el patrón de reconexión de
+// abrirWebSocket.
+// =============================================================================
+
+let juegoElegido = 'codigos';
+let wsBatalla = null;
+let currentRoomCodeBatalla = null;
+let currentPlayerNameBatalla = null;
+let esSalidaIntencionalBatalla = false;
+let reconnectAttemptsBatalla = 0;
+let reconnectTimeoutBatalla = null;
+let heartbeatIntervalBatalla = null;
+let lastStateBatalla = null;
+let myIdBatalla = null;
+let cartaSeleccionadaBatalla = null;
+let modoDescarteBatalla = false;
+let cartasParaDescartar = [];
+let matchmakingIntervalBatalla = null;
+
+// --- Selector de juego ---
+function mostrarModoParaJuego(juego) {
+  const esBatalla = juego === 'batalla';
+  document.getElementById('modo-acciones-codigos').classList.toggle('hidden', esBatalla);
+  document.getElementById('modo-acciones-batalla').classList.toggle('hidden', !esBatalla);
+  document.getElementById('titulo-modo-juego').textContent = esBatalla
+    ? '⚔️ Batalla de Avatares — ¿cómo quieres jugar?'
+    : '🎯 Estratega de Códigos — ¿cómo quieres jugar?';
+}
+
+function elegirJuego(juego) {
+  juegoElegido = juego;
+  document.getElementById('join-step-juego').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+  mostrarModoParaJuego(juego);
+}
+document.getElementById('btn-elegir-codigos').onclick = () => elegirJuego('codigos');
+document.getElementById('btn-elegir-batalla').onclick = () => elegirJuego('batalla');
+document.getElementById('btn-cambiar-nombre-juego').onclick = () => cerrarSesion();
+document.getElementById('btn-cambiar-juego').onclick = () => {
+  document.getElementById('join-step-modo').classList.add('hidden');
+  document.getElementById('nombre-confirmado-juego').textContent = document.getElementById('name-input').value.trim();
+  document.getElementById('join-step-juego').classList.remove('hidden');
+};
+
+// --- Vuelve a la pantalla de "¿cómo quieres jugar Batalla?" conservando el
+// nombre, igual de espíritu que irASeleccionModo() con Estratega. ---
+function irASeleccionModoBatalla(nombre) {
+  esSalidaIntencionalBatalla = true;
+  currentRoomCodeBatalla = null;
+  currentPlayerNameBatalla = null;
+  limpiarEstadoDePartidaBatalla();
+  juegoElegido = 'batalla';
+
+  document.getElementById('join-screen').classList.remove('hidden');
+  document.getElementById('join-step-name').classList.add('hidden');
+  document.getElementById('join-step-juego').classList.add('hidden');
+  document.getElementById('join-step-modo').classList.remove('hidden');
+  mostrarModoParaJuego('batalla');
+  document.getElementById('name-input').value = nombre;
+
+  conectarLobby(nombre);
+  cargarSalasEnCurso();
+}
+
+function limpiarEstadoDePartidaBatalla() {
+  if (reconnectTimeoutBatalla) { clearTimeout(reconnectTimeoutBatalla); reconnectTimeoutBatalla = null; }
+  if (heartbeatIntervalBatalla) { clearInterval(heartbeatIntervalBatalla); heartbeatIntervalBatalla = null; }
+  if (matchmakingIntervalBatalla) { clearInterval(matchmakingIntervalBatalla); matchmakingIntervalBatalla = null; }
+  if (wsBatalla) { try { wsBatalla.close(); } catch (e) {} }
+  wsBatalla = null;
+  lastStateBatalla = null;
+  cartaSeleccionadaBatalla = null;
+  modoDescarteBatalla = false;
+  cartasParaDescartar = [];
+  document.getElementById('wait-screen-batalla').classList.add('hidden');
+  document.getElementById('game-screen-batalla').classList.add('hidden');
+  document.getElementById('btn-salir').classList.add('hidden');
+}
+
+// --- Conexión ---
+function conectarSalaBatalla(room, name) {
+  const errEl = document.getElementById('join-error');
+  errEl.textContent = '';
+  if (!room || !name) {
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+  cerrarLobby();
+  actualizarPerfilHUD(name);
+  currentRoomCodeBatalla = room;
+  currentPlayerNameBatalla = name;
+  esSalidaIntencionalBatalla = false;
+  reconnectAttemptsBatalla = 0;
+  abrirWebSocketBatalla(room, name);
+}
+
+async function abrirWebSocketBatalla(room, name) {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const token = await obtenerAccessToken();
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  wsBatalla = new WebSocket(`${proto}://${location.host}/ws/batalla/${encodeURIComponent(room)}/${encodeURIComponent(name)}${tokenParam}`);
+  const thisSocket = wsBatalla;
+
+  wsBatalla.onopen = () => {
+    if (wsBatalla !== thisSocket) return;
+    reconnectAttemptsBatalla = 0;
+    heartbeatIntervalBatalla = setInterval(() => {
+      if (wsBatalla && wsBatalla.readyState === WebSocket.OPEN) {
+        try { wsBatalla.send(JSON.stringify({type: 'ping'})); } catch (e) {}
+      }
+    }, 20000);
+  };
+
+  wsBatalla.onmessage = (event) => {
+    if (wsBatalla !== thisSocket) return;
+    const msg = JSON.parse(event.data);
+    if (msg.type === 'error') {
+      document.getElementById('join-error').textContent = msg.message;
+      esSalidaIntencionalBatalla = true;
+      thisSocket.close();
+      return;
+    }
+    if (msg.type === 'redirect_spectator') {
+      esSalidaIntencionalBatalla = true;
+      thisSocket.close();
+      const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
+      espectadorJuego = 'batalla';
+      conectarEspectador(msg.room, nombre);
+      return;
+    }
+    if (msg.type === 'redirect_game') {
+      // El código pertenece a Estratega de Códigos: reconectar allá.
+      esSalidaIntencionalBatalla = true;
+      thisSocket.close();
+      const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
+      conectarSala(msg.room, nombre);
+      return;
+    }
+    if (msg.type === 'state') {
+      document.getElementById('join-screen').classList.add('hidden');
+      handleStateBatalla(msg);
+    }
+  };
+
+  wsBatalla.onclose = () => {
+    if (wsBatalla !== thisSocket) return;
+    if (heartbeatIntervalBatalla) { clearInterval(heartbeatIntervalBatalla); heartbeatIntervalBatalla = null; }
+    if (esSalidaIntencionalBatalla) return;
+    if (!currentRoomCodeBatalla || !currentPlayerNameBatalla) return;
+    if (reconnectAttemptsBatalla >= MAX_RECONNECT_ATTEMPTS) return;
+    reconnectAttemptsBatalla++;
+    const statusLine = document.getElementById('status-line-batalla');
+    if (statusLine) statusLine.textContent = `Conexión perdida. Reconectando... (${reconnectAttemptsBatalla}/${MAX_RECONNECT_ATTEMPTS})`;
+    const espera = Math.min(800 * reconnectAttemptsBatalla, 5000);
+    reconnectTimeoutBatalla = setTimeout(() => {
+      if (esSalidaIntencionalBatalla) return;
+      abrirWebSocketBatalla(currentRoomCodeBatalla, currentPlayerNameBatalla);
+    }, espera);
+  };
+}
+
+document.getElementById('btn-auto-join-batalla').onclick = async () => {
+  const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
+  if (!name) {
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+  errEl.textContent = 'Buscando rival...';
+  try {
+    const resp = await fetch('/matchmake?game=batalla');
+    const data = await resp.json();
+    if (resp.ok && data.room) {
+      errEl.textContent = '';
+      conectarSalaBatalla(data.room, name);
+    } else {
+      errEl.textContent = data.detail || 'No se pudo encontrar partida.';
+    }
+  } catch (e) {
+    errEl.textContent = 'Error de conexión con el servidor.';
+  }
+};
+
+document.getElementById('join-btn-batalla').onclick = () => {
+  const room = document.getElementById('room-input-batalla').value.trim().toUpperCase();
+  const name = document.getElementById('name-input').value.trim();
+  if (!name) {
+    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+  conectarSalaBatalla(room, name);
+};
+
+function salirDeBatalla() {
+  const status = lastStateBatalla ? lastStateBatalla.status : null;
+  const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
+  if (status === 'playing') {
+    if (!confirm('Si sales ahora perderás automáticamente y tu rival gana. ¿Seguro que quieres salir?')) return;
+  } else if (status === 'waiting') {
+    if (!confirm('¿Seguro que quieres salir de la sala?')) return;
+  }
+  if (nombre) localStorage.setItem('edc_name', nombre);
+  if (wsBatalla && wsBatalla.readyState === WebSocket.OPEN) {
+    try { wsBatalla.send(JSON.stringify({type: 'leave'})); } catch (e) {}
+  }
+  esSalidaIntencionalBatalla = true;
+  irASeleccionModoBatalla(nombre);
+}
+
+// --- Estado / render ---
+function handleStateBatalla(state) {
+  myIdBatalla = state.your_id;
+  const anterior = lastStateBatalla;
+
+  if (anterior) {
+    if (anterior.current_turn !== state.current_turn && state.status === 'playing') {
+      reproducirSonido(soundTurno);
+      if (state.current_turn === myIdBatalla) vibrar([30, 40, 30]);
+    }
+    // Un personaje cambió de estado (tumbado/revivido) en cualquiera de
+    // los dos equipos: un sonido/vibración corta de confirmación.
+    const antesPersonajes = JSON.stringify((anterior.players || []).map(p => p.personajes));
+    const ahoraPersonajes = JSON.stringify((state.players || []).map(p => p.personajes));
+    if (antesPersonajes !== ahoraPersonajes) {
+      reproducirSonido(soundCarta);
+      vibrar(15);
+    }
+    if (anterior.status !== 'finished' && state.status === 'finished' && state.winner === myIdBatalla) {
+      lanzarConfeti();
+      vibrar([100, 60, 100, 60, 220]);
+    }
+  }
+
+  lastStateBatalla = state;
+  renderGameBatalla(state);
+
+  if (anterior && anterior.status !== 'finished' && state.status === 'finished') {
+    mostrarResultadoBatalla(state);
+  }
+}
+
+function mostrarResultadoBatalla(state) {
+  const gane = state.winner === myIdBatalla;
+  const rival = (state.players || []).find(p => p.id !== myIdBatalla);
+  const chips = [];
+  if (gane) {
+    chips.push({ tipo: 'gano', texto: `+${(state.points_gained || 0).toLocaleString()} puntos` });
+    if (state.coins_gained) chips.push({ tipo: 'gano', texto: `🪙 +${state.coins_gained}` });
+  }
+  mostrarResultadoRonda({
+    icono: gane ? '🏆' : '💥',
+    titulo: gane
+      ? '¡Ganaste la batalla!'
+      : `Perdiste contra ${rival ? escaparHtml(rival.name) : 'tu rival'}.`,
+    chips,
+  }, () => {
+    if (gane && state.coins_gained) {
+      mostrarCajasFuertes(state.coins_gained, () => {});
+    }
+  });
+}
+
+function indicesDonde(personajes, pred) {
+  const out = [];
+  personajes.forEach((p, i) => { if (pred(p)) out.push(i); });
+  return out;
+}
+
+// Devuelve {equipo: 'propio'|'rival'|null, slots: [indices]} — a qué
+// personajes se le puede aplicar esta carta ahora mismo. Espejo exacto de
+// las validaciones de BatallaRoom.jugar_carta en main.py.
+function objetivosValidosBatalla(carta, you, rival) {
+  switch (carta) {
+    case 'bomba':
+      return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.estado === 'pie' && !p.candado) };
+    case 'misil':
+      return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.bunker && !p.radar) };
+    case 'hada':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.estado === 'caido') };
+    case 'bunker':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.bunker) };
+    case 'candado':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.estado === 'pie' && p.bunker && !p.candado) };
+    case 'radar':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.bunker && !p.radar) };
+    default:
+      return { equipo: null, slots: [] };
+  }
+}
+
+function badgesProteccion(p) {
+  const iconos = [];
+  if (p.bunker) iconos.push('🛡️');
+  if (p.candado) iconos.push('🔒');
+  if (p.radar) iconos.push('📡');
+  return iconos.length ? `<div class="badges-proteccion">${iconos.join('')}</div>` : '';
+}
+
+function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo) {
+  const cont = document.getElementById(contenedorId);
+  if (!cont || !jugador) { if (cont) cont.innerHTML = ''; return; }
+  const avatarSrc = jugador.avatar ? `/gif/${jugador.avatar}` : '';
+  cont.innerHTML = jugador.personajes.map((p, i) => {
+    const esObjetivo = objetivos && objetivos.equipo === equipo && objetivos.slots.includes(i);
+    const caido = p.estado === 'caido' ? ' caido' : '';
+    const objetivoClass = esObjetivo ? ' objetivo' : '';
+    const img = avatarSrc ? `<img src="${avatarSrc}" alt="" loading="lazy">` : jugador.name[0];
+    return `<div class="batalla-personaje${caido}${objetivoClass}" data-slot="${i}" data-equipo="${equipo}">
+      ${img}${badgesProteccion(p)}
+    </div>`;
+  }).join('');
+
+  if (objetivos && objetivos.equipo === equipo) {
+    cont.querySelectorAll('.batalla-personaje.objetivo').forEach(el => {
+      el.onclick = () => jugarCartaBatalla(cartaSeleccionadaBatalla, { slot: parseInt(el.dataset.slot, 10) });
+    });
+  }
+}
+
+function renderGameBatalla(state) {
+  const you = (state.players || []).find(p => p.is_you);
+  const rival = (state.players || []).find(p => !p.is_you);
+
+  if (state.status === 'waiting') {
+    document.getElementById('game-screen-batalla').classList.add('hidden');
+    document.getElementById('wait-screen-batalla').classList.remove('hidden');
+    document.getElementById('btn-salir').classList.remove('hidden');
+    document.getElementById('wait-batalla-room-code').textContent = state.room;
+    document.getElementById('wait-batalla-players').innerHTML = (state.players || []).map(p =>
+      `<div>👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}</div>`
+    ).join('');
+
+    const esMM = (currentRoomCodeBatalla || '').toUpperCase().startsWith('MM-');
+    const countdownEl = document.getElementById('wait-batalla-countdown');
+    const esperandoEl = document.getElementById('wait-batalla-esperando');
+    if (esMM && state.matchmaking_deadline_ms) {
+      esperandoEl.classList.add('hidden');
+      countdownEl.classList.remove('hidden');
+      const numEl = document.getElementById('wait-batalla-countdown-num');
+      clearInterval(matchmakingIntervalBatalla);
+      const actualizar = () => {
+        const restante = Math.max(0, Math.ceil((state.matchmaking_deadline_ms - Date.now()) / 1000));
+        numEl.textContent = String(restante);
+        if (restante <= 0) clearInterval(matchmakingIntervalBatalla);
+      };
+      actualizar();
+      matchmakingIntervalBatalla = setInterval(actualizar, 250);
+    } else {
+      countdownEl.classList.add('hidden');
+      esperandoEl.classList.remove('hidden');
+      clearInterval(matchmakingIntervalBatalla);
+    }
+    return;
+  }
+
+  clearInterval(matchmakingIntervalBatalla);
+  document.getElementById('wait-screen-batalla').classList.add('hidden');
+  document.getElementById('game-screen-batalla').classList.remove('hidden');
+  document.getElementById('btn-salir').classList.remove('hidden');
+
+  if (!you || !rival) return;
+
+  const esTuTurno = state.current_turn === myIdBatalla && state.status === 'playing';
+  const objetivos = cartaSeleccionadaBatalla ? objetivosValidosBatalla(cartaSeleccionadaBatalla, you, rival) : null;
+
+  document.getElementById('batalla-rival-nombre').textContent = `⚔️ ${rival.name}`;
+  document.getElementById('batalla-turno-rival-badge').textContent = (state.current_turn === rival.id && state.status === 'playing') ? 'SU TURNO' : '';
+  document.getElementById('batalla-turno-badge').textContent = esTuTurno ? 'TU TURNO' : '';
+  document.getElementById('batalla-mazo-badge').textContent = `Mazo: ${state.deck_remaining ?? '--'}`;
+
+  renderEscuadronBatalla('batalla-escuadron-rival', rival, objetivos, 'rival');
+  renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio');
+
+  const statusLine = document.getElementById('status-line-batalla');
+  if (statusLine) {
+    statusLine.textContent = state.status === 'finished'
+      ? 'Batalla terminada.'
+      : (esTuTurno ? '¡Es tu turno!' : `Turno de ${rival.name}`);
+  }
+
+  renderManoBatalla(you, esTuTurno);
+  renderAccionBatalla(you, esTuTurno);
+
+  const logEl = document.getElementById('log-batalla');
+  if (logEl) {
+    logEl.innerHTML = (state.log || []).map(l => `<div>${escaparHtml(l)}</div>`).join('');
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function renderManoBatalla(you, esTuTurno) {
+  const cont = document.getElementById('batalla-mano');
+  const mano = you.mano || [];
+  cont.innerHTML = mano.map((carta, i) => {
+    const info = BATALLA_CARTAS_INFO[carta] || { emoji: '❓', nombre: carta };
+    const marcada = modoDescarteBatalla && cartasParaDescartar.includes(i);
+    const seleccionada = !modoDescarteBatalla && cartaSeleccionadaBatalla === carta;
+    const deshabilitada = !esTuTurno;
+    return `<button class="batalla-carta${seleccionada ? ' seleccionada' : ''}${marcada ? ' marcada-descarte' : ''}${deshabilitada ? ' deshabilitada' : ''}"
+      data-idx="${i}" data-carta="${carta}" ${deshabilitada ? 'disabled' : ''}>
+      <span class="emoji">${info.emoji}</span>${info.nombre}
+    </button>`;
+  }).join('');
+
+  cont.querySelectorAll('.batalla-carta').forEach(btn => {
+    btn.onclick = () => {
+      if (!esTuTurno) return;
+      const idx = parseInt(btn.dataset.idx, 10);
+      const carta = btn.dataset.carta;
+      if (modoDescarteBatalla) {
+        const pos = cartasParaDescartar.indexOf(idx);
+        if (pos === -1) cartasParaDescartar.push(idx); else cartasParaDescartar.splice(pos, 1);
+        renderGameBatalla(lastStateBatalla);
+        return;
+      }
+      if (carta === 'bombardeo') {
+        cartaSeleccionadaBatalla = cartaSeleccionadaBatalla === 'bombardeo' ? null : 'bombardeo';
+        renderGameBatalla(lastStateBatalla);
+        return;
+      }
+      cartaSeleccionadaBatalla = cartaSeleccionadaBatalla === carta ? null : carta;
+      renderGameBatalla(lastStateBatalla);
+    };
+  });
+}
+
+function renderAccionBatalla(you, esTuTurno) {
+  const cont = document.getElementById('batalla-accion-content');
+  if (!esTuTurno) {
+    cont.innerHTML = `<div class="action-hint">Esperando a que tu rival juegue...</div>`;
+    return;
+  }
+
+  if (modoDescarteBatalla) {
+    cont.innerHTML = `
+      <div class="action-hint">Toca las cartas que quieras descartar (arriba) y confirmá. Vas a robar la misma cantidad.</div>
+      <div class="row">
+        <button class="full secondary" id="btn-confirmar-descarte" ${cartasParaDescartar.length ? '' : 'disabled'}>
+          Confirmar descarte (${cartasParaDescartar.length})
+        </button>
+        <button class="full ghost" id="btn-cancelar-descarte">Cancelar</button>
+      </div>
+    `;
+    document.getElementById('btn-confirmar-descarte').onclick = () => {
+      const cartas = cartasParaDescartar.map(i => you.mano[i]);
+      wsBatalla.send(JSON.stringify({ type: 'descartar_robar', cartas }));
+      modoDescarteBatalla = false;
+      cartasParaDescartar = [];
+    };
+    document.getElementById('btn-cancelar-descarte').onclick = () => {
+      modoDescarteBatalla = false;
+      cartasParaDescartar = [];
+      renderGameBatalla(lastStateBatalla);
+    };
+    return;
+  }
+
+  if (cartaSeleccionadaBatalla === 'bombardeo') {
+    cont.innerHTML = `
+      <div class="action-hint">☢️ El Bombardeo General afecta a TODOS los personajes en pie sin Búnker, tuyos y de tu rival por igual.</div>
+      <div class="row">
+        <button class="full secondary" id="btn-confirmar-bombardeo">Confirmar Bombardeo</button>
+        <button class="full ghost" id="btn-cancelar-bombardeo">Cancelar</button>
+      </div>
+    `;
+    document.getElementById('btn-confirmar-bombardeo').onclick = () => jugarCartaBatalla('bombardeo', {});
+    document.getElementById('btn-cancelar-bombardeo').onclick = () => { cartaSeleccionadaBatalla = null; renderGameBatalla(lastStateBatalla); };
+    return;
+  }
+
+  if (cartaSeleccionadaBatalla) {
+    cont.innerHTML = `
+      <div class="action-hint">👆 Toca el personaje resaltado para aplicar la carta.</div>
+      <button class="full ghost" id="btn-cancelar-carta">Cancelar</button>
+    `;
+    document.getElementById('btn-cancelar-carta').onclick = () => { cartaSeleccionadaBatalla = null; renderGameBatalla(lastStateBatalla); };
+    return;
+  }
+
+  cont.innerHTML = `
+    <div class="action-hint">Toca una carta de tu mano para jugarla, o descartá y robá de nuevo.</div>
+    <button class="full ghost" id="btn-descartar-batalla">🔁 Descartar cartas</button>
+  `;
+  document.getElementById('btn-descartar-batalla').onclick = () => {
+    modoDescarteBatalla = true;
+    cartasParaDescartar = [];
+    renderGameBatalla(lastStateBatalla);
+  };
+}
+
+function jugarCartaBatalla(carta, objetivo) {
+  if (!wsBatalla || wsBatalla.readyState !== WebSocket.OPEN) return;
+  wsBatalla.send(JSON.stringify({ type: 'jugar_carta', carta, objetivo }));
+  cartaSeleccionadaBatalla = null;
+}
+
+// --- Espectador de Batalla ---
+function renderEspectadorBatalla(state) {
+  const jugadores = state.players || [];
+  const p1 = jugadores[0], p2 = jugadores[1];
+  const statusLine = document.getElementById('esp-status-line');
+  if (statusLine) {
+    statusLine.textContent = state.status === 'finished'
+      ? `👁️ Batalla terminada · Sala ${state.room}`
+      : `👁️ Turno de ${state.current_turn_name || '—'} · Sala ${state.room}`;
+  }
+  if (p1) {
+    document.getElementById('esp-batalla-nombre-1').textContent = `⚔️ ${p1.name}`;
+    document.getElementById('esp-batalla-turno-1').textContent = state.current_turn === p1.id ? 'SU TURNO' : '';
+    renderEscuadronBatalla('esp-batalla-escuadron-1', p1, null, null);
+  }
+  if (p2) {
+    document.getElementById('esp-batalla-nombre-2').textContent = `⚔️ ${p2.name}`;
+    document.getElementById('esp-batalla-turno-2').textContent = state.current_turn === p2.id ? 'SU TURNO' : '';
+    renderEscuadronBatalla('esp-batalla-escuadron-2', p2, null, null);
+  }
+}
+
+// Nombres/emoji de las 7 cartas — debe coincidir con BATALLA_CARTAS en
+// main.py (ver también /ws/batalla, que manda "cartas_info" con lo mismo
+// por si algún día conviene leerlo del servidor en vez de duplicarlo acá).
+const BATALLA_CARTAS_INFO = {
+  bomba: { emoji: '💣', nombre: 'Bomba' },
+  hada: { emoji: '🧚', nombre: 'Hada Curandera' },
+  bombardeo: { emoji: '☢️', nombre: 'Bombardeo General' },
+  bunker: { emoji: '🛡️', nombre: 'Búnker' },
+  candado: { emoji: '🔒', nombre: 'Candado' },
+  misil: { emoji: '🚀', nombre: 'Misil' },
+  radar: { emoji: '📡', nombre: 'Radar' },
+};
 </script>
 </body>
 </html>
