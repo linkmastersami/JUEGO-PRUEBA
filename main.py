@@ -1162,14 +1162,20 @@ async def broadcast(room):
 # =============================================================================
 
 BATALLA_CARTAS = {
-    "bomba":     {"nombre": "Bomba",               "emoji": "💣", "cantidad": 21},
-    "hada":      {"nombre": "Hada Curandera",      "emoji": "🧚", "cantidad": 8},
-    "bombardeo": {"nombre": "Bombardeo General",   "emoji": "☢️", "cantidad": 4},
-    "bunker":    {"nombre": "Búnker",              "emoji": "🛡️", "cantidad": 12},
-    "candado":   {"nombre": "Candado de Seguridad", "emoji": "🔒", "cantidad": 4},
-    "misil":     {"nombre": "Misil Teledirigido",  "emoji": "🚀", "cantidad": 4},
-    "radar":     {"nombre": "Radar Antimisiles",   "emoji": "📡", "cantidad": 4},
+    "bomba":        {"nombre": "Bomba",                       "emoji": "💣", "cantidad": 19},
+    "hada":         {"nombre": "Hada Curandera",              "emoji": "🧚", "cantidad": 8},
+    "bombardeo":    {"nombre": "Bombardeo General",           "emoji": "☢️", "cantidad": 3},
+    "misil":        {"nombre": "Misil Teledirigido",          "emoji": "🚀", "cantidad": 8},
+    "escudo":       {"nombre": "Escudo",                      "emoji": "🛡️", "cantidad": 10},
+    "campo_fuerza": {"nombre": "Campo de Fuerza",             "emoji": "💠", "cantidad": 5},
+    "dron":         {"nombre": "Dron Antiaéreo",              "emoji": "🛸", "cantidad": 6},
+    "campo_dron":   {"nombre": "Campo de Fuerza del Dron",    "emoji": "🌀", "cantidad": 3},
 }
+# Orden de "pelado" de capas de defensa, de la más externa a la más interna.
+# La Bomba solo llega hasta las dos terrestres (viene por tierra, el Dron no
+# la detecta); el Misil y el Bombardeo General recorren la cadena completa.
+BATALLA_CAPAS_AEREAS = ("campo_dron", "dron")
+BATALLA_CAPAS_TERRESTRES = ("campo_fuerza", "escudo")
 BATALLA_MANO_SIZE = 3
 BATALLA_PERSONAJES_INICIALES = 5
 BATALLA_MATCHMAKE_TIMEOUT = 10  # segundos de espera antes de completar con un bot
@@ -1193,7 +1199,26 @@ def _crear_mazo_batalla() -> List[str]:
 
 
 def _personaje_nuevo() -> dict:
-    return {"estado": "pie", "bunker": False, "candado": False, "radar": False}
+    return {"estado": "pie", "escudo": False, "campo_fuerza": False, "dron": False, "campo_dron": False}
+
+
+def _pelar_capa(p: dict, capas) -> Optional[str]:
+    """Rompe la capa de defensa más externa que tenga `p` dentro de la
+    secuencia `capas` (ya ordenada de afuera hacia adentro) y devuelve su
+    nombre, o None si no le queda ninguna de esas capas."""
+    for capa in capas:
+        if p[capa]:
+            p[capa] = False
+            return capa
+    return None
+
+
+BATALLA_NOMBRE_CAPA = {
+    "campo_dron": "Campo de Fuerza del Dron",
+    "dron": "Dron Antiaéreo",
+    "campo_fuerza": "Campo de Fuerza",
+    "escudo": "Escudo",
+}
 
 
 class BatallaPlayer:
@@ -1213,7 +1238,7 @@ class BatallaPlayer:
     def to_dict(self, viewer_id: str) -> dict:
         # A diferencia de Estratega de Códigos, acá no hay ningún código
         # secreto que ocultar: el estado del escuadrón (en pie/caído,
-        # búnker/candado/radar) es información pública para ambos
+        # capas de defensa) es información pública para ambos
         # jugadores y para cualquier espectador, tal como en el juego de
         # mesa físico. Lo único privado es qué cartas tiene cada uno en la
         # mano — esas solo se mandan al dueño.
@@ -1319,7 +1344,8 @@ class BatallaRoom:
 
     def jugar_carta(self, pid: str, carta: str, objetivo: dict) -> Tuple[bool, str]:
         """objetivo: {"slot": int} — sobre un personaje propio (hada,
-        búnker, candado, radar) o de un rival (bomba, misil). Bombardeo no
+        escudo, campo_fuerza, dron, campo_dron) o de un rival (bomba,
+        misil). Bombardeo no
         necesita objetivo. Devuelve (ok, motivo_si_falló)."""
         cur = self.get_player(pid)
         if cur is None or self.status != "playing" or self.current_player().id != pid:
@@ -1336,11 +1362,18 @@ class BatallaRoom:
             p = rival.personajes[slot]
             if p["estado"] != "pie":
                 return False, "Ese personaje ya está Fuera de Combate."
-            if p["candado"]:
-                return False, "Ese personaje tiene un Candado de Seguridad: la Bomba no puede alcanzarlo."
-            p["estado"] = "caido"
-            rival.en_pie -= 1
-            self.log.append(f"{cur.name} lanzó una Bomba y dejó Fuera de Combate a un personaje de {rival.name}.")
+            # La Bomba viene por tierra: el Dron y su Campo de Fuerza no la
+            # detectan, así que se salta directo a las capas terrestres.
+            capa = _pelar_capa(p, BATALLA_CAPAS_TERRESTRES)
+            if capa:
+                self.log.append(
+                    f"{cur.name} lanzó una Bomba y destruyó el {BATALLA_NOMBRE_CAPA[capa]} "
+                    f"de un personaje de {rival.name}."
+                )
+            else:
+                p["estado"] = "caido"
+                rival.en_pie -= 1
+                self.log.append(f"{cur.name} lanzó una Bomba y dejó Fuera de Combate a un personaje de {rival.name}.")
 
         elif carta == "hada":
             if not self._slot_valido(cur, slot) or cur.personajes[slot]["estado"] != "caido":
@@ -1352,46 +1385,59 @@ class BatallaRoom:
         elif carta == "bombardeo":
             for jugador in self.players:
                 for p in jugador.personajes:
-                    if p["estado"] == "pie" and not p["bunker"]:
-                        p["estado"] = "caido"
-                        jugador.en_pie -= 1
+                    if p["estado"] == "pie":
+                        capa = _pelar_capa(p, BATALLA_CAPAS_AEREAS + BATALLA_CAPAS_TERRESTRES)
+                        if not capa:
+                            p["estado"] = "caido"
+                            jugador.en_pie -= 1
             self.log.append(f"{cur.name} soltó un Bombardeo General sobre toda la mesa.")
 
-        elif carta == "bunker":
-            if not self._slot_valido(cur, slot) or cur.personajes[slot]["bunker"]:
-                return False, "Elige un personaje tuyo que todavía no tenga Búnker."
-            cur.personajes[slot]["bunker"] = True
-            self.log.append(f"{cur.name} protegió a un personaje con un Búnker.")
+        elif carta == "escudo":
+            if not self._slot_valido(cur, slot) or cur.personajes[slot]["escudo"]:
+                return False, "Elige un personaje tuyo que todavía no tenga Escudo."
+            cur.personajes[slot]["escudo"] = True
+            self.log.append(f"{cur.name} protegió a un personaje con un Escudo.")
 
-        elif carta == "candado":
+        elif carta == "campo_fuerza":
             if not self._slot_valido(cur, slot):
                 return False, "Objetivo inválido."
             p = cur.personajes[slot]
-            if p["estado"] != "pie" or not p["bunker"] or p["candado"]:
-                return False, "Elige un personaje tuyo En Pie que ya tenga Búnker y no tenga Candado."
-            p["candado"] = True
-            self.log.append(f"{cur.name} colocó un Candado de Seguridad.")
+            if not p["escudo"] or p["campo_fuerza"]:
+                return False, "Elige un personaje tuyo que ya tenga Escudo y no tenga Campo de Fuerza."
+            p["campo_fuerza"] = True
+            self.log.append(f"{cur.name} reforzó un Escudo con un Campo de Fuerza.")
+
+        elif carta == "dron":
+            if not self._slot_valido(cur, slot) or cur.personajes[slot]["dron"]:
+                return False, "Elige un personaje tuyo que todavía no tenga Dron Antiaéreo."
+            cur.personajes[slot]["dron"] = True
+            self.log.append(f"{cur.name} desplegó un Dron Antiaéreo.")
+
+        elif carta == "campo_dron":
+            if not self._slot_valido(cur, slot):
+                return False, "Objetivo inválido."
+            p = cur.personajes[slot]
+            if not p["dron"] or p["campo_dron"]:
+                return False, "Elige un personaje tuyo que ya tenga Dron Antiaéreo y no tenga Campo de Fuerza del Dron."
+            p["campo_dron"] = True
+            self.log.append(f"{cur.name} reforzó un Dron Antiaéreo con un Campo de Fuerza.")
 
         elif carta == "misil":
             if rival is None or not self._slot_valido(rival, slot):
                 return False, "Objetivo inválido."
             p = rival.personajes[slot]
-            if not p["bunker"]:
-                return False, "Ese personaje no tiene ningún Búnker que destruir."
-            if p["radar"]:
-                return False, "Ese Búnker está protegido por un Radar Antimisiles."
-            p["bunker"] = False
-            p["candado"] = False
-            self.log.append(f"{cur.name} destruyó un Búnker (y su Candado, si tenía) con un Misil Teledirigido.")
-
-        elif carta == "radar":
-            if not self._slot_valido(cur, slot):
-                return False, "Objetivo inválido."
-            p = cur.personajes[slot]
-            if not p["bunker"] or p["radar"]:
-                return False, "Elige un personaje tuyo con Búnker que todavía no tenga Radar."
-            p["radar"] = True
-            self.log.append(f"{cur.name} instaló un Radar Antimisiles.")
+            if p["estado"] != "pie":
+                return False, "Ese personaje ya está Fuera de Combate."
+            capa = _pelar_capa(p, BATALLA_CAPAS_AEREAS + BATALLA_CAPAS_TERRESTRES)
+            if capa:
+                self.log.append(
+                    f"{cur.name} disparó un Misil y destruyó el {BATALLA_NOMBRE_CAPA[capa]} "
+                    f"de un personaje de {rival.name}."
+                )
+            else:
+                p["estado"] = "caido"
+                rival.en_pie -= 1
+                self.log.append(f"{cur.name} disparó un Misil y dejó Fuera de Combate a un personaje de {rival.name}.")
 
         else:
             return False, "Carta desconocida."
@@ -1403,12 +1449,38 @@ class BatallaRoom:
             self.turn_index = 1 - self.turn_index
         return True, ""
 
+    def _carta_jugable(self, jugador: BatallaPlayer, rival: Optional[BatallaPlayer], carta: str) -> bool:
+        """¿Tiene esta carta algún objetivo legal ahora mismo? Se usa para
+        no dejar descartar mientras haya al menos una jugada real posible
+        (evita el "no ataco nunca y descarto para siempre")."""
+        if carta in ("bomba", "misil"):
+            return rival is not None and any(p["estado"] == "pie" for p in rival.personajes)
+        if carta == "hada":
+            return any(p["estado"] == "caido" for p in jugador.personajes)
+        if carta == "escudo":
+            return any(not p["escudo"] for p in jugador.personajes)
+        if carta == "campo_fuerza":
+            return any(p["escudo"] and not p["campo_fuerza"] for p in jugador.personajes)
+        if carta == "dron":
+            return any(not p["dron"] for p in jugador.personajes)
+        if carta == "campo_dron":
+            return any(p["dron"] and not p["campo_dron"] for p in jugador.personajes)
+        if carta == "bombardeo":
+            return True
+        return False
+
+    def tiene_jugada_legal(self, jugador: BatallaPlayer) -> bool:
+        rival = self._rival(jugador)
+        return any(self._carta_jugable(jugador, rival, c) for c in jugador.mano)
+
     def descartar_y_robar(self, pid: str, cartas: List[str]) -> Tuple[bool, str]:
         cur = self.get_player(pid)
         if cur is None or self.status != "playing" or self.current_player().id != pid:
             return False, "No es tu turno."
         if not cartas:
             return False, "Elige al menos una carta para descartar."
+        if self.tiene_jugada_legal(cur):
+            return False, "Tenés al menos una carta jugable: no podés descartar sin jugarla."
         restante = list(cur.mano)
         for c in cartas:
             if c not in restante:
@@ -1437,21 +1509,29 @@ class BatallaRoom:
             self.log.append(f"{player.name} salió de la sala.")
 
     def _revisar_victoria(self) -> bool:
-        for jugador in self.players:
-            if jugador.en_pie <= 0:
-                ganador = self._rival(jugador)
-                self.status = "finished"
-                self.winner = ganador.id if ganador else None
-                if ganador:
-                    self.points_gained = 100 * ganador.en_pie
-                    update_player_score(ganador.name, self.points_gained, "puntos_batalla", "victorias_batalla")
-                    self.coins_gained = grant_coin_reward(self.coin_rewards, ganador, COIN_REWARD_OPTIONS_BATALLA)
-                    self.log.append(
-                        f"¡{ganador.name} ganó la batalla! Gana {self.points_gained} puntos "
-                        f"y {self.coins_gained} monedas."
-                    )
-                return True
-        return False
+        caidos = [j for j in self.players if j.en_pie <= 0]
+        if not caidos:
+            return False
+        if len(caidos) == len(self.players):
+            # Empate: un Bombardeo General dejó a los dos escuadrones en
+            # cero a la vez. Nadie gana, nadie pierde: no se reparten
+            # puntos ni monedas para que no quede como una victoria trucha.
+            self.status = "finished"
+            self.winner = None
+            self.log.append("¡Empate! El Bombardeo General dejó a los dos escuadrones Fuera de Combate a la vez.")
+            return True
+        ganador = self._rival(caidos[0])
+        self.status = "finished"
+        self.winner = ganador.id if ganador else None
+        if ganador:
+            self.points_gained = 100 * ganador.en_pie
+            update_player_score(ganador.name, self.points_gained, "puntos_batalla", "victorias_batalla")
+            self.coins_gained = grant_coin_reward(self.coin_rewards, ganador, COIN_REWARD_OPTIONS_BATALLA)
+            self.log.append(
+                f"¡{ganador.name} ganó la batalla! Gana {self.points_gained} puntos "
+                f"y {self.coins_gained} monedas."
+            )
+        return True
 
     def state_for(self, viewer_id: str) -> dict:
         cur = self.current_player() if self.players and self.status == "playing" else None
@@ -1487,53 +1567,111 @@ class BatallaRoom:
         return base
 
 
+def _capas_activas(p: dict) -> int:
+    return int(p["campo_dron"]) + int(p["dron"]) + int(p["campo_fuerza"]) + int(p["escudo"])
+
+
+def _capas_terrestres(p: dict) -> int:
+    return int(p["campo_fuerza"]) + int(p["escudo"])
+
+
+def _mejores(indices: List[int], personajes: List[dict], clave) -> List[int]:
+    """De una lista de índices, devuelve los que empatan en el mínimo valor
+    de `clave` (para elegir entre varios objetivos igual de buenos y recién
+    ahí sortear al azar entre ellos)."""
+    if not indices:
+        return []
+    mejor = min(clave(personajes[i]) for i in indices)
+    return [i for i in indices if clave(personajes[i]) == mejor]
+
+
 def decidir_jugada_bot(room: BatallaRoom, bot: BatallaPlayer):
     """Heurística fija (sin búsqueda en profundidad, pero sin tirar cartas
-    al azar): prioriza atacar, después despejar protecciones del rival,
-    después curarse y protegerse a sí mismo, y solo bombardea si el
-    intercambio le conviene. Devuelve (carta, objetivo) o None si conviene
-    descartar toda la mano y robar de nuevo."""
+    al azar): primero busca rematar a alguien de un solo golpe, después
+    desgasta las capas de defensa del rival (con Misil priorizando a quien
+    solo le queden capas aéreas, que la Bomba no puede tocar), después se
+    cura, después se protege a sí mismo (Escudo → Campo de Fuerza → Dron →
+    Campo del Dron), y solo bombardea si el intercambio le conviene.
+    Devuelve (carta, objetivo) o None si conviene descartar toda la mano y
+    robar de nuevo."""
     rival = room._rival(bot)
     mano = bot.mano
     if rival is None:
         return None
 
+    # 1) Rematar: un solo golpe que deje a alguien Fuera de Combate.
     if "bomba" in mano:
-        objetivos = [i for i, p in enumerate(rival.personajes) if p["estado"] == "pie" and not p["candado"]]
-        if objetivos:
-            return "bomba", {"slot": random.choice(objetivos)}
-
+        rematables = [i for i, p in enumerate(rival.personajes)
+                      if p["estado"] == "pie" and _capas_terrestres(p) == 0]
+        if rematables:
+            return "bomba", {"slot": random.choice(rematables)}
     if "misil" in mano:
-        objetivos = [i for i, p in enumerate(rival.personajes) if p["bunker"] and not p["radar"]]
-        if objetivos:
-            return "misil", {"slot": random.choice(objetivos)}
+        rematables = [i for i, p in enumerate(rival.personajes)
+                      if p["estado"] == "pie" and _capas_activas(p) == 0]
+        if rematables:
+            return "misil", {"slot": random.choice(rematables)}
 
+    # 2) Curarse si tengo caídos.
     if "hada" in mano:
         caidos = [i for i, p in enumerate(bot.personajes) if p["estado"] == "caido"]
         if caidos:
             return "hada", {"slot": random.choice(caidos)}
 
-    if "bunker" in mano:
-        desprotegidos = [i for i, p in enumerate(bot.personajes) if not p["bunker"]]
+    # 3) Desgastar con Bomba al que le queden menos capas terrestres.
+    if "bomba" in mano:
+        objetivos = [i for i, p in enumerate(rival.personajes) if p["estado"] == "pie"]
+        mejores = _mejores(objetivos, rival.personajes, _capas_terrestres)
+        if mejores:
+            return "bomba", {"slot": random.choice(mejores)}
+
+    # 4) Desgastar con Misil, priorizando a quien solo lo protejan capas
+    #    aéreas (Dron/Campo del Dron), ya que la Bomba no las puede tocar.
+    if "misil" in mano:
+        solo_aereo = [i for i, p in enumerate(rival.personajes)
+                      if p["estado"] == "pie" and _capas_terrestres(p) == 0 and _capas_activas(p) > 0]
+        if solo_aereo:
+            return "misil", {"slot": random.choice(solo_aereo)}
+        objetivos = [i for i, p in enumerate(rival.personajes) if p["estado"] == "pie"]
+        mejores = _mejores(objetivos, rival.personajes, _capas_activas)
+        if mejores:
+            return "misil", {"slot": random.choice(mejores)}
+
+    # 5) Protegerse a mí mismo: Escudo -> Campo de Fuerza -> Dron -> Campo del Dron.
+    if "escudo" in mano:
+        desprotegidos = [i for i, p in enumerate(bot.personajes) if not p["escudo"]]
         if desprotegidos:
             en_pie = [i for i in desprotegidos if bot.personajes[i]["estado"] == "pie"]
-            return "bunker", {"slot": random.choice(en_pie or desprotegidos)}
+            return "escudo", {"slot": random.choice(en_pie or desprotegidos)}
 
-    if "candado" in mano:
-        candidatos = [i for i, p in enumerate(bot.personajes) if p["estado"] == "pie" and p["bunker"] and not p["candado"]]
+    if "campo_fuerza" in mano:
+        candidatos = [i for i, p in enumerate(bot.personajes) if p["escudo"] and not p["campo_fuerza"]]
         if candidatos:
-            return "candado", {"slot": random.choice(candidatos)}
+            return "campo_fuerza", {"slot": random.choice(candidatos)}
 
+    if "dron" in mano:
+        desprotegidos = [i for i, p in enumerate(bot.personajes) if not p["dron"]]
+        if desprotegidos:
+            en_pie = [i for i in desprotegidos if bot.personajes[i]["estado"] == "pie"]
+            return "dron", {"slot": random.choice(en_pie or desprotegidos)}
+
+    if "campo_dron" in mano:
+        candidatos = [i for i, p in enumerate(bot.personajes) if p["dron"] and not p["campo_dron"]]
+        if candidatos:
+            return "campo_dron", {"slot": random.choice(candidatos)}
+
+    # 6) Bombardeo solo si me deja Fuera de Combate a más rivales que propios.
     if "bombardeo" in mano:
-        rival_expuestos = sum(1 for p in rival.personajes if p["estado"] == "pie" and not p["bunker"])
-        propios_expuestos = sum(1 for p in bot.personajes if p["estado"] == "pie" and not p["bunker"])
-        if rival_expuestos > propios_expuestos:
+        rival_en_riesgo = sum(1 for p in rival.personajes if p["estado"] == "pie" and _capas_activas(p) == 0)
+        propios_en_riesgo = sum(1 for p in bot.personajes if p["estado"] == "pie" and _capas_activas(p) == 0)
+        if rival_en_riesgo > propios_en_riesgo:
             return "bombardeo", {}
-
-    if "radar" in mano:
-        candidatos = [i for i, p in enumerate(bot.personajes) if p["bunker"] and not p["radar"]]
-        if candidatos:
-            return "radar", {"slot": random.choice(candidatos)}
+        # El Bombardeo es la única carta que siempre es legal jugar (no
+        # necesita objetivo). Si llegamos hasta acá con Bombardeo en mano,
+        # es que ninguna otra carta tenía objetivo válido — y como la sala
+        # ya no permite descartar teniendo una jugada legal disponible, hay
+        # que jugarlo igual aunque el intercambio no sea el ideal, para no
+        # trabar el turno del bot.
+        return "bombardeo", {}
 
     return None
 
@@ -1550,15 +1688,21 @@ async def _bot_jugar_batalla(room_code: str):
     if not cur.is_bot:
         return
     jugada = decidir_jugada_bot(room, cur)
+    ok = False
     if jugada is None:
-        room.descartar_y_robar(cur.id, list(cur.mano))
+        ok, _ = room.descartar_y_robar(cur.id, list(cur.mano))
     else:
         carta, objetivo = jugada
         ok, _ = room.jugar_carta(cur.id, carta, objetivo)
         if not ok:
             # Salvaguarda: si por algún motivo la heurística sugirió una
             # jugada inválida, no se traba el turno — descarta y sigue.
-            room.descartar_y_robar(cur.id, list(cur.mano))
+            ok, _ = room.descartar_y_robar(cur.id, list(cur.mano))
+    if not ok:
+        # Última red de seguridad: ni jugar ni descartar funcionaron (no
+        # debería pasar nunca, pero nunca hay que dejar una partida trabada
+        # en el turno del bot). Se fuerza a pasar el turno igual.
+        room.turn_index = 1 - room.turn_index
     try:
         await broadcast(room)
     except Exception:

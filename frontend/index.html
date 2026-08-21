@@ -251,7 +251,8 @@
   }
   #overlay-cajas.activo { opacity: 1; pointer-events: auto; }
   #cajas-titulo { font-size: 1.25rem; font-weight: 800; margin-bottom: 26px; color: var(--accent); }
-  #cajas-fila { display: flex; gap: 18px; }
+  #cajas-fila { display: flex; align-items: flex-start; gap: 18px; }
+  .caja-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
   .caja-fuerte {
     width: 84px; height: 84px;
     border-radius: 14px;
@@ -264,7 +265,18 @@
   .caja-fuerte.elegible { cursor: pointer; border-color: var(--accent2); animation: cajaFlota 1.2s ease-in-out infinite; }
   .caja-fuerte.elegible:active { transform: scale(0.92); }
   .caja-fuerte.abierta { border-color: gold; transform: scale(1.15); animation: none; }
-  .caja-fuerte.descartada { opacity: 0.25; animation: none; }
+  .caja-fuerte.descartada { opacity: 0.45; animation: none; }
+  /* Las otras dos cajas, reveladas un instante después de la propia: solo
+     curiosidad ("esto te hubieras llevado"), por eso quedan atenuadas y con
+     un borde neutro en vez del dorado de la que sí elegiste. */
+  .caja-fuerte.abierta-ajena { opacity: 0.85; border-color: #8a90a6; transform: scale(1.02); animation: none; }
+  .caja-monto {
+    font-size: 0.8rem; font-weight: 800; min-height: 1.1em;
+    opacity: 0; transition: opacity 0.3s ease;
+  }
+  .caja-monto.activo { opacity: 1; }
+  .caja-monto.propia { color: gold; }
+  .caja-monto.ajena { color: #9aa0b4; }
   /* "Revolver" las cajas antes de poder elegir: como las 3 se ven idénticas
      (mismo candado 🔒), no tiene sentido animar un intercambio de posición
      de verdad -sería invisible-, así que en cambio cada una se sacude con
@@ -1746,7 +1758,13 @@ function ejecutarAnimacionPuntos(esVictoria, puntosInicio, puntosFin, callbackFi
 // (grant_coin_reward la fija una sola vez por jugador+sala, así que no
 // importa cuál caja se elija: el monto es siempre el mismo, solo cambia el
 // suspenso de cuál abrir).
-function mostrarCajasFuertes(monedas, callbackFin) {
+// `options` son los 3 montos posibles de este juego (ej. [100,75,50] en
+// Estratega de Códigos, [75,50,25] en Batalla de Avatares) — el premio real
+// (`monedas`) ya se decidió en el servidor antes de este clic, así que las
+// otras dos cajas no esconden nada de verdad: son los otros 2 valores de
+// `options` nada más, para que después de elegir se vea "qué te hubieras
+// llevado" con las que no tocaste.
+function mostrarCajasFuertes(monedas, callbackFin, options) {
     const overlay = document.getElementById('overlay-cajas');
     const fila = document.getElementById('cajas-fila');
     const titulo = document.getElementById('cajas-titulo');
@@ -1758,12 +1776,20 @@ function mostrarCajasFuertes(monedas, callbackFin) {
     fila.innerHTML = '';
 
     const cajas = [];
+    const montoEls = [];
     for (let i = 0; i < 3; i++) {
+        const wrap = document.createElement('div');
+        wrap.className = 'caja-wrap';
         const caja = document.createElement('div');
         caja.className = 'caja-fuerte revolviendo';
         caja.innerHTML = '🔒';
-        fila.appendChild(caja);
+        const monto = document.createElement('div');
+        monto.className = 'caja-monto';
+        wrap.appendChild(caja);
+        wrap.appendChild(monto);
+        fila.appendChild(wrap);
         cajas.push(caja);
+        montoEls.push(monto);
     }
 
     overlay.classList.remove('activo');
@@ -1783,7 +1809,7 @@ function mostrarCajasFuertes(monedas, callbackFin) {
         cajas.forEach(c => { c.classList.remove('revolviendo'); c.classList.add('elegible'); });
     }, 1300);
 
-    cajas.forEach(caja => {
+    cajas.forEach((caja, idx) => {
         caja.onclick = () => {
             if (elegido || !listo) return;
             elegido = true;
@@ -1793,14 +1819,40 @@ function mostrarCajasFuertes(monedas, callbackFin) {
 
             caja.classList.add('abierta');
             caja.innerHTML = '💰';
+            montoEls[idx].textContent = `+${monedas.toLocaleString()}`;
+            montoEls[idx].classList.add('activo', 'propia');
             titulo.textContent = '¡Encontraste monedas!';
             resultado.textContent = `+${monedas.toLocaleString()} monedas`;
             resultado.classList.add('activo');
 
+            const alternativos = (options || [100, 75, 50]).slice();
+            const posPropio = alternativos.indexOf(monedas);
+            if (posPropio !== -1) alternativos.splice(posPropio, 1);
+            for (let i = alternativos.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [alternativos[i], alternativos[j]] = [alternativos[j], alternativos[i]];
+            }
+
+            // Después de ver tu propio resultado, se revela qué tenían las
+            // otras dos — ya no se pueden elegir, es solo para satisfacer
+            // la curiosidad de "¿y si agarraba esa otra?".
+            setTimeout(() => {
+                cajas.forEach((c, i) => {
+                    if (i === idx) return;
+                    const valor = alternativos.pop();
+                    c.classList.add('abierta-ajena');
+                    c.innerHTML = '💰';
+                    if (valor != null) {
+                        montoEls[i].textContent = valor.toLocaleString();
+                        montoEls[i].classList.add('activo', 'ajena');
+                    }
+                });
+            }, 700);
+
             setTimeout(() => {
                 overlay.classList.remove('activo');
                 if (callbackFin) callbackFin();
-            }, 1600);
+            }, 2500);
         };
     });
 }
@@ -4471,7 +4523,7 @@ function procesarColaAnimEventos() {
       mostrarCajasFuertes(ev.coins, () => {
         animarPuntajeHUD("uiMonedas", monedasAntes, monedasActuales, 800);
         continuarCola();
-      });
+      }, [100, 75, 50]);
     } else {
       continuarCola();
     }
@@ -5323,22 +5375,27 @@ function handleStateBatalla(state) {
 }
 
 function mostrarResultadoBatalla(state) {
-  const gane = state.winner === myIdBatalla;
+  const empate = state.winner === null || state.winner === undefined;
+  const gane = !empate && state.winner === myIdBatalla;
   const rival = (state.players || []).find(p => p.id !== myIdBatalla);
+  // Las monedas NO se mencionan acá a propósito: el monto se revela recién
+  // al elegir una caja fuerte (ver mostrarCajasFuertes) — si ya lo decimos
+  // acá, elegir la caja deja de tener sentido porque ya sabés cuánto es.
   const chips = [];
   if (gane) {
     chips.push({ tipo: 'gano', texto: `+${(state.points_gained || 0).toLocaleString()} puntos` });
-    if (state.coins_gained) chips.push({ tipo: 'gano', texto: `🪙 +${state.coins_gained}` });
   }
   mostrarResultadoRonda({
-    icono: gane ? '🏆' : '💥',
-    titulo: gane
-      ? '¡Ganaste la batalla!'
-      : `Perdiste contra ${rival ? escaparHtml(rival.name) : 'tu rival'}.`,
+    icono: empate ? '🤝' : (gane ? '🏆' : '💥'),
+    titulo: empate
+      ? 'Empate: un Bombardeo General dejó a los dos escuadrones Fuera de Combate a la vez.'
+      : (gane
+        ? '¡Ganaste la batalla!'
+        : `Perdiste contra ${rival ? escaparHtml(rival.name) : 'tu rival'}.`),
     chips,
   }, () => {
     if (gane && state.coins_gained) {
-      mostrarCajasFuertes(state.coins_gained, () => {});
+      mostrarCajasFuertes(state.coins_gained, () => {}, [75, 50, 25]);
     }
   });
 }
@@ -5354,18 +5411,22 @@ function indicesDonde(personajes, pred) {
 // las validaciones de BatallaRoom.jugar_carta en main.py.
 function objetivosValidosBatalla(carta, you, rival) {
   switch (carta) {
+    // La Bomba y el Misil siempre tienen a quién pegarle mientras el rival
+    // tenga algún personaje En Pie: rompen la capa de defensa más externa
+    // que tenga, o lo dejan Fuera de Combate si ya no le queda ninguna.
     case 'bomba':
-      return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.estado === 'pie' && !p.candado) };
     case 'misil':
-      return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.bunker && !p.radar) };
+      return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.estado === 'pie') };
     case 'hada':
       return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.estado === 'caido') };
-    case 'bunker':
-      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.bunker) };
-    case 'candado':
-      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.estado === 'pie' && p.bunker && !p.candado) };
-    case 'radar':
-      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.bunker && !p.radar) };
+    case 'escudo':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.escudo) };
+    case 'campo_fuerza':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.escudo && !p.campo_fuerza) };
+    case 'dron':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.dron) };
+    case 'campo_dron':
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.dron && !p.campo_dron) };
     default:
       return { equipo: null, slots: [] };
   }
@@ -5373,9 +5434,10 @@ function objetivosValidosBatalla(carta, you, rival) {
 
 function badgesProteccion(p) {
   const iconos = [];
-  if (p.bunker) iconos.push('🛡️');
-  if (p.candado) iconos.push('🔒');
-  if (p.radar) iconos.push('📡');
+  if (p.campo_dron) iconos.push('🌀');
+  if (p.dron) iconos.push('🛸');
+  if (p.campo_fuerza) iconos.push('💠');
+  if (p.escudo) iconos.push('🛡️');
   return iconos.length ? `<div class="badges-proteccion">${iconos.join('')}</div>` : '';
 }
 
@@ -5462,7 +5524,7 @@ function renderGameBatalla(state) {
   }
 
   renderManoBatalla(you, esTuTurno);
-  renderAccionBatalla(you, esTuTurno);
+  renderAccionBatalla(you, rival, esTuTurno);
 
   const logEl = document.getElementById('log-batalla');
   if (logEl) {
@@ -5507,7 +5569,35 @@ function renderManoBatalla(you, esTuTurno) {
   });
 }
 
-function renderAccionBatalla(you, esTuTurno) {
+// Espejo exacto de BatallaRoom._carta_jugable en main.py — decide si una
+// carta de la mano tiene algún objetivo legal ahora mismo.
+function cartaJugableBatalla(carta, you, rival) {
+  switch (carta) {
+    case 'bomba':
+    case 'misil':
+      return !!rival && rival.personajes.some(p => p.estado === 'pie');
+    case 'hada':
+      return you.personajes.some(p => p.estado === 'caido');
+    case 'escudo':
+      return you.personajes.some(p => !p.escudo);
+    case 'campo_fuerza':
+      return you.personajes.some(p => p.escudo && !p.campo_fuerza);
+    case 'dron':
+      return you.personajes.some(p => !p.dron);
+    case 'campo_dron':
+      return you.personajes.some(p => p.dron && !p.campo_dron);
+    case 'bombardeo':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function hayJugadaLegalBatalla(you, rival) {
+  return (you.mano || []).some(carta => cartaJugableBatalla(carta, you, rival));
+}
+
+function renderAccionBatalla(you, rival, esTuTurno) {
   const cont = document.getElementById('batalla-accion-content');
   if (!esTuTurno) {
     cont.innerHTML = `<div class="action-hint">Esperando a que tu rival juegue...</div>`;
@@ -5540,7 +5630,7 @@ function renderAccionBatalla(you, esTuTurno) {
 
   if (cartaSeleccionadaBatalla === 'bombardeo') {
     cont.innerHTML = `
-      <div class="action-hint">☢️ El Bombardeo General afecta a TODOS los personajes en pie sin Búnker, tuyos y de tu rival por igual.</div>
+      <div class="action-hint">☢️ El Bombardeo General le rompe una capa de defensa (o derriba, si ya no le queda ninguna) a TODOS los personajes en pie, tuyos y de tu rival por igual.</div>
       <div class="row">
         <button class="full secondary" id="btn-confirmar-bombardeo">Confirmar Bombardeo</button>
         <button class="full ghost" id="btn-cancelar-bombardeo">Cancelar</button>
@@ -5560,15 +5650,21 @@ function renderAccionBatalla(you, esTuTurno) {
     return;
   }
 
-  cont.innerHTML = `
-    <div class="action-hint">Toca una carta de tu mano para jugarla, o descartá y robá de nuevo.</div>
-    <button class="full ghost" id="btn-descartar-batalla">🔁 Descartar cartas</button>
-  `;
-  document.getElementById('btn-descartar-batalla').onclick = () => {
-    modoDescarteBatalla = true;
-    cartasParaDescartar = [];
-    renderGameBatalla(lastStateBatalla);
-  };
+  const puedeJugar = hayJugadaLegalBatalla(you, rival);
+  cont.innerHTML = puedeJugar
+    ? `<div class="action-hint">Toca una carta de tu mano para jugarla.</div>`
+    : `
+      <div class="action-hint">Ninguna de tus cartas tiene un objetivo legal ahora mismo: descartá y robá de nuevo.</div>
+      <button class="full ghost" id="btn-descartar-batalla">🔁 Descartar cartas</button>
+    `;
+  const btnDescartar = document.getElementById('btn-descartar-batalla');
+  if (btnDescartar) {
+    btnDescartar.onclick = () => {
+      modoDescarteBatalla = true;
+      cartasParaDescartar = [];
+      renderGameBatalla(lastStateBatalla);
+    };
+  }
 }
 
 function jugarCartaBatalla(carta, objetivo) {
@@ -5599,17 +5695,18 @@ function renderEspectadorBatalla(state) {
   }
 }
 
-// Nombres/emoji de las 7 cartas — debe coincidir con BATALLA_CARTAS en
+// Nombres/emoji de las 8 cartas — debe coincidir con BATALLA_CARTAS en
 // main.py (ver también /ws/batalla, que manda "cartas_info" con lo mismo
 // por si algún día conviene leerlo del servidor en vez de duplicarlo acá).
 const BATALLA_CARTAS_INFO = {
   bomba: { emoji: '💣', nombre: 'Bomba' },
   hada: { emoji: '🧚', nombre: 'Hada Curandera' },
   bombardeo: { emoji: '☢️', nombre: 'Bombardeo General' },
-  bunker: { emoji: '🛡️', nombre: 'Búnker' },
-  candado: { emoji: '🔒', nombre: 'Candado' },
-  misil: { emoji: '🚀', nombre: 'Misil' },
-  radar: { emoji: '📡', nombre: 'Radar' },
+  misil: { emoji: '🚀', nombre: 'Misil Teledirigido' },
+  escudo: { emoji: '🛡️', nombre: 'Escudo' },
+  campo_fuerza: { emoji: '💠', nombre: 'Campo de Fuerza' },
+  dron: { emoji: '🛸', nombre: 'Dron Antiaéreo' },
+  campo_dron: { emoji: '🌀', nombre: 'Campo de Fuerza del Dron' },
 };
 </script>
 </body>
