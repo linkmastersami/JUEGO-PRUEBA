@@ -6,17 +6,18 @@ esto es solo el lugar donde van los archivos).
 
 ## Convención de nombres
 
-Numeración de 3 dígitos, en formato PNG:
+6 dígitos en formato PNG: **los primeros 3 son el precio en monedas, los
+últimos 3 son el identificador** (para no repetir número entre tableros
+que cuesten lo mismo).
 
 ```
-001.png
-002.png
-003.png
-...
+150001.png   -> precio 150, id 001
+250002.png   -> precio 250, id 002
+300003.png   -> precio 300, id 003
 ```
 
-El número de archivo es el identificador del tablero (así como los avatares
-usan su propio archivo en `frontend/gif/`).
+O sea que ni bien se suba una imagen con este nombre, el archivo ya trae
+su propio precio incluido — no hace falta cargarlo aparte en ningún lado.
 
 ## Cómo se va a usar (cuando esté conectado)
 
