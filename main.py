@@ -1283,6 +1283,12 @@ class BatallaRoom:
         # Revancha al terminar (status == "finished"): si los dos la piden
         # se reinicia la sala entera, de vuelta al piedra/papel/tijera.
         self.rematch_requested: Dict[str, bool] = {}
+        # Última carta jugada, en forma estructurada — el frontend la usa
+        # para saber exactamente qué animar (ver jugar_carta). action_seq
+        # sube en cada jugada para que el cliente note que es una jugada
+        # nueva y no la misma de antes repetida en otro broadcast.
+        self.action_seq = 0
+        self.last_action: Optional[dict] = None
 
     def get_player(self, pid: str) -> Optional[BatallaPlayer]:
         return next((p for p in self.players if p.id == pid), None)
@@ -1343,6 +1349,8 @@ class BatallaRoom:
         self.rps_choices = {}
         self.rps_resultado = None
         self.rematch_requested = {}
+        self.action_seq = 0
+        self.last_action = None
         self.log.append("¡La batalla ha comenzado! Que gane el mejor escuadrón.")
 
     def iniciar_rps(self) -> None:
@@ -1422,6 +1430,11 @@ class BatallaRoom:
         rival = self._rival(cur)
         objetivo = objetivo or {}
         slot = objetivo.get("slot")
+        # Se arma en cada rama y se guarda al final en self.last_action —
+        # es lo único que el frontend necesita para saber exactamente qué
+        # animar (quién atacó/protegió a quién con qué, y qué pasó), sin
+        # tener que adivinar comparando el tablero de antes y de después.
+        efecto: dict = {}
 
         if carta == "bomba":
             if rival is None or not self._slot_valido(rival, slot):
@@ -1432,6 +1445,7 @@ class BatallaRoom:
             # La Bomba viene por tierra: el Dron y su Campo de Fuerza no la
             # detectan, así que se salta directo a las capas terrestres.
             capa = _pelar_capa(p, BATALLA_CAPAS_TERRESTRES)
+            efecto = {"objetivo_id": rival.id, "slot": slot, "capa": capa, "derribado": capa is None}
             if capa:
                 self.log.append(
                     f"{cur.name} lanzó una Bomba y destruyó el {BATALLA_NOMBRE_CAPA[capa]} "
@@ -1447,22 +1461,27 @@ class BatallaRoom:
                 return False, "Elige uno de tus personajes que esté Fuera de Combate."
             cur.personajes[slot]["estado"] = "pie"
             cur.en_pie += 1
+            efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} revivió a un personaje con una Hada Curandera.")
 
         elif carta == "bombardeo":
+            efectos = []
             for jugador in self.players:
-                for p in jugador.personajes:
+                for i, p in enumerate(jugador.personajes):
                     if p["estado"] == "pie":
                         capa = _pelar_capa(p, BATALLA_CAPAS_AEREAS + BATALLA_CAPAS_TERRESTRES)
                         if not capa:
                             p["estado"] = "caido"
                             jugador.en_pie -= 1
+                        efectos.append({"jugador_id": jugador.id, "slot": i, "capa": capa, "derribado": capa is None})
+            efecto = {"efectos": efectos}
             self.log.append(f"{cur.name} soltó un Bombardeo General sobre toda la mesa.")
 
         elif carta == "escudo":
             if not self._slot_valido(cur, slot) or cur.personajes[slot]["escudo"]:
                 return False, "Elige un personaje tuyo que todavía no tenga Escudo."
             cur.personajes[slot]["escudo"] = True
+            efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} protegió a un personaje con un Escudo.")
 
         elif carta == "campo_fuerza":
@@ -1472,12 +1491,14 @@ class BatallaRoom:
             if not p["escudo"] or p["campo_fuerza"]:
                 return False, "Elige un personaje tuyo que ya tenga Escudo y no tenga Campo de Fuerza."
             p["campo_fuerza"] = True
+            efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} reforzó un Escudo con un Campo de Fuerza.")
 
         elif carta == "dron":
             if not self._slot_valido(cur, slot) or cur.personajes[slot]["dron"]:
                 return False, "Elige un personaje tuyo que todavía no tenga Dron Antiaéreo."
             cur.personajes[slot]["dron"] = True
+            efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} desplegó un Dron Antiaéreo.")
 
         elif carta == "campo_dron":
@@ -1487,6 +1508,7 @@ class BatallaRoom:
             if not p["dron"] or p["campo_dron"]:
                 return False, "Elige un personaje tuyo que ya tenga Dron Antiaéreo y no tenga Campo de Fuerza del Dron."
             p["campo_dron"] = True
+            efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} reforzó un Dron Antiaéreo con un Campo de Fuerza.")
 
         elif carta == "misil":
@@ -1496,6 +1518,7 @@ class BatallaRoom:
             if p["estado"] != "pie":
                 return False, "Ese personaje ya está Fuera de Combate."
             capa = _pelar_capa(p, BATALLA_CAPAS_AEREAS + BATALLA_CAPAS_TERRESTRES)
+            efecto = {"objetivo_id": rival.id, "slot": slot, "capa": capa, "derribado": capa is None}
             if capa:
                 self.log.append(
                     f"{cur.name} disparó un Misil y destruyó el {BATALLA_NOMBRE_CAPA[capa]} "
@@ -1508,6 +1531,9 @@ class BatallaRoom:
 
         else:
             return False, "Carta desconocida."
+
+        self.action_seq += 1
+        self.last_action = {"seq": self.action_seq, "jugador_id": cur.id, "carta": carta, **efecto}
 
         cur.mano.remove(carta)
         self.descarte.append(carta)
@@ -1659,6 +1685,7 @@ class BatallaRoom:
             "rps": rps,
             "rps_resultado": rps_resultado,
             "rematch": rematch,
+            "last_action": self.last_action,
         }
 
     def spectator_state_for(self) -> dict:

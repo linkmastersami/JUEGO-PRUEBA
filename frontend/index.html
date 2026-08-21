@@ -484,6 +484,84 @@
   .batalla-carta.marcada-descarte { border-color: var(--bad); opacity: 0.75; }
   .batalla-carta:disabled, .batalla-carta.deshabilitada { opacity: 0.35; cursor: not-allowed; }
 
+  /* --- Animaciones de combate de Batalla de Avatares (ver
+       procesarUltimaAccionBatalla y compañía) --- */
+  .batalla-proyectil {
+    position: fixed; z-index: 9990; pointer-events: none;
+    font-size: 2.1rem; line-height: 1;
+    transform: translate(-50%, -50%);
+    filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+  }
+  .batalla-impacto-wrap {
+    position: fixed; z-index: 9989; pointer-events: none;
+    width: 4px; height: 4px;
+  }
+  .batalla-impacto-wrap .particula-explosion { z-index: 1; }
+  @keyframes batallaDestelloImpacto {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+    30% { opacity: 1; transform: translate(-50%, -50%) scale(1.6); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); }
+  }
+  .batalla-destello {
+    position: fixed; z-index: 9988; pointer-events: none;
+    width: 70px; height: 70px; border-radius: 50%;
+    background: radial-gradient(circle, #fff, var(--bad) 55%, transparent 75%);
+    animation: batallaDestelloImpacto 0.5s ease-out forwards;
+  }
+  /* Flash sobre el propio avatar: aparece un instante cuando se coloca o
+     se rompe una capa de defensa (escudo/campo de fuerza/dron/campo del
+     dron), y cuando el hada revive a alguien. */
+  .batalla-flash-capa {
+    position: absolute; inset: 0; z-index: 3; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.7rem; background: rgba(0,0,0,0.35);
+    animation: batallaFlashCapa 0.9s ease-out forwards;
+    pointer-events: none;
+  }
+  @keyframes batallaFlashCapa {
+    0% { opacity: 0; transform: scale(0.6); }
+    25% { opacity: 1; transform: scale(1.15); }
+    45% { opacity: 1; transform: scale(1); }
+    70% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1); }
+  }
+  /* Hada curandera: un anillo de chispitas dando la vuelta alrededor del
+     personaje revivido, estilo hada de Zelda. */
+  .batalla-hada-fx {
+    position: absolute; inset: -14px; z-index: 4; pointer-events: none;
+  }
+  .batalla-hada-chispa {
+    position: absolute; top: 50%; left: 50%; font-size: 0.85rem;
+    animation: batallaHadaOrbita 1.1s linear forwards;
+  }
+  @keyframes batallaHadaOrbita {
+    0% { transform: rotate(var(--ang)) translateX(0) rotate(calc(var(--ang) * -1)); opacity: 0; }
+    15% { opacity: 1; }
+    85% { opacity: 1; }
+    100% { transform: rotate(calc(var(--ang) + 300deg)) translateX(38px) rotate(calc((var(--ang) + 300deg) * -1)); opacity: 0; }
+  }
+  .batalla-hada-glow {
+    position: absolute; inset: 0; border-radius: 10px;
+    box-shadow: 0 0 0 0 rgba(150, 255, 190, 0.9);
+    animation: batallaHadaGlow 1.1s ease-out forwards;
+  }
+  @keyframes batallaHadaGlow {
+    0% { box-shadow: 0 0 0 0 rgba(150, 255, 190, 0.9); }
+    60% { box-shadow: 0 0 22px 10px rgba(150, 255, 190, 0.5); }
+    100% { box-shadow: 0 0 0 0 rgba(150, 255, 190, 0); }
+  }
+  .batalla-bombardeo-icono {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    font-size: 4rem; z-index: 9991; pointer-events: none;
+    animation: batallaBombardeoPop 1s ease-in-out forwards;
+  }
+  @keyframes batallaBombardeoPop {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+    25% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+    75% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+  }
+
   #confetti-canvas {
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 9999; pointer-events: none;
@@ -5524,6 +5602,8 @@ function salirDeBatalla() {
 }
 
 // --- Estado / render ---
+let lastActionSeqBatalla = 0;
+
 function handleStateBatalla(state) {
   myIdBatalla = state.your_id;
   const anterior = lastStateBatalla;
@@ -5555,10 +5635,26 @@ function handleStateBatalla(state) {
     if (anterior.status === 'finished' && state.status === 'rps') {
       ocultarPantallaFinalBatalla();
     }
+    // Cada partida nueva arranca su propio contador de jugadas — si no se
+    // reinicia acá, la primera jugada de una revancha (seq=1) quedaría
+    // por debajo del último seq visto en la partida anterior y nunca se
+    // animaría.
+    if (anterior.status !== 'rps' && state.status === 'rps') {
+      lastActionSeqBatalla = 0;
+    }
   }
 
   lastStateBatalla = state;
   renderGameBatalla(state);
+
+  // Recién ACÁ, después de renderGameBatalla: renderEscuadronBatalla
+  // reconstruye el HTML de los avatares en cada render, así que si se
+  // dispara la animación antes, renderGameBatalla le borra el flash/hada
+  // que le acabamos de agregar como hijo del avatar.
+  if (state.last_action && state.last_action.seq > lastActionSeqBatalla) {
+    lastActionSeqBatalla = state.last_action.seq;
+    procesarUltimaAccionBatalla(state.last_action);
+  }
 
   if (anterior && anterior.status !== 'finished' && state.status === 'finished') {
     mostrarResultadoBatalla(state);
@@ -5668,6 +5764,192 @@ function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo, filas)
     cont.querySelectorAll('.batalla-personaje.objetivo').forEach(el => {
       el.onclick = () => jugarCartaBatalla(cartaSeleccionadaBatalla, { slot: parseInt(el.dataset.slot, 10) });
     });
+  }
+}
+
+// --- Animaciones de combate: una por cada carta, espejadas tanto si la
+// jugaste vos como si la jugó tu rival. Todas parten de state.last_action
+// (ver BatallaRoom.jugar_carta en main.py), así que no hay que adivinar
+// nada comparando el tablero de antes y de después.
+function elementoSlotBatalla(jugadorId, slot) {
+  const equipo = jugadorId === myIdBatalla ? 'propio' : 'rival';
+  return document.querySelector(`#batalla-escuadron-${equipo} .batalla-personaje[data-slot="${slot}"]`);
+}
+
+function centroDeRect(rect) {
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+}
+
+// De dónde "sale" el ataque: si lo jugaste vos, de tu mano de cartas; si
+// lo jugó tu rival (no le vemos la mano), del tablero de tu rival.
+function origenAtaqueBatalla(actorEsPropio) {
+  const cont = document.getElementById(actorEsPropio ? 'batalla-mano-zona' : 'batalla-tablero-rival');
+  if (!cont) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  return centroDeRect(cont.getBoundingClientRect());
+}
+
+function crearProyectilBatalla(emoji, x, y) {
+  const el = document.createElement('div');
+  el.className = 'batalla-proyectil';
+  el.textContent = emoji;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  document.body.appendChild(el);
+  return el;
+}
+
+function destelloImpactoBatalla(x, y) {
+  const wrap = document.createElement('div');
+  wrap.className = 'batalla-impacto-wrap';
+  wrap.style.left = `${x}px`;
+  wrap.style.top = `${y}px`;
+  document.body.appendChild(wrap);
+  const destello = document.createElement('div');
+  destello.className = 'batalla-destello';
+  destello.style.left = `${x}px`;
+  destello.style.top = `${y}px`;
+  document.body.appendChild(destello);
+  crearExplosionParticulas(wrap, 14);
+  setTimeout(() => { wrap.remove(); destello.remove(); }, 950);
+}
+
+// Flash de un instante sobre el avatar: se usa tanto cuando se COLOCA una
+// capa de defensa (escudo/campo de fuerza/dron/campo del dron) como
+// cuando un ataque le ROMPE una capa (se le pasa cuál, para mostrar
+// justo ese ícono antes de que desaparezca de la fichita).
+function flashCapaBatalla(jugadorId, slot, capa) {
+  const el = elementoSlotBatalla(jugadorId, slot);
+  const info = BATALLA_CARTAS_INFO[capa];
+  if (!el || !info) return;
+  const flash = document.createElement('div');
+  flash.className = 'batalla-flash-capa';
+  flash.textContent = info.emoji;
+  el.appendChild(flash);
+  setTimeout(() => flash.remove(), 900);
+}
+
+// Hada Curandera: un anillo de chispitas dando la vuelta alrededor del
+// personaje revivido, estilo hada de Zelda.
+function hadaFxBatalla(jugadorId, slot) {
+  const el = elementoSlotBatalla(jugadorId, slot);
+  if (!el) return;
+  const glow = document.createElement('div');
+  glow.className = 'batalla-hada-glow';
+  el.appendChild(glow);
+  const fx = document.createElement('div');
+  fx.className = 'batalla-hada-fx';
+  el.appendChild(fx);
+  ['🧚', '✨', '✨', '🧚', '✨', '✨'].forEach((c, i) => {
+    const chispa = document.createElement('div');
+    chispa.className = 'batalla-hada-chispa';
+    chispa.textContent = c;
+    chispa.style.setProperty('--ang', `${i * 60}deg`);
+    chispa.style.animationDelay = `${i * 0.03}s`;
+    fx.appendChild(chispa);
+  });
+  setTimeout(() => { glow.remove(); fx.remove(); }, 1200);
+}
+
+// Bomba: rueda por el suelo hasta el objetivo y explota.
+function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
+  const el = elementoSlotBatalla(objetivoId, slot);
+  if (!el) return;
+  const destino = centroDeRect(el.getBoundingClientRect());
+  const origen = origenAtaqueBatalla(actorEsPropio);
+  const proy = crearProyectilBatalla('💣', origen.x, origen.y);
+  requestAnimationFrame(() => {
+    proy.style.transition = 'left 0.5s ease-in, top 0.5s ease-in, transform 0.5s linear';
+    proy.style.left = `${destino.x}px`;
+    proy.style.top = `${destino.y}px`;
+    proy.style.transform = 'translate(-50%, -50%) rotate(900deg)';
+  });
+  setTimeout(() => {
+    proy.remove();
+    destelloImpactoBatalla(destino.x, destino.y);
+    if (capa) flashCapaBatalla(objetivoId, slot, capa);
+  }, 520);
+}
+
+// Misil: sube un poco y después le cae al objetivo.
+function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa) {
+  const el = elementoSlotBatalla(objetivoId, slot);
+  if (!el) return;
+  const destino = centroDeRect(el.getBoundingClientRect());
+  const origen = origenAtaqueBatalla(actorEsPropio);
+  const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
+  proy.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
+  const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 70 };
+  requestAnimationFrame(() => {
+    proy.style.transition = 'left 0.3s ease-out, top 0.3s ease-out';
+    proy.style.left = `${alto.x}px`;
+    proy.style.top = `${alto.y}px`;
+  });
+  setTimeout(() => {
+    proy.style.transition = 'left 0.32s ease-in, top 0.32s ease-in, transform 0.32s ease-in';
+    proy.style.left = `${destino.x}px`;
+    proy.style.top = `${destino.y}px`;
+    proy.style.transform = 'translate(-50%, -50%) rotate(90deg)';
+  }, 300);
+  setTimeout(() => {
+    proy.remove();
+    destelloImpactoBatalla(destino.x, destino.y);
+    if (capa) flashCapaBatalla(objetivoId, slot, capa);
+  }, 640);
+}
+
+// Bombardeo General: el ícono aparece en el centro y de ahí "llueven"
+// misiles sobre cada personaje en pie, uno detrás de otro.
+function animarBombardeoBatalla(accion) {
+  const icono = document.createElement('div');
+  icono.className = 'batalla-bombardeo-icono';
+  icono.textContent = '☢️';
+  document.body.appendChild(icono);
+  setTimeout(() => icono.remove(), 1000);
+
+  (accion.efectos || []).forEach((efecto, i) => {
+    setTimeout(() => {
+      const el = elementoSlotBatalla(efecto.jugador_id, efecto.slot);
+      if (!el) return;
+      const destino = centroDeRect(el.getBoundingClientRect());
+      const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 160);
+      proy.style.transform = 'translate(-50%, -50%) rotate(90deg)';
+      requestAnimationFrame(() => {
+        proy.style.transition = 'top 0.35s ease-in';
+        proy.style.top = `${destino.y}px`;
+      });
+      setTimeout(() => {
+        proy.remove();
+        destelloImpactoBatalla(destino.x, destino.y);
+        if (efecto.capa) flashCapaBatalla(efecto.jugador_id, efecto.slot, efecto.capa);
+      }, 380);
+    }, 500 + i * 90);
+  });
+}
+
+function procesarUltimaAccionBatalla(accion) {
+  if (!accion || !accion.carta) return;
+  const actorEsPropio = accion.jugador_id === myIdBatalla;
+  switch (accion.carta) {
+    case 'bomba':
+      animarBombaBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa);
+      break;
+    case 'misil':
+      animarMisilBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa);
+      break;
+    case 'bombardeo':
+      animarBombardeoBatalla(accion);
+      break;
+    case 'hada':
+      hadaFxBatalla(accion.objetivo_id, accion.slot);
+      break;
+    case 'escudo':
+    case 'campo_fuerza':
+    case 'dron':
+    case 'campo_dron':
+      flashCapaBatalla(accion.objetivo_id, accion.slot, accion.carta);
+      break;
+    default:
+      break;
   }
 }
 
