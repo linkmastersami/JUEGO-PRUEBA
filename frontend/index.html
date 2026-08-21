@@ -409,11 +409,40 @@
   .guess-section { margin-top: 16px; padding-top: 14px; border-top: 1px dashed #3a3f52; }
 
   /* --- Batalla de Avatares --- */
-  .batalla-escuadron { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 4px 0; }
+  /* Una vez iniciada la partida, la pantalla se sale del flujo normal de
+     `.wrap` (position:fixed) para ocupar el viewport completo sin scroll:
+     tablero del rival arriba, el propio pegado abajo, y la mano de cartas
+     al final. Cada tablero se reparte el alto sobrante por igual. */
+  #batalla-fixed {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0;
+    max-width: 520px; margin: 0 auto;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px))
+             calc(10px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px));
+    display: flex; flex-direction: column; gap: 6px;
+    overflow: hidden;
+    background: var(--bg);
+    z-index: 40;
+  }
+  #batalla-fixed .status-line { flex: 0 0 auto; margin: 0 0 2px; }
+  /* Fondo por defecto de cada tablero: si el jugador tiene un diseño de
+     tablero comprado en la tienda, se le pisa con background-image (ver
+     aplicarTableroFondo) — si no tiene ninguno, queda este degradado tal
+     como está ahora. */
+  .batalla-tablero {
+    flex: 1 1 0; min-height: 0;
+    display: flex; flex-direction: column; justify-content: center; gap: 6px;
+    background: linear-gradient(145deg, #23263a, #1a1c28);
+    background-size: cover; background-position: center;
+    border-radius: 14px; border: 1px solid #2c2f42;
+    padding: 6px 8px;
+  }
+  .batalla-tablero-header { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; font-weight: 700; }
+  .batalla-escuadron { display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
+  .batalla-fila { display: flex; gap: 8px; justify-content: center; }
   .batalla-personaje {
-    position: relative; width: 58px; height: 58px; border-radius: 12px;
+    position: relative; width: 52px; height: 52px; border-radius: 12px;
     background: #2a2e3d; border: 2px solid #454a5e; overflow: hidden;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     transition: opacity 0.25s ease, border-color 0.2s ease, transform 0.15s ease;
   }
   .batalla-personaje img { width: 100%; height: 100%; object-fit: contain; }
@@ -435,14 +464,15 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(33, 158, 188, 0.6); transform: scale(1); }
     50% { box-shadow: 0 0 0 7px rgba(33, 158, 188, 0); transform: scale(1.06); }
   }
-  .batalla-mano { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  #batalla-mano-zona { flex: 0 0 auto; }
+  .batalla-mano { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
   .batalla-carta {
-    width: 72px; padding: 8px 4px; border-radius: 10px; background: #2a2e3d;
+    width: 64px; padding: 6px 4px; border-radius: 10px; background: #2a2e3d;
     border: 2px solid #454a5e; color: var(--text); display: flex; flex-direction: column;
-    align-items: center; gap: 3px; font-size: 0.68rem; font-weight: 700; text-align: center;
+    align-items: center; gap: 3px; font-size: 0.64rem; font-weight: 700; text-align: center;
     cursor: pointer;
   }
-  .batalla-carta .emoji { font-size: 1.5rem; }
+  .batalla-carta .emoji { font-size: 1.3rem; }
   .batalla-carta.seleccionada { border-color: var(--accent); background: #3a3220; }
   .batalla-carta.marcada-descarte { border-color: var(--bad); opacity: 0.75; }
   .batalla-carta:disabled, .batalla-carta.deshabilitada { opacity: 0.35; cursor: not-allowed; }
@@ -912,6 +942,27 @@
   .juego-card-texto span { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
   #btn-elegir-codigos:hover, #btn-elegir-codigos:focus-visible { border-color: var(--accent); }
   #btn-elegir-batalla:hover, #btn-elegir-batalla:focus-visible { border-color: var(--bad); }
+
+  /* --- Transición al elegir juego: el icono que tocaste "vuela" desde el
+     botón hasta el centro, se agranda al máximo, y todo se desvanece para
+     dejar ver la pantalla del juego elegido debajo. Ver animarTransicionJuego(). --- */
+  #overlay-transicion-juego {
+    position: fixed; inset: 0; z-index: 10500;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0);
+    opacity: 0; pointer-events: none;
+    transition: background 0.5s ease, opacity 0.4s ease;
+  }
+  #overlay-transicion-juego.activo { opacity: 1; pointer-events: auto; }
+  #overlay-transicion-juego.oscuro { background: rgba(0, 0, 0, 0.94); }
+  #otj-emoji {
+    position: fixed; top: 50%; left: 50%;
+    font-size: min(46vw, 260px);
+    line-height: 1;
+    transform-origin: center;
+    will-change: transform;
+    transition: transform 0.55s cubic-bezier(0.22, 0.85, 0.28, 1);
+  }
   .ranking-tab.activo { background: var(--accent2); color: #fff; border-color: var(--accent2); }
   #btn-salir {
     position: fixed;
@@ -1197,6 +1248,8 @@
     <div id="cajas-fila"></div>
     <div id="cajas-resultado"></div>
 </div>
+
+<div id="overlay-transicion-juego"><span id="otj-emoji"></span></div>
 
 <div id="overlay-tienda">
     <div id="tienda-header">
@@ -1601,36 +1654,33 @@
   </div>
 
   <div id="game-screen-batalla" class="hidden">
-    <div class="status-line" id="status-line-batalla">Conectando...</div>
-    <div id="result-card-batalla" class="card hidden"></div>
+    <div id="batalla-fixed">
+      <div class="status-line" id="status-line-batalla">Conectando...</div>
 
-    <div class="card">
-      <div class="board-title">
-        <span id="batalla-rival-nombre">⚔️ Rival</span>
-        <span class="badge" id="batalla-turno-rival-badge"></span>
+      <div id="batalla-tablero-rival" class="batalla-tablero">
+        <div class="batalla-tablero-header">
+          <span id="batalla-rival-nombre">⚔️ Rival</span>
+          <span class="badge" id="batalla-turno-rival-badge"></span>
+        </div>
+        <div id="batalla-escuadron-rival" class="batalla-escuadron"></div>
       </div>
-      <div id="batalla-escuadron-rival" class="batalla-escuadron"></div>
-    </div>
 
-    <div class="card">
-      <div class="board-title">
-        <span>Tu escuadrón <span class="badge you">TÚ</span></span>
-        <span class="badge" id="batalla-turno-badge"></span>
+      <div id="batalla-tablero-propio" class="batalla-tablero">
+        <div id="batalla-escuadron-propio" class="batalla-escuadron"></div>
+        <div class="batalla-tablero-header">
+          <span>Tu escuadrón <span class="badge you">TÚ</span></span>
+          <span class="badge" id="batalla-turno-badge"></span>
+        </div>
       </div>
-      <div id="batalla-escuadron-propio" class="batalla-escuadron"></div>
 
-      <div class="board-title" style="margin-top:14px;">
-        <span>Tu mano</span>
-        <span class="badge" id="batalla-mazo-badge">Mazo: --</span>
+      <div id="batalla-mano-zona">
+        <div class="board-title">
+          <span>Tu mano</span>
+          <span class="badge" id="batalla-mazo-badge">Mazo: --</span>
+        </div>
+        <div id="batalla-mano" class="batalla-mano"></div>
+        <div id="batalla-accion-content"></div>
       </div>
-      <div id="batalla-mano" class="batalla-mano"></div>
-      <div id="batalla-accion-content" style="margin-top:10px;"></div>
-    </div>
-
-    <!-- Historial -->
-    <div class="card">
-      <div class="board-title">Historial</div>
-      <div class="log" id="log-batalla"></div>
     </div>
   </div>
 </div>
@@ -5162,14 +5212,52 @@ function mostrarModoParaJuego(juego) {
     : '🎯 Estratega de Códigos — ¿cómo quieres jugar?';
 }
 
+// El icono que tocaste "vuela" desde el botón hasta ocupar el centro de la
+// pantalla lo más grande posible, con el fondo oscureciéndose alrededor;
+// una vez tapada la pantalla se ejecuta `callback` (el cambio de pantalla
+// de verdad) y recién ahí todo se desvanece para revelarla.
+function animarTransicionJuego(sourceEl, emoji, callback) {
+  const overlay = document.getElementById('overlay-transicion-juego');
+  const emojiEl = document.getElementById('otj-emoji');
+
+  const rect = sourceEl.getBoundingClientRect();
+  const deltaX = (rect.left + rect.width / 2) - window.innerWidth / 2;
+  const deltaY = (rect.top + rect.height / 2) - window.innerHeight / 2;
+  const finalPx = Math.min(window.innerWidth * 0.46, 260);
+  const escalaInicial = Math.max(0.05, (rect.height || 35) / finalPx);
+
+  emojiEl.textContent = emoji;
+  emojiEl.style.transition = 'none';
+  emojiEl.style.transform = `translate(-50%, -50%) translate(${deltaX}px, ${deltaY}px) scale(${escalaInicial})`;
+  overlay.classList.remove('oscuro');
+  overlay.classList.add('activo');
+  void emojiEl.offsetWidth;
+
+  requestAnimationFrame(() => {
+    overlay.classList.add('oscuro');
+    emojiEl.style.transition = 'transform 0.55s cubic-bezier(0.22, 0.85, 0.28, 1)';
+    emojiEl.style.transform = 'translate(-50%, -50%) scale(1)';
+  });
+
+  setTimeout(() => {
+    if (callback) callback();
+    overlay.classList.remove('oscuro');
+    overlay.classList.remove('activo');
+  }, 850);
+}
+
 function elegirJuego(juego) {
   juegoElegido = juego;
-  document.getElementById('join-step-juego').classList.add('hidden');
   document.getElementById('join-step-modo').classList.remove('hidden');
   mostrarModoParaJuego(juego);
+  document.getElementById('join-step-juego').classList.add('hidden');
 }
-document.getElementById('btn-elegir-codigos').onclick = () => elegirJuego('codigos');
-document.getElementById('btn-elegir-batalla').onclick = () => elegirJuego('batalla');
+document.getElementById('btn-elegir-codigos').onclick = (e) => {
+  animarTransicionJuego(e.currentTarget.querySelector('.juego-card-emoji'), '🎯', () => elegirJuego('codigos'));
+};
+document.getElementById('btn-elegir-batalla').onclick = (e) => {
+  animarTransicionJuego(e.currentTarget.querySelector('.juego-card-emoji'), '⚔️', () => elegirJuego('batalla'));
+};
 document.getElementById('btn-cambiar-nombre-juego').onclick = () => cerrarSesion();
 document.getElementById('btn-cambiar-juego').onclick = () => {
   document.getElementById('join-step-modo').classList.add('hidden');
@@ -5210,6 +5298,8 @@ function limpiarEstadoDePartidaBatalla() {
   document.getElementById('wait-screen-batalla').classList.add('hidden');
   document.getElementById('game-screen-batalla').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
+  // Fuera del área de batalla la ficha de perfil vuelve a tener sentido.
+  document.getElementById('perfilJugador').classList.remove('hidden');
 }
 
 // --- Conexión ---
@@ -5441,19 +5531,35 @@ function badgesProteccion(p) {
   return iconos.length ? `<div class="badges-proteccion">${iconos.join('')}</div>` : '';
 }
 
-function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo) {
+// `filas` arma la formación en pirámide (ej. [3,2] para el rival, arriba
+// ancho y angosto abajo; [2,3] para la propia, al revés, así las dos
+// "puntas" quedan pegadas en el medio de la pantalla). Sin `filas` cae en
+// una sola fila con los 5 (así queda el espectador, que no necesita la
+// formación completa).
+function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo, filas) {
   const cont = document.getElementById(contenedorId);
   if (!cont || !jugador) { if (cont) cont.innerHTML = ''; return; }
   const avatarSrc = jugador.avatar ? `/gif/${jugador.avatar}` : '';
-  cont.innerHTML = jugador.personajes.map((p, i) => {
-    const esObjetivo = objetivos && objetivos.equipo === equipo && objetivos.slots.includes(i);
-    const caido = p.estado === 'caido' ? ' caido' : '';
-    const objetivoClass = esObjetivo ? ' objetivo' : '';
-    const img = avatarSrc ? `<img src="${avatarSrc}" alt="" loading="lazy">` : jugador.name[0];
-    return `<div class="batalla-personaje${caido}${objetivoClass}" data-slot="${i}" data-equipo="${equipo}">
-      ${img}${badgesProteccion(p)}
-    </div>`;
-  }).join('');
+  const grupos = filas || [jugador.personajes.length];
+  let idx = 0;
+  let html = '';
+  grupos.forEach(cantidad => {
+    html += '<div class="batalla-fila">';
+    for (let k = 0; k < cantidad; k++) {
+      const i = idx++;
+      const p = jugador.personajes[i];
+      if (!p) continue;
+      const esObjetivo = objetivos && objetivos.equipo === equipo && objetivos.slots.includes(i);
+      const caido = p.estado === 'caido' ? ' caido' : '';
+      const objetivoClass = esObjetivo ? ' objetivo' : '';
+      const img = avatarSrc ? `<img src="${avatarSrc}" alt="" loading="lazy">` : jugador.name[0];
+      html += `<div class="batalla-personaje${caido}${objetivoClass}" data-slot="${i}" data-equipo="${equipo}">
+        ${img}${badgesProteccion(p)}
+      </div>`;
+    }
+    html += '</div>';
+  });
+  cont.innerHTML = html;
 
   if (objetivos && objetivos.equipo === equipo) {
     cont.querySelectorAll('.batalla-personaje.objetivo').forEach(el => {
@@ -5465,6 +5571,11 @@ function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo) {
 function renderGameBatalla(state) {
   const you = (state.players || []).find(p => p.is_you);
   const rival = (state.players || []).find(p => !p.is_you);
+
+  // La ficha de perfil (HUD de arriba con tus puntos/rango de Estratega de
+  // Códigos) no pinta nada acá: son otros puntos, y el área de batalla ya
+  // muestra quién sos vos con tu propia pirámide de personajes.
+  document.getElementById('perfilJugador').classList.add('hidden');
 
   if (state.status === 'waiting') {
     document.getElementById('game-screen-batalla').classList.add('hidden');
@@ -5513,8 +5624,11 @@ function renderGameBatalla(state) {
   document.getElementById('batalla-turno-badge').textContent = esTuTurno ? 'TU TURNO' : '';
   document.getElementById('batalla-mazo-badge').textContent = `Mazo: ${state.deck_remaining ?? '--'}`;
 
-  renderEscuadronBatalla('batalla-escuadron-rival', rival, objetivos, 'rival');
-  renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio');
+  // Pirámide invertida (3 arriba, 2 abajo) para el rival, pirámide normal
+  // (2 arriba, 3 abajo) para la propia: las puntas angostas quedan
+  // pegadas una a la otra en el medio de la pantalla.
+  renderEscuadronBatalla('batalla-escuadron-rival', rival, objetivos, 'rival', [3, 2]);
+  renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio', [2, 3]);
 
   const statusLine = document.getElementById('status-line-batalla');
   if (statusLine) {
@@ -5525,12 +5639,6 @@ function renderGameBatalla(state) {
 
   renderManoBatalla(you, esTuTurno);
   renderAccionBatalla(you, rival, esTuTurno);
-
-  const logEl = document.getElementById('log-batalla');
-  if (logEl) {
-    logEl.innerHTML = (state.log || []).map(l => `<div>${escaparHtml(l)}</div>`).join('');
-    logEl.scrollTop = logEl.scrollHeight;
-  }
 }
 
 function renderManoBatalla(you, esTuTurno) {
