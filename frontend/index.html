@@ -1908,6 +1908,7 @@ function ejecutarAnimacionVictoriaRonda(callbackFin) {
     textoGrande.style.color = "var(--good)";
     textoGrande.innerText = "🏆";
     subtexto.innerText = "¡GANASTE LA RONDA!";
+    reproducirSonido(soundDesactivarCorrecto);
 
     setTimeout(() => {
         overlay.classList.remove("activo");
@@ -1929,6 +1930,7 @@ function ejecutarAnimacionExplosion(callbackFin) {
     textoGrande.classList.add("efecto-explosion");
     textoGrande.innerText = "💥";
     subtexto.innerText = "IMPACTO DETECTADO...";
+    reproducirSonido(soundDesactivarExplota);
 
     const duracionExplosion = 4000;
     destello.classList.remove("destello-activo");
@@ -2035,6 +2037,7 @@ function mostrarCajasFuertes(monedas, callbackFin, options) {
     overlay.classList.remove('activo');
     void overlay.offsetWidth;
     overlay.classList.add('activo');
+    reproducirSonido(soundCofreRevolver);
 
     // Las 3 cajas son indistinguibles (mismo candado), así que "revolverlas"
     // de verdad -moverlas de posición- se vería exactamente igual a no
@@ -2064,6 +2067,7 @@ function mostrarCajasFuertes(monedas, callbackFin, options) {
             titulo.textContent = '¡Encontraste monedas!';
             resultado.textContent = `+${monedas.toLocaleString()} monedas`;
             resultado.classList.add('activo');
+            reproducirSonido(soundCofreAbrir);
 
             const alternativos = (options || [100, 75, 50]).slice();
             const posPropio = alternativos.indexOf(monedas);
@@ -2181,6 +2185,7 @@ function iniciarCuentaRegresivaDesactivar(nombre, esMio) {
     contadorEl.classList.remove('tick');
     void contadorEl.offsetWidth;
     contadorEl.classList.add('tick');
+    reproducirSonido(soundCuentaTick);
   }, 1000);
 }
 
@@ -2203,6 +2208,7 @@ function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs) {
   overlay.classList.remove('activo');
   void overlay.offsetWidth;
   overlay.classList.add('activo');
+  reproducirSonido(soundDesconexionAlerta);
 
   barra.classList.remove('animar');
   void barra.offsetWidth;
@@ -2517,15 +2523,19 @@ document.getElementById('btn-auth-submit').onclick = async () => {
       errEl.textContent = error.message.includes('already registered')
         ? 'Ese usuario ya existe. Inicia sesión.'
         : 'No se pudo crear la cuenta: ' + error.message;
+      reproducirSonido(soundUiError);
       return;
     }
+    reproducirSonido(soundUiLogin);
     await continuarConSesion(username);
   } else {
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
     if (error) {
       errEl.textContent = 'Usuario o contraseña incorrectos.';
+      reproducirSonido(soundUiError);
       return;
     }
+    reproducirSonido(soundUiLogin);
     const realUsername = data.user?.user_metadata?.username || username;
     await continuarConSesion(realUsername);
   }
@@ -2588,6 +2598,7 @@ async function actualizarPerfilHUD(name) {
         } else {
             avatarImg.style.display = 'none';
         }
+        reproducirMusicaParaAvatar(data.avatar_actual || null);
         animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 800);
         animarPuntajeHUD("uiMonedas", monedasAnteriores, monedasActuales, 800);
         const perfilCard = document.getElementById("perfilJugador");
@@ -2644,6 +2655,7 @@ async function abrirTienda(forzado = false) {
     document.getElementById('tienda-grid').classList.add('carrusel');
     document.getElementById('overlay-tienda').classList.add('carrusel-activo');
     document.getElementById('overlay-tienda').classList.add('activo');
+    reproducirSonido(soundTiendaAbrir);
     await cargarTienda();
 }
 
@@ -2660,12 +2672,14 @@ async function abrirSelectorAvatares() {
     document.getElementById('tienda-grid').classList.remove('carrusel');
     document.getElementById('overlay-tienda').classList.remove('carrusel-activo');
     document.getElementById('overlay-tienda').classList.add('activo');
+    reproducirSonido(soundTiendaAbrir);
     await cargarTienda();
 }
 
 function cerrarTienda() {
     if (tiendaForzada) return; // no puede salir sin elegir su primer avatar
     document.getElementById('overlay-tienda').classList.remove('activo');
+    reproducirSonido(soundUiCerrar);
 }
 
 // Tarjeta de un item comprable (dentro del carrusel de la tienda). Al
@@ -2820,11 +2834,13 @@ async function onClickComprar(archivo) {
             body: JSON.stringify({ username: tiendaUsuarioActual, archivo })
         });
         const d = await r.json();
-        if (!d.ok) { errEl.textContent = d.error || 'No se pudo comprar el avatar.'; return; }
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo comprar el avatar.'; reproducirSonido(soundUiError); return; }
+        reproducirSonido(soundTiendaComprar);
         await cargarTienda();
         actualizarPerfilHUD(tiendaUsuarioActual);
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
+        reproducirSonido(soundUiError);
     }
 }
 
@@ -2838,10 +2854,12 @@ async function onClickComprarTablero(archivo) {
             body: JSON.stringify({ archivo })
         });
         const d = await r.json();
-        if (!d.ok) { errEl.textContent = d.error || 'No se pudo comprar el tablero.'; return; }
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo comprar el tablero.'; reproducirSonido(soundUiError); return; }
+        reproducirSonido(soundTiendaComprar);
         await cargarTienda();
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
+        reproducirSonido(soundUiError);
     }
 }
 
@@ -2877,10 +2895,10 @@ document.getElementById('btn-confirmar-compra').onclick = () => {
     if (categoria === 'tablero') onClickComprarTablero(archivo);
     else onClickComprar(archivo);
 };
-document.getElementById('btn-cancelar-compra').onclick = cerrarConfirmarCompra;
+document.getElementById('btn-cancelar-compra').onclick = () => { reproducirSonido(soundUiCerrar); cerrarConfirmarCompra(); };
 // Tocar el fondo oscuro (fuera de la tarjeta) también cancela.
 document.getElementById('overlay-confirmar-compra').onclick = (e) => {
-    if (e.target.id === 'overlay-confirmar-compra') cerrarConfirmarCompra();
+    if (e.target.id === 'overlay-confirmar-compra') { reproducirSonido(soundUiCerrar); cerrarConfirmarCompra(); }
 };
 
 async function onClickElegir(archivo) {
@@ -2893,11 +2911,13 @@ async function onClickElegir(archivo) {
             body: JSON.stringify({ username: tiendaUsuarioActual, archivo })
         });
         const d = await r.json();
-        if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el avatar.'; return; }
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el avatar.'; reproducirSonido(soundUiError); return; }
+        reproducirSonido(soundTiendaElegir);
         await cargarTienda();
         actualizarPerfilHUD(tiendaUsuarioActual);
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
+        reproducirSonido(soundUiError);
     }
 }
 
@@ -2911,11 +2931,13 @@ async function onClickElegirTablero(archivo) {
             body: JSON.stringify({ archivo })
         });
         const d = await r.json();
-        if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el tablero.'; return; }
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el tablero.'; reproducirSonido(soundUiError); return; }
+        reproducirSonido(soundTiendaElegir);
         await cargarTienda();
         actualizarPerfilHUD(tiendaUsuarioActual);
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
+        reproducirSonido(soundUiError);
     }
 }
 
@@ -3174,12 +3196,65 @@ let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
+// --- Efectos de sonido (ver la Hoja de Pistas Sonoras para qué es cada uno) ---
 const soundTachar = new Audio('tachar.mp3');
 const soundCarta = new Audio('carta.mp3');
 const soundTurno = new Audio('turno.mp3');
 
-// --- Silenciar sonido (persistido, para no reproducir tachar/carta/turno
-// sin que el jugador pueda apagarlos) ---
+// Interfaz general
+const soundUiBoton = new Audio('ui-boton.mp3');
+const soundUiError = new Audio('ui-error.mp3');
+const soundUiMensaje = new Audio('ui-mensaje.mp3');
+const soundUiJugadorEntra = new Audio('ui-jugador-entra.mp3');
+const soundUiJugadorSale = new Audio('ui-jugador-sale.mp3');
+const soundUiCerrar = new Audio('ui-cerrar.mp3');
+const soundUiLogin = new Audio('ui-login.mp3');
+const soundTransicionJuego = new Audio('transicion-juego.mp3');
+const soundTiendaAbrir = new Audio('tienda-abrir.mp3');
+const soundTiendaComprar = new Audio('tienda-comprar.mp3');
+const soundTiendaElegir = new Audio('tienda-elegir.mp3');
+
+// Estratega de Códigos
+const soundFichaTomar = new Audio('ficha-tomar.mp3');
+const soundFichaRival = new Audio('ficha-rival.mp3');
+const soundPistaElegir = new Audio('pista-elegir.mp3');
+const soundPistaMover = new Audio('pista-mover.mp3');
+const soundCuentaTick = new Audio('cuenta-tick.mp3');
+const soundDesactivarCorrecto = new Audio('desactivar-correcto.mp3');
+const soundDesactivarExplota = new Audio('desactivar-explota.mp3');
+const soundDesconexionAlerta = new Audio('desconexion-alerta.mp3');
+const soundCofreRevolver = new Audio('cofre-revolver.mp3');
+const soundCofreAbrir = new Audio('cofre-abrir.mp3');
+const soundVictoriaPartida = new Audio('victoria-partida.mp3');
+const soundDerrotaPartida = new Audio('derrota-partida.mp3');
+const soundTutorialCompletado = new Audio('tutorial-completado.mp3');
+
+// Batalla de Avatares
+const soundMatchmakingEncontrado = new Audio('matchmaking-encontrado.mp3');
+const soundRpsElegir = new Audio('rps-elegir.mp3');
+const soundRpsEmpate = new Audio('rps-empate.mp3');
+const soundRpsGana = new Audio('rps-gana.mp3');
+const soundRpsPierde = new Audio('rps-pierde.mp3');
+const soundListos = new Audio('listos.mp3');
+const soundComienza = new Audio('comienza.mp3');
+const soundCartaElegir = new Audio('carta-elegir.mp3');
+const soundCartaDescartar = new Audio('carta-descartar.mp3');
+const soundBombaLanzar = new Audio('bomba-lanzar.mp3');
+const soundBombaImpacto = new Audio('bomba-impacto.mp3');
+const soundMisilLanzar = new Audio('misil-lanzar.mp3');
+const soundMisilImpacto = new Audio('misil-impacto.mp3');
+const soundBombardeoSirena = new Audio('bombardeo-sirena.mp3');
+const soundBombardeoImpacto = new Audio('bombardeo-impacto.mp3');
+const soundEscudoColocar = new Audio('escudo-colocar.mp3');
+const soundEscudoRomper = new Audio('escudo-romper.mp3');
+const soundHadaCurar = new Audio('hada-curar.mp3');
+const soundBatallaGana = new Audio('batalla-gana.mp3');
+const soundBatallaPierde = new Audio('batalla-pierde.mp3');
+const soundBatallaEmpate = new Audio('batalla-empate.mp3');
+const soundRevanchaPedida = new Audio('revancha-pedida.mp3');
+
+// --- Silenciar sonido (persistido, para no reproducir nada sin que el
+// jugador pueda apagarlo) ---
 let sonidoSilenciado = localStorage.getItem('edc_muted') === '1';
 
 function reproducirSonido(audio) {
@@ -3187,6 +3262,103 @@ function reproducirSonido(audio) {
   audio.currentTime = 0;
   audio.play().catch(() => {});
 }
+
+// iOS/Safari solo deja arrancar un <audio> por código si hubo un
+// play() de ESE elemento durante un toque real del usuario en algún
+// momento — así que la primera vez que hay un gesto de verdad (entrar a
+// una sala), se hace un play()+pause() mudo de cada efecto para
+// "desbloquearlos" a todos de una, y que después reproducirSonido()
+// pueda dispararlos sin que haga falta otro toque.
+const TODOS_LOS_SONIDOS = [
+  soundTachar, soundCarta, soundTurno,
+  soundUiBoton, soundUiError, soundUiMensaje, soundUiJugadorEntra, soundUiJugadorSale,
+  soundUiCerrar, soundUiLogin, soundTransicionJuego, soundTiendaAbrir, soundTiendaComprar, soundTiendaElegir,
+  soundFichaTomar, soundFichaRival, soundPistaElegir, soundPistaMover, soundCuentaTick,
+  soundDesactivarCorrecto, soundDesactivarExplota, soundDesconexionAlerta,
+  soundCofreRevolver, soundCofreAbrir, soundVictoriaPartida, soundDerrotaPartida, soundTutorialCompletado,
+  soundMatchmakingEncontrado, soundRpsElegir, soundRpsEmpate, soundRpsGana, soundRpsPierde,
+  soundListos, soundComienza, soundCartaElegir, soundCartaDescartar,
+  soundBombaLanzar, soundBombaImpacto, soundMisilLanzar, soundMisilImpacto,
+  soundBombardeoSirena, soundBombardeoImpacto, soundEscudoColocar, soundEscudoRomper, soundHadaCurar,
+  soundBatallaGana, soundBatallaPierde, soundBatallaEmpate, soundRevanchaPedida,
+];
+let sonidosYaDesbloqueados = false;
+function desbloquearTodosLosSonidos() {
+  if (sonidosYaDesbloqueados) return;
+  sonidosYaDesbloqueados = true;
+  TODOS_LOS_SONIDOS.forEach(audio => {
+    audio.play().catch(() => {});
+    audio.pause();
+    audio.currentTime = 0;
+  });
+}
+
+// --- Sonido propio al ser noqueado, por avatar (Batalla de Avatares) ---
+// frontend/noqueo/<archivo-del-avatar>.mp3 si existe, si no
+// frontend/noqueo/default.mp3. Se resuelve una sola vez por avatar y se
+// cachea, así que el 404 (si no tiene sonido propio) solo se paga una vez.
+const cacheNoqueoPorAvatar = {};
+function reproducirNoqueoDeAvatar(archivoAvatar) {
+  if (sonidoSilenciado) return;
+  const clave = archivoAvatar || '__default__';
+  if (cacheNoqueoPorAvatar[clave]) {
+    reproducirSonido(cacheNoqueoPorAvatar[clave]);
+    return;
+  }
+  const nombreBase = archivoAvatar ? archivoAvatar.replace(/\.[^.]+$/, '') : null;
+  const propio = nombreBase ? new Audio(`noqueo/${nombreBase}.mp3`) : null;
+  const usarDefault = () => {
+    const def = cacheNoqueoPorAvatar['__default__'] || new Audio('noqueo/default.mp3');
+    cacheNoqueoPorAvatar['__default__'] = def;
+    cacheNoqueoPorAvatar[clave] = def;
+    reproducirSonido(def);
+  };
+  if (!propio) { usarDefault(); return; }
+  propio.addEventListener('canplaythrough', () => {
+    cacheNoqueoPorAvatar[clave] = propio;
+    reproducirSonido(propio);
+  }, { once: true });
+  propio.addEventListener('error', usarDefault, { once: true });
+  propio.load();
+}
+
+// --- Música de fondo, sigue al avatar puesto ---
+// frontend/musica/<archivo-del-avatar>.mp3 si existe, si no
+// frontend/musica/default.mp3 — suena en loop todo el tiempo (menú,
+// tienda, las dos partidas), y cambia sola cuando cambia el avatar.
+let musicaActual = null;
+let musicaAvatarActual = undefined; // undefined = todavía no se resolvió ninguna
+function reproducirMusicaParaAvatar(archivoAvatar) {
+  const clave = archivoAvatar || null;
+  if (clave === musicaAvatarActual) return; // ya está sonando la que corresponde
+  musicaAvatarActual = clave;
+  const nombreBase = archivoAvatar ? archivoAvatar.replace(/\.[^.]+$/, '') : null;
+  const src = nombreBase ? `musica/${nombreBase}.mp3` : 'musica/default.mp3';
+  const arrancar = (audio) => {
+    audio.loop = true;
+    audio.volume = 0.35;
+    const anterior = musicaActual;
+    musicaActual = audio;
+    if (anterior && anterior !== audio) anterior.pause();
+    if (!sonidoSilenciado) audio.play().catch(() => {});
+  };
+  const nuevo = new Audio(src);
+  if (nombreBase) {
+    nuevo.addEventListener('canplaythrough', () => arrancar(nuevo), { once: true });
+    nuevo.addEventListener('error', () => arrancar(new Audio('musica/default.mp3')), { once: true });
+    nuevo.load();
+  } else {
+    arrancar(nuevo);
+  }
+}
+// Si el primer intento de reproducir música se bloqueó por la política de
+// autoplay del navegador (no hubo ningún toque todavía), la reintenta en
+// el primer toque/click que haga la persona en la página.
+document.addEventListener('click', () => {
+  if (musicaActual && musicaActual.paused && !sonidoSilenciado) {
+    musicaActual.play().catch(() => {});
+  }
+}, true);
 
 // --- Vibración táctil (feedback háptico) ---
 // No todos los navegadores la soportan (iOS Safari no tiene
@@ -3277,7 +3449,12 @@ document.getElementById('btn-mute').onclick = () => {
   sonidoSilenciado = !sonidoSilenciado;
   localStorage.setItem('edc_muted', sonidoSilenciado ? '1' : '0');
   actualizarBotonMute();
-  if (sonidoSilenciado) pararNarracionTutorial();
+  if (sonidoSilenciado) {
+    pararNarracionTutorial();
+    if (musicaActual) musicaActual.pause();
+  } else if (musicaActual) {
+    musicaActual.play().catch(() => {});
+  }
 };
 actualizarBotonMute();
 
@@ -3371,10 +3548,8 @@ async function ejecutarReinicio(tipo, nombre) {
 }
 
 function conectarSala(room, name, solo = false) {
-  soundTachar.play().catch(() => {}); soundTachar.pause(); soundTachar.currentTime = 0;
-  soundCarta.play().catch(() => {}); soundCarta.pause(); soundCarta.currentTime = 0;
-  soundTurno.play().catch(() => {}); soundTurno.pause(); soundTurno.currentTime = 0;
-  
+  desbloquearTodosLosSonidos();
+
   const errEl = document.getElementById('join-error');
   errEl.textContent = '';
   
@@ -3628,6 +3803,7 @@ document.getElementById('btn-auto-join').onclick = async () => {
 };
 
 document.getElementById('start-btn').onclick = () => {
+  reproducirSonido(soundUiBoton);
   ws.send(JSON.stringify({type: 'start'}));
 };
 
@@ -3679,6 +3855,7 @@ document.getElementById('btn-salir').onclick = () => {
 document.getElementById('guess-btn').onclick = () => {
   const { ready, numbers } = computeTableGuess();
   if (!ready) return;
+  reproducirSonido(soundUiBoton);
   ws.send(JSON.stringify({type: 'guess', numbers}));
 };
 
@@ -4538,6 +4715,7 @@ function conectarLobby(name) {
     nuevos.sort((a, b) => a.seq - b.seq);
     nuevos.forEach(m => {
       renderMensajeLobbyChat(m);
+      if (m.player_name !== miNombreLobby) reproducirSonido(soundUiMensaje);
       if (!lobbyChatAbierto && m.player_name !== miNombreLobby) lobbyChatNoLeidos++;
     });
     if (nuevos.length) {
@@ -4902,14 +5080,15 @@ function handleState(state) {
       if (state.current_turn === myId) vibrar([30, 40, 30]);
     }
     if (state.faceup && lastState.faceup && state.faceup.length > lastState.faceup.length) {
-      reproducirSonido(soundCarta);
       vibrar(18);
 
       const nuevaFicha = state.faceup[state.faceup.length - 1];
       const actorEsOponente = state.current_turn && state.current_turn !== myId;
       if (actorEsOponente) {
+        reproducirSonido(soundFichaRival);
         mostrarFichaGrande(`${state.current_turn_name} robó una ficha`, nuevaFicha);
       } else {
+        reproducirSonido(soundFichaTomar);
         mostrarFichaGrande('¡Sacaste esta ficha!', nuevaFicha);
       }
     }
@@ -4926,9 +5105,24 @@ function handleState(state) {
     // vos (no en cada re-render mientras se sigue mostrando la pantalla
     // final). Cubre multijugador, solitario y el tutorial por igual, los
     // 3 marcan status:'finished' + winner con el mismo criterio.
-    if (lastState.status !== 'finished' && state.status === 'finished' && state.winner === myId) {
-      lanzarConfeti();
-      vibrar([100, 60, 100, 60, 220]);
+    if (lastState.status !== 'finished' && state.status === 'finished') {
+      if (state.winner === myId) {
+        lanzarConfeti();
+        vibrar([100, 60, 100, 60, 220]);
+      }
+      if (state.mode === 'tutorial') {
+        reproducirSonido(soundTutorialCompletado);
+      } else if (state.winner === myId) {
+        reproducirSonido(soundVictoriaPartida);
+      } else {
+        reproducirSonido(soundDerrotaPartida);
+      }
+    }
+
+    // Alguien entra o sale de la sala mientras se espera a que arranque.
+    if (lastState.status === 'waiting' && state.status === 'waiting' && lastState.players && state.players) {
+      if (state.players.length > lastState.players.length) reproducirSonido(soundUiJugadorEntra);
+      else if (state.players.length < lastState.players.length) reproducirSonido(soundUiJugadorSale);
     }
 
     if (state.events && state.events.length) {
@@ -4973,6 +5167,7 @@ function handleState(state) {
     nuevosChat.sort((a, b) => a.seq - b.seq);
     nuevosChat.forEach(m => {
       renderMensajeChat(m);
+      if (m.player_id !== myId) reproducirSonido(soundUiMensaje);
       if (!chatAbierto && m.player_id !== myId) chatNoLeidos++;
     });
     if (nuevosChat.length) {
@@ -5181,6 +5376,7 @@ function animarPistaHaciaCodigo(faceupIdx, clue) {
   setTimeout(() => {
     copia.remove();
     if (destino.isConnected) destino.style.visibility = 'visible';
+    reproducirSonido(soundPistaMover);
   }, 640);
 }
 
@@ -5264,6 +5460,7 @@ function renderGame(state) {
   if (canPickClue) {
     faceupRow.querySelectorAll('.faceup-tile.selectable').forEach(el => {
       el.onclick = () => {
+        reproducirSonido(soundPistaElegir);
         selectedFaceupIndex = parseInt(el.dataset.idx, 10);
         compareMode = false;
         renderGame(lastState);
@@ -5527,6 +5724,7 @@ function mostrarModoParaJuego(juego) {
 function animarTransicionJuego(sourceEl, emoji, callback) {
   const overlay = document.getElementById('overlay-transicion-juego');
   const emojiEl = document.getElementById('otj-emoji');
+  reproducirSonido(soundTransicionJuego);
 
   const rect = sourceEl.getBoundingClientRect();
   const deltaX = (rect.left + rect.width / 2) - window.innerWidth / 2;
@@ -5615,6 +5813,7 @@ function limpiarEstadoDePartidaBatalla() {
 
 // --- Conexión ---
 function conectarSalaBatalla(room, name) {
+  desbloquearTodosLosSonidos();
   const errEl = document.getElementById('join-error');
   errEl.textContent = '';
   if (!room || !name) {
@@ -5761,16 +5960,24 @@ function handleStateBatalla(state) {
       if (state.current_turn === myIdBatalla) vibrar([30, 40, 30]);
     }
     // Un personaje cambió de estado (tumbado/revivido) en cualquiera de
-    // los dos equipos: un sonido/vibración corta de confirmación.
+    // los dos equipos: una vibración corta de confirmación. El sonido ya
+    // lo pone procesarUltimaAccionBatalla() con el efecto específico de
+    // cada carta (bomba-impacto, escudo-romper, hada-curar, etc.) — poner
+    // acá también un sonido genérico sonaría dos veces pisado.
     const antesPersonajes = JSON.stringify((anterior.players || []).map(p => p.personajes));
     const ahoraPersonajes = JSON.stringify((state.players || []).map(p => p.personajes));
     if (antesPersonajes !== ahoraPersonajes) {
-      reproducirSonido(soundCarta);
       vibrar(15);
     }
     if (anterior.status !== 'finished' && state.status === 'finished' && state.winner === myIdBatalla) {
       lanzarConfeti();
       vibrar([100, 60, 100, 60, 220]);
+    }
+    // Se encontró rival (real o bot) y la sala pasa de esperar a elegir
+    // piedra/papel/tijera — no para la revancha, ahí ya sabés quién es tu
+    // rival, para eso está revancha-pedida.mp3.
+    if (anterior.status === 'waiting' && state.status === 'rps') {
+      reproducirSonido(soundMatchmakingEncontrado);
     }
     // De la revelación del piedra/papel/tijera a la partida de verdad:
     // un par de avisos cortos antes de destapar el tablero.
@@ -5820,6 +6027,7 @@ function mostrarResultadoBatalla(state) {
   const empate = state.winner === null || state.winner === undefined;
   const gane = !empate && state.winner === myIdBatalla;
   const rival = (state.players || []).find(p => p.id !== myIdBatalla);
+  reproducirSonido(empate ? soundBatallaEmpate : (gane ? soundBatallaGana : soundBatallaPierde));
   // Las monedas NO se mencionan acá a propósito: el monto se revela recién
   // al elegir una caja fuerte (ver mostrarCajasFuertes) — si ya lo decimos
   // acá, elegir la caja deja de tener sentido porque ya sabés cuánto es.
@@ -5978,6 +6186,13 @@ function elementoSlotBatalla(jugadorId, slot) {
   return document.querySelector(`#batalla-escuadron-${equipo} .batalla-personaje[data-slot="${slot}"]`);
 }
 
+// Para el sonido de noqueo por avatar: el avatar del DUEÑO del personaje
+// que cayó, no el del que atacó.
+function avatarDeJugadorBatalla(jugadorId) {
+  const jugador = (lastStateBatalla && lastStateBatalla.players || []).find(p => p.id === jugadorId);
+  return jugador ? jugador.avatar : null;
+}
+
 function centroDeRect(rect) {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
@@ -6087,6 +6302,7 @@ function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
   const destino = centroDeRect(el.getBoundingClientRect());
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('💣', origen.x, origen.y);
+  reproducirSonido(soundBombaLanzar);
   requestAnimationFrame(() => {
     moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(900deg)', 1000, 'ease-in');
   });
@@ -6095,7 +6311,9 @@ function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
     limpiarImpactoPendienteBatalla(objetivoId, slot);
     rerenderEscuadronesBatalla();
     destelloImpactoBatalla(destino.x, destino.y);
-    if (capa) flashCapaBatalla(objetivoId, slot, capa);
+    reproducirSonido(soundBombaImpacto);
+    if (capa) { flashCapaBatalla(objetivoId, slot, capa); reproducirSonido(soundEscudoRomper); }
+    if (derribado) reproducirNoqueoDeAvatar(avatarDeJugadorBatalla(objetivoId));
   }, 1020);
 }
 
@@ -6111,6 +6329,7 @@ function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
   const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
   proy.style.transform += ' rotate(-90deg)';
   void proy.offsetWidth;
+  reproducirSonido(soundMisilLanzar);
   const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 90 };
   requestAnimationFrame(() => {
     moverProyectilBatalla(proy, alto.x, alto.y, 'rotate(-90deg)', 550, 'ease-out');
@@ -6123,7 +6342,9 @@ function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
     limpiarImpactoPendienteBatalla(objetivoId, slot);
     rerenderEscuadronesBatalla();
     destelloImpactoBatalla(destino.x, destino.y);
-    if (capa) flashCapaBatalla(objetivoId, slot, capa);
+    reproducirSonido(soundMisilImpacto);
+    if (capa) { flashCapaBatalla(objetivoId, slot, capa); reproducirSonido(soundEscudoRomper); }
+    if (derribado) reproducirNoqueoDeAvatar(avatarDeJugadorBatalla(objetivoId));
   }, 1120);
 }
 
@@ -6134,6 +6355,7 @@ function animarBombardeoBatalla(accion) {
   icono.className = 'batalla-bombardeo-icono';
   icono.textContent = '☢️';
   document.body.appendChild(icono);
+  reproducirSonido(soundBombardeoSirena);
   setTimeout(() => icono.remove(), 1300);
 
   // Todos quedan "congelados" en su estado previo desde el arranque, y
@@ -6159,7 +6381,9 @@ function animarBombardeoBatalla(accion) {
         limpiarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot);
         rerenderEscuadronesBatalla();
         destelloImpactoBatalla(destino.x, destino.y);
-        if (efecto.capa) flashCapaBatalla(efecto.jugador_id, efecto.slot, efecto.capa);
+        reproducirSonido(soundBombardeoImpacto);
+        if (efecto.capa) { flashCapaBatalla(efecto.jugador_id, efecto.slot, efecto.capa); reproducirSonido(soundEscudoRomper); }
+        if (efecto.derribado) reproducirNoqueoDeAvatar(avatarDeJugadorBatalla(efecto.jugador_id));
       }, 480);
     }, 700 + i * 160);
   });
@@ -6180,12 +6404,14 @@ function procesarUltimaAccionBatalla(accion) {
       break;
     case 'hada':
       hadaFxBatalla(accion.objetivo_id, accion.slot);
+      reproducirSonido(soundHadaCurar);
       break;
     case 'escudo':
     case 'campo_fuerza':
     case 'dron':
     case 'campo_dron':
       flashCapaBatalla(accion.objetivo_id, accion.slot, accion.carta);
+      reproducirSonido(soundEscudoColocar);
       break;
     default:
       break;
@@ -6293,6 +6519,7 @@ function renderRpsBatalla(state) {
   const resultado = state.rps_resultado;
   if (resultado) {
     if (resultado.empate) {
+      if (cont.dataset.rpsUltimoSeq !== 'empate') { reproducirSonido(soundRpsEmpate); cont.dataset.rpsUltimoSeq = 'empate'; }
       cont.innerHTML = `
         <div class="obr-titulo">¡Empate!</div>
         <div class="obr-reveal">
@@ -6303,6 +6530,8 @@ function renderRpsBatalla(state) {
         <div class="obr-sub">Tiran de nuevo...</div>
       `;
     } else {
+      const clave = resultado.ganaste ? 'gana' : 'pierde';
+      if (cont.dataset.rpsUltimoSeq !== clave) { reproducirSonido(resultado.ganaste ? soundRpsGana : soundRpsPierde); cont.dataset.rpsUltimoSeq = clave; }
       cont.innerHTML = `
         <div class="obr-titulo">${resultado.ganaste ? '¡Ganaste!' : 'Perdiste'}</div>
         <div class="obr-reveal">
@@ -6315,6 +6544,11 @@ function renderRpsBatalla(state) {
     }
     return;
   }
+
+  // Volvimos a la fase de elegir (recién arrancó, o hubo un empate y hay
+  // que tirar de nuevo): se limpia la marca de "ya sonó este resultado"
+  // para que un empate/resultado futuro en esta misma sala sí suene.
+  delete cont.dataset.rpsUltimoSeq;
 
   const rps = state.rps || { ya_elegiste: false, rival_eligio: false };
   if (rps.ya_elegiste) {
@@ -6338,6 +6572,7 @@ function renderRpsBatalla(state) {
   cont.querySelectorAll('.obr-opcion[data-opcion]').forEach(btn => {
     btn.onclick = () => {
       if (!wsBatalla || wsBatalla.readyState !== WebSocket.OPEN) return;
+      reproducirSonido(soundRpsElegir);
       wsBatalla.send(JSON.stringify({ type: 'elegir_rps', opcion: btn.dataset.opcion }));
     };
   });
@@ -6364,8 +6599,10 @@ function mostrarListosComiencen() {
   const cont = document.getElementById('obr-contenido');
   overlay.classList.add('activo');
   cont.innerHTML = `<div class="obr-listos">¡LISTOS!</div>`;
+  reproducirSonido(soundListos);
   setTimeout(() => {
     cont.innerHTML = `<div class="obr-listos">¡COMIENCEN!</div>`;
+    reproducirSonido(soundComienza);
     setTimeout(() => {
       mostrandoListosComiencen = false;
       overlay.classList.remove('activo');
@@ -6433,12 +6670,14 @@ function renderContenidoPantallaFinalBatalla(state, restante) {
   if (!rem.vos) {
     document.getElementById('btn-revancha-batalla').onclick = () => {
       if (wsBatalla && wsBatalla.readyState === WebSocket.OPEN) {
+        reproducirSonido(soundRevanchaPedida);
         wsBatalla.send(JSON.stringify({ type: 'revancha' }));
       }
     };
   }
   document.getElementById('btn-salir-batalla-final').onclick = () => {
     clearInterval(intervaloFinalBatalla);
+    reproducirSonido(soundUiCerrar);
     salirDeBatalla();
   };
 }
@@ -6477,6 +6716,7 @@ function renderManoBatalla(you, esTuTurno) {
   cont.querySelectorAll('.batalla-carta').forEach(btn => {
     btn.onclick = () => {
       if (!esTuTurno) return;
+      reproducirSonido(soundCartaElegir);
       const idx = parseInt(btn.dataset.idx, 10);
       const carta = btn.dataset.carta;
       if (modoDescarteBatalla) {
@@ -6543,11 +6783,13 @@ function renderAccionBatalla(you, rival, esTuTurno) {
     `;
     document.getElementById('btn-confirmar-descarte').onclick = () => {
       const cartas = cartasParaDescartar.map(i => you.mano[i]);
+      reproducirSonido(soundCartaDescartar);
       wsBatalla.send(JSON.stringify({ type: 'descartar_robar', cartas }));
       modoDescarteBatalla = false;
       cartasParaDescartar = [];
     };
     document.getElementById('btn-cancelar-descarte').onclick = () => {
+      reproducirSonido(soundUiCerrar);
       modoDescarteBatalla = false;
       cartasParaDescartar = [];
       renderGameBatalla(lastStateBatalla);
@@ -6598,6 +6840,7 @@ document.getElementById('batalla-fixed').addEventListener('click', (e) => {
   if (e.target.closest('.batalla-carta')) return;
   if (e.target.closest('#btn-confirmar-bombardeo')) return;
   cartaSeleccionadaBatalla = null;
+  reproducirSonido(soundUiCerrar);
   if (lastStateBatalla) renderGameBatalla(lastStateBatalla);
 });
 
