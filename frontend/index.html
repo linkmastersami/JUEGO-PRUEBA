@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Estratega de Códigos</title>
-<meta name="description" content="Juego de deducción tipo &quot;desactivar la bomba&quot; para 2-4 jugadores, en línea.">
+<title>Link Master Sami</title>
+<meta name="description" content="Estratega de Códigos y Batalla de Avatares: dos juegos en línea, en un mismo lugar.">
 <meta name="theme-color" content="#12141c">
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/icons/favicon.ico" sizes="any">
@@ -44,6 +44,19 @@
              calc(16px + env(safe-area-inset-bottom, 0px)) calc(16px + env(safe-area-inset-left, 0px));
   }
   h1 { text-align: center; font-size: 1.6rem; margin: 8px 0 4px; }
+  #titulo-app {
+    display: flex; flex-direction: column; align-items: center;
+    line-height: 1.05; margin: 10px 0 4px; gap: 2px;
+  }
+  #titulo-app-principal {
+    font-size: 1.9rem; font-weight: 900; letter-spacing: 1.5px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  #titulo-app-firma {
+    font-size: 0.95rem; font-weight: 700; letter-spacing: 5px;
+    color: var(--muted);
+  }
   .subtitle { text-align: center; color: var(--muted); font-size: 0.85rem; margin-bottom: 20px; }
   .card {
     background: var(--card);
@@ -1601,7 +1614,7 @@
 <div class="wrap" id="pantallaJuego" style="position:relative;">
   <button id="btn-mute" title="Silenciar sonido" aria-label="Silenciar sonido"
     style="position:absolute; top:14px; left:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
-  <h1>🎯 Estratega de Códigos</h1>
+  <h1 id="titulo-app"><span id="titulo-app-principal">LINK MASTER</span><span id="titulo-app-firma">SAMI</span></h1>
   <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
 
   <!-- HUD DEL JUGADOR -->

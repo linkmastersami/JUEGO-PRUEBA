@@ -1,7 +1,7 @@
 {
-  "name": "Estratega de Códigos",
-  "short_name": "Estratega",
-  "description": "Juego de deducción tipo \"desactivar la bomba\" para 2-4 jugadores, en línea.",
+  "name": "Link Master Sami",
+  "short_name": "Link Master",
+  "description": "Estratega de Códigos y Batalla de Avatares: dos juegos en línea, en un mismo lugar.",
   "start_url": "/",
   "id": "/",
   "display": "standalone",
