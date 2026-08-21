@@ -437,6 +437,11 @@
     padding: 6px 8px;
   }
   .batalla-tablero-header { display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem; font-weight: 700; }
+  /* Los tableros del espectador viven en una pantalla normal con scroll
+     (no en el layout fijo de la partida), así que necesitan su propio
+     alto mínimo — sin un padre flex que reparta el espacio, "flex:1"
+     no alcanza para darle lugar de sobra al fondo. */
+  .batalla-tablero.esp-tablero { flex: none; min-height: 200px; margin-bottom: 14px; }
   .batalla-escuadron { display: flex; flex-direction: column; gap: 52px; align-items: center; justify-content: center; flex: 1 1 auto; min-height: 0; }
   .batalla-fila { display: flex; gap: 52px; justify-content: center; }
   .batalla-personaje {
@@ -1763,19 +1768,19 @@
     <!-- Contenido de espectador para Batalla de Avatares: mismo cascarón
          (título/salir/chat), cuerpo distinto. -->
     <div id="esp-contenido-batalla" class="hidden">
-      <div class="card">
-        <div class="board-title">
+      <div id="esp-batalla-tablero-1" class="batalla-tablero esp-tablero">
+        <div class="batalla-tablero-header">
           <span id="esp-batalla-nombre-1">—</span>
           <span class="badge" id="esp-batalla-turno-1"></span>
         </div>
         <div id="esp-batalla-escuadron-1" class="batalla-escuadron"></div>
       </div>
-      <div class="card">
-        <div class="board-title">
+      <div id="esp-batalla-tablero-2" class="batalla-tablero esp-tablero">
+        <div id="esp-batalla-escuadron-2" class="batalla-escuadron"></div>
+        <div class="batalla-tablero-header">
           <span id="esp-batalla-nombre-2">—</span>
           <span class="badge" id="esp-batalla-turno-2"></span>
         </div>
-        <div id="esp-batalla-escuadron-2" class="batalla-escuadron"></div>
       </div>
     </div>
 
@@ -6615,12 +6620,14 @@ function renderEspectadorBatalla(state) {
   if (p1) {
     document.getElementById('esp-batalla-nombre-1').textContent = `⚔️ ${p1.name}`;
     document.getElementById('esp-batalla-turno-1').textContent = state.current_turn === p1.id ? 'SU TURNO' : '';
-    renderEscuadronBatalla('esp-batalla-escuadron-1', p1, null, null);
+    renderEscuadronBatalla('esp-batalla-escuadron-1', p1, null, null, [3, 2]);
+    aplicarFondoTableroBatalla('esp-batalla-tablero-1', p1);
   }
   if (p2) {
     document.getElementById('esp-batalla-nombre-2').textContent = `⚔️ ${p2.name}`;
     document.getElementById('esp-batalla-turno-2').textContent = state.current_turn === p2.id ? 'SU TURNO' : '';
-    renderEscuadronBatalla('esp-batalla-escuadron-2', p2, null, null);
+    renderEscuadronBatalla('esp-batalla-escuadron-2', p2, null, null, [2, 3]);
+    aplicarFondoTableroBatalla('esp-batalla-tablero-2', p2);
   }
 }
 
