@@ -487,10 +487,10 @@
   /* --- Animaciones de combate de Batalla de Avatares (ver
        procesarUltimaAccionBatalla y compañía) --- */
   .batalla-proyectil {
-    position: fixed; z-index: 9990; pointer-events: none;
+    position: fixed; top: 0; left: 0; z-index: 9990; pointer-events: none;
     font-size: 2.1rem; line-height: 1;
-    transform: translate(-50%, -50%);
     filter: drop-shadow(0 4px 8px rgba(0,0,0,0.5));
+    will-change: transform;
   }
   .batalla-impacto-wrap {
     position: fixed; z-index: 9989; pointer-events: none;
@@ -527,8 +527,12 @@
   }
   /* Hada curandera: un anillo de chispitas dando la vuelta alrededor del
      personaje revivido, estilo hada de Zelda. */
-  .batalla-hada-fx {
-    position: absolute; inset: -14px; z-index: 4; pointer-events: none;
+  /* Pegado a la pantalla (no adentro del recuadro del personaje, que
+     tiene overflow:hidden y le cortaba las chispitas que se salen del
+     borde) — se posiciona con left/top/width/height calculados en JS a
+     partir del rectángulo real del avatar. */
+  .batalla-hada-wrap {
+    position: fixed; z-index: 9992; pointer-events: none;
   }
   .batalla-hada-chispa {
     position: absolute; top: 50%; left: 50%; font-size: 0.85rem;
@@ -5780,22 +5784,31 @@ function centroDeRect(rect) {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
 
-// De dónde "sale" el ataque: si lo jugaste vos, de tu mano de cartas; si
-// lo jugó tu rival (no le vemos la mano), del tablero de tu rival.
+// De dónde "sale" el ataque: si lo jugaste vos, de la fila de tus cartas
+// (como si saliera de la carta que tocaste); si lo jugó tu rival (no le
+// vemos la mano), del tablero de tu rival.
 function origenAtaqueBatalla(actorEsPropio) {
-  const cont = document.getElementById(actorEsPropio ? 'batalla-mano-zona' : 'batalla-tablero-rival');
+  const cont = document.getElementById(actorEsPropio ? 'batalla-mano' : 'batalla-tablero-rival');
   if (!cont) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
   return centroDeRect(cont.getBoundingClientRect());
 }
 
+// Todo el movimiento se hace con transform (no con left/top): en el
+// celular animar left/top obliga a recalcular el layout en cada cuadro y
+// se ve entrecortado o directamente instantáneo — transform lo mueve la
+// placa gráfica y queda suave de verdad.
 function crearProyectilBatalla(emoji, x, y) {
   const el = document.createElement('div');
   el.className = 'batalla-proyectil';
   el.textContent = emoji;
-  el.style.left = `${x}px`;
-  el.style.top = `${y}px`;
+  el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
   document.body.appendChild(el);
   return el;
+}
+
+function moverProyectilBatalla(proy, x, y, extra, duracionMs, easing) {
+  proy.style.transition = `transform ${duracionMs}ms ${easing || 'ease-in-out'}`;
+  proy.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%) ${extra || ''}`;
 }
 
 function destelloImpactoBatalla(x, y) {
@@ -5829,28 +5842,37 @@ function flashCapaBatalla(jugadorId, slot, capa) {
 }
 
 // Hada Curandera: un anillo de chispitas dando la vuelta alrededor del
-// personaje revivido, estilo hada de Zelda.
+// personaje revivido, estilo hada de Zelda. Va pegada a la pantalla (no
+// adentro del recuadro del personaje, que tiene overflow:hidden y le
+// cortaba las chispitas) y con un z-index bien alto para que se vea por
+// encima de todo.
 function hadaFxBatalla(jugadorId, slot) {
   const el = elementoSlotBatalla(jugadorId, slot);
   if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const wrap = document.createElement('div');
+  wrap.className = 'batalla-hada-wrap';
+  wrap.style.left = `${rect.left - 14}px`;
+  wrap.style.top = `${rect.top - 14}px`;
+  wrap.style.width = `${rect.width + 28}px`;
+  wrap.style.height = `${rect.height + 28}px`;
+  document.body.appendChild(wrap);
   const glow = document.createElement('div');
   glow.className = 'batalla-hada-glow';
-  el.appendChild(glow);
-  const fx = document.createElement('div');
-  fx.className = 'batalla-hada-fx';
-  el.appendChild(fx);
+  wrap.appendChild(glow);
   ['🧚', '✨', '✨', '🧚', '✨', '✨'].forEach((c, i) => {
     const chispa = document.createElement('div');
     chispa.className = 'batalla-hada-chispa';
     chispa.textContent = c;
     chispa.style.setProperty('--ang', `${i * 60}deg`);
     chispa.style.animationDelay = `${i * 0.03}s`;
-    fx.appendChild(chispa);
+    wrap.appendChild(chispa);
   });
-  setTimeout(() => { glow.remove(); fx.remove(); }, 1200);
+  setTimeout(() => wrap.remove(), 1200);
 }
 
-// Bomba: rueda por el suelo hasta el objetivo y explota.
+// Bomba: sale de tu fila de cartas (o del tablero rival si atacó él),
+// rueda girando hasta el objetivo y explota ahí.
 function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
   const el = elementoSlotBatalla(objetivoId, slot);
   if (!el) return;
@@ -5858,43 +5880,36 @@ function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('💣', origen.x, origen.y);
   requestAnimationFrame(() => {
-    proy.style.transition = 'left 0.5s ease-in, top 0.5s ease-in, transform 0.5s linear';
-    proy.style.left = `${destino.x}px`;
-    proy.style.top = `${destino.y}px`;
-    proy.style.transform = 'translate(-50%, -50%) rotate(900deg)';
+    moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(900deg)', 1000, 'ease-in');
   });
   setTimeout(() => {
     proy.remove();
     destelloImpactoBatalla(destino.x, destino.y);
     if (capa) flashCapaBatalla(objetivoId, slot, capa);
-  }, 520);
+  }, 1020);
 }
 
-// Misil: sube un poco y después le cae al objetivo.
+// Misil: sale de tu fila de cartas (o del tablero rival), sube un poco y
+// después le cae encima al objetivo.
 function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa) {
   const el = elementoSlotBatalla(objetivoId, slot);
   if (!el) return;
   const destino = centroDeRect(el.getBoundingClientRect());
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
-  proy.style.transform = 'translate(-50%, -50%) rotate(-90deg)';
-  const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 70 };
+  proy.style.transform += ' rotate(-90deg)';
+  const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 90 };
   requestAnimationFrame(() => {
-    proy.style.transition = 'left 0.3s ease-out, top 0.3s ease-out';
-    proy.style.left = `${alto.x}px`;
-    proy.style.top = `${alto.y}px`;
+    moverProyectilBatalla(proy, alto.x, alto.y, 'rotate(-90deg)', 550, 'ease-out');
   });
   setTimeout(() => {
-    proy.style.transition = 'left 0.32s ease-in, top 0.32s ease-in, transform 0.32s ease-in';
-    proy.style.left = `${destino.x}px`;
-    proy.style.top = `${destino.y}px`;
-    proy.style.transform = 'translate(-50%, -50%) rotate(90deg)';
-  }, 300);
+    moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(90deg)', 550, 'ease-in');
+  }, 550);
   setTimeout(() => {
     proy.remove();
     destelloImpactoBatalla(destino.x, destino.y);
     if (capa) flashCapaBatalla(objetivoId, slot, capa);
-  }, 640);
+  }, 1120);
 }
 
 // Bombardeo General: el ícono aparece en el centro y de ahí "llueven"
@@ -5904,25 +5919,24 @@ function animarBombardeoBatalla(accion) {
   icono.className = 'batalla-bombardeo-icono';
   icono.textContent = '☢️';
   document.body.appendChild(icono);
-  setTimeout(() => icono.remove(), 1000);
+  setTimeout(() => icono.remove(), 1300);
 
   (accion.efectos || []).forEach((efecto, i) => {
     setTimeout(() => {
       const el = elementoSlotBatalla(efecto.jugador_id, efecto.slot);
       if (!el) return;
       const destino = centroDeRect(el.getBoundingClientRect());
-      const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 160);
-      proy.style.transform = 'translate(-50%, -50%) rotate(90deg)';
+      const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 180);
+      proy.style.transform += ' rotate(90deg)';
       requestAnimationFrame(() => {
-        proy.style.transition = 'top 0.35s ease-in';
-        proy.style.top = `${destino.y}px`;
+        moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(90deg)', 480, 'ease-in');
       });
       setTimeout(() => {
         proy.remove();
         destelloImpactoBatalla(destino.x, destino.y);
         if (efecto.capa) flashCapaBatalla(efecto.jugador_id, efecto.slot, efecto.capa);
-      }, 380);
-    }, 500 + i * 90);
+      }, 480);
+    }, 700 + i * 160);
   });
 }
 
