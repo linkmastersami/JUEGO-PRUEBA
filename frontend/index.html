@@ -5645,6 +5645,7 @@ function handleStateBatalla(state) {
     // animaría.
     if (anterior.status !== 'rps' && state.status === 'rps') {
       lastActionSeqBatalla = 0;
+      pendingImpactosBatalla = {};
     }
   }
 
@@ -5741,6 +5742,40 @@ function badgesProteccion(p) {
   return iconos.length ? `<div class="badges-proteccion">${iconos.join('')}</div>` : '';
 }
 
+// Mientras un proyectil está en camino, el personaje al que le va a
+// pegar sigue mostrándose como estaba ANTES del golpe (en pie, o con la
+// capa que le van a romper) — recién al instante del impacto se aplica
+// el cambio de verdad. Sin esto, el personaje se veía apagado/caído
+// desde que arrancaba la animación, antes de que el proyectil siquiera
+// llegara. Clave "jugadorId:slot" -> override parcial de ese personaje.
+let pendingImpactosBatalla = {};
+
+function marcarImpactoPendienteBatalla(jugadorId, slot, derribado, capa) {
+  if (derribado) {
+    pendingImpactosBatalla[`${jugadorId}:${slot}`] = { estado: 'pie' };
+  } else if (capa) {
+    pendingImpactosBatalla[`${jugadorId}:${slot}`] = { [capa]: true };
+  }
+}
+
+function limpiarImpactoPendienteBatalla(jugadorId, slot) {
+  delete pendingImpactosBatalla[`${jugadorId}:${slot}`];
+}
+
+// Vuelve a pintar nada más los dos escuadrones (no toda la pantalla) —
+// se usa para aplicar/quitar los overrides de arriba sin tocar mano,
+// turno, etc.
+function rerenderEscuadronesBatalla() {
+  const state = lastStateBatalla;
+  if (!state) return;
+  const you = (state.players || []).find(p => p.is_you);
+  const rival = (state.players || []).find(p => !p.is_you);
+  if (!you || !rival) return;
+  const objetivos = cartaSeleccionadaBatalla ? objetivosValidosBatalla(cartaSeleccionadaBatalla, you, rival) : null;
+  renderEscuadronBatalla('batalla-escuadron-rival', rival, objetivos, 'rival', [3, 2]);
+  renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio', [2, 3]);
+}
+
 // `filas` arma la formación en pirámide (ej. [3,2] para el rival, arriba
 // ancho y angosto abajo; [2,3] para la propia, al revés, así las dos
 // "puntas" quedan pegadas en el medio de la pantalla). Sin `filas` cae en
@@ -5757,8 +5792,10 @@ function renderEscuadronBatalla(contenedorId, jugador, objetivos, equipo, filas)
     html += '<div class="batalla-fila">';
     for (let k = 0; k < cantidad; k++) {
       const i = idx++;
-      const p = jugador.personajes[i];
+      let p = jugador.personajes[i];
       if (!p) continue;
+      const override = pendingImpactosBatalla[`${jugador.id}:${i}`];
+      if (override) p = { ...p, ...override };
       const esObjetivo = objetivos && objetivos.equipo === equipo && objetivos.slots.includes(i);
       const caido = p.estado === 'caido' ? ' caido' : '';
       const objetivoClass = esObjetivo ? ' objetivo' : '';
@@ -5888,9 +5925,11 @@ function hadaFxBatalla(jugadorId, slot) {
 
 // Bomba: sale de tu fila de cartas (o del tablero rival si atacó él),
 // rueda girando hasta el objetivo y explota ahí.
-function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
+function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
+  marcarImpactoPendienteBatalla(objetivoId, slot, derribado, capa);
+  rerenderEscuadronesBatalla();
   const el = elementoSlotBatalla(objetivoId, slot);
-  if (!el) return;
+  if (!el) { limpiarImpactoPendienteBatalla(objetivoId, slot); return; }
   const destino = centroDeRect(el.getBoundingClientRect());
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('💣', origen.x, origen.y);
@@ -5899,6 +5938,8 @@ function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
   });
   setTimeout(() => {
     proy.remove();
+    limpiarImpactoPendienteBatalla(objetivoId, slot);
+    rerenderEscuadronesBatalla();
     destelloImpactoBatalla(destino.x, destino.y);
     if (capa) flashCapaBatalla(objetivoId, slot, capa);
   }, 1020);
@@ -5906,9 +5947,11 @@ function animarBombaBatalla(actorEsPropio, objetivoId, slot, capa) {
 
 // Misil: sale de tu fila de cartas (o del tablero rival), sube un poco y
 // después le cae encima al objetivo.
-function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa) {
+function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa, derribado) {
+  marcarImpactoPendienteBatalla(objetivoId, slot, derribado, capa);
+  rerenderEscuadronesBatalla();
   const el = elementoSlotBatalla(objetivoId, slot);
-  if (!el) return;
+  if (!el) { limpiarImpactoPendienteBatalla(objetivoId, slot); return; }
   const destino = centroDeRect(el.getBoundingClientRect());
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
@@ -5923,6 +5966,8 @@ function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa) {
   }, 550);
   setTimeout(() => {
     proy.remove();
+    limpiarImpactoPendienteBatalla(objetivoId, slot);
+    rerenderEscuadronesBatalla();
     destelloImpactoBatalla(destino.x, destino.y);
     if (capa) flashCapaBatalla(objetivoId, slot, capa);
   }, 1120);
@@ -5937,10 +5982,17 @@ function animarBombardeoBatalla(accion) {
   document.body.appendChild(icono);
   setTimeout(() => icono.remove(), 1300);
 
+  // Todos quedan "congelados" en su estado previo desde el arranque, y
+  // cada uno se destapa recién cuando le cae SU misil (más abajo).
+  (accion.efectos || []).forEach(efecto => {
+    marcarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot, efecto.derribado, efecto.capa);
+  });
+  rerenderEscuadronesBatalla();
+
   (accion.efectos || []).forEach((efecto, i) => {
     setTimeout(() => {
       const el = elementoSlotBatalla(efecto.jugador_id, efecto.slot);
-      if (!el) return;
+      if (!el) { limpiarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot); return; }
       const destino = centroDeRect(el.getBoundingClientRect());
       const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 180);
       proy.style.transform += ' rotate(90deg)';
@@ -5950,6 +6002,8 @@ function animarBombardeoBatalla(accion) {
       });
       setTimeout(() => {
         proy.remove();
+        limpiarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot);
+        rerenderEscuadronesBatalla();
         destelloImpactoBatalla(destino.x, destino.y);
         if (efecto.capa) flashCapaBatalla(efecto.jugador_id, efecto.slot, efecto.capa);
       }, 480);
@@ -5962,10 +6016,10 @@ function procesarUltimaAccionBatalla(accion) {
   const actorEsPropio = accion.jugador_id === myIdBatalla;
   switch (accion.carta) {
     case 'bomba':
-      animarBombaBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa);
+      animarBombaBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa, accion.derribado);
       break;
     case 'misil':
-      animarMisilBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa);
+      animarMisilBatalla(actorEsPropio, accion.objetivo_id, accion.slot, accion.capa, accion.derribado);
       break;
     case 'bombardeo':
       animarBombardeoBatalla(accion);
