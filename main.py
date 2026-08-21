@@ -152,6 +152,39 @@ def cargar_catalogo_avatares() -> List[dict]:
 CATALOGO_AVATARES: List[dict] = cargar_catalogo_avatares()
 PRECIO_AVATAR_GRATIS = 150  # el avatar gratis de bienvenida sale de este precio
 
+# ---------------------------------------------------------------------------
+# Catálogo de tableros (carpeta frontend/tableros/) — mismo mecanismo que los
+# avatares: el nombre del archivo trae el precio adentro, así que subir una
+# imagen nueva a la carpeta la agrega sola a la tienda. Acá el nombre son 6
+# dígitos en vez de los ~5 de los avatares (los primeros 3 son el precio
+# igual, los últimos 3 son el identificador — cargar_catalogo_avatares() no
+# le presta atención al largo total, así que sirve tal cual para los dos).
+TABLERO_DIR = os.path.join("frontend", "tableros")
+TABLERO_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def cargar_catalogo_tableros() -> List[dict]:
+    catalogo = []
+    if not os.path.isdir(TABLERO_DIR):
+        print(f"⚠️  Carpeta de tableros no encontrada: {TABLERO_DIR}")
+        return catalogo
+
+    for archivo in sorted(os.listdir(TABLERO_DIR)):
+        nombre, ext = os.path.splitext(archivo)
+        if ext.lower() not in TABLERO_EXTENSIONS:
+            continue
+        if len(nombre) < 3 or not nombre[:3].isdigit():
+            print(f"⚠️  Ignorado (no respeta la convención de precio): {archivo}")
+            continue
+        precio = int(nombre[:3])
+        catalogo.append({"archivo": archivo, "precio": precio})
+
+    catalogo.sort(key=lambda a: (a["precio"], a["archivo"]))
+    return catalogo
+
+
+CATALOGO_TABLEROS: List[dict] = cargar_catalogo_tableros()
+
 def obtener_rango(puntos: int, victorias: int):
     if victorias == 0:
         return "Novato en Desactivación"
@@ -269,7 +302,8 @@ async def obtener_perfil(username: str):
     if supabase is None:
         rango_cero = obtener_rango(0, 0)
         return {"username": username, "puntos": 0, "victorias": 0, "monedas": 0, "avatar_actual": None,
-                "rango": rango_cero, "puntos_batalla": 0, "victorias_batalla": 0, "rango_batalla": rango_cero}
+                "tablero_actual": None, "rango": rango_cero, "puntos_batalla": 0, "victorias_batalla": 0,
+                "rango_batalla": rango_cero}
 
     try:
         resp = supabase.table("profiles").select(
@@ -299,30 +333,52 @@ async def obtener_perfil(username: str):
     puntos_batalla = fila.get("puntos_batalla") or 0
     victorias_batalla = fila.get("victorias_batalla") or 0
 
+    # Consulta aparte y con su propio try/except (no metida en el select de
+    # arriba): si todavía no se corrió el ALTER TABLE de tablero_actual, que
+    # falle solo esto y no se lleve puesto el resto del perfil.
+    tablero_actual = None
+    try:
+        resp_tablero = supabase.table("profiles").select("tablero_actual").eq("username", username).execute()
+        if resp_tablero.data:
+            tablero_actual = resp_tablero.data[0].get("tablero_actual")
+    except Exception:
+        pass
+
     return {"username": username, "puntos": puntos, "victorias": victorias, "monedas": monedas,
-            "avatar_actual": avatar_actual, "rango": obtener_rango(puntos, victorias),
+            "avatar_actual": avatar_actual, "tablero_actual": tablero_actual, "rango": obtener_rango(puntos, victorias),
             "puntos_batalla": puntos_batalla, "victorias_batalla": victorias_batalla,
             "rango_batalla": obtener_rango(puntos_batalla, victorias_batalla)}
 
 
 def obtener_avatar_y_rango(username: str, puntos_col: str = "puntos", victorias_col: str = "victorias") -> tuple:
-    """Consulta rápida al unirse a una sala: trae el avatar_actual y el
-    rango del jugador para mandarlos junto con su ficha a los demás.
-    puntos_col/victorias_col permite pedir el rango de Batalla de Avatares
-    en vez del de Estratega de Códigos sin duplicar esta función."""
+    """Consulta rápida al unirse a una sala: trae el avatar_actual, el
+    tablero_actual y el rango del jugador para mandarlos junto con su
+    ficha a los demás. puntos_col/victorias_col permite pedir el rango de
+    Batalla de Avatares en vez del de Estratega de Códigos sin duplicar
+    esta función."""
     if supabase is None:
-        return None, obtener_rango(0, 0)
+        return None, obtener_rango(0, 0), None
     try:
-        resp = supabase.table("profiles").select(f"{puntos_col}, {victorias_col}, avatar_actual").eq("username", username).execute()
-    except Exception as e:
-        print(f"❌ ERROR obteniendo avatar/rango de {username}: {e}")
-        return None, obtener_rango(0, 0)
+        resp = supabase.table("profiles").select(
+            f"{puntos_col}, {victorias_col}, avatar_actual, tablero_actual"
+        ).eq("username", username).execute()
+    except Exception:
+        # Probablemente falta el ALTER TABLE de tablero_actual todavía:
+        # seguimos andando igual (avatar/rango son más importantes), solo
+        # sin tablero de fondo hasta que se corra la migración.
+        try:
+            resp = supabase.table("profiles").select(
+                f"{puntos_col}, {victorias_col}, avatar_actual"
+            ).eq("username", username).execute()
+        except Exception as e2:
+            print(f"❌ ERROR obteniendo avatar/rango de {username}: {e2}")
+            return None, obtener_rango(0, 0), None
     if not resp.data:
-        return None, obtener_rango(0, 0)
+        return None, obtener_rango(0, 0), None
     fila = resp.data[0]
     puntos = fila.get(puntos_col) or 0
     victorias = fila.get(victorias_col) or 0
-    return fila.get("avatar_actual"), obtener_rango(puntos, victorias)
+    return fila.get("avatar_actual"), obtener_rango(puntos, victorias), fila.get("tablero_actual")
 
 
 @app.get("/ranking")
@@ -499,6 +555,120 @@ async def elegir_avatar(payload: dict, authorization: Optional[str] = Header(Non
         return {"ok": False, "error": "Error guardando el cambio."}
 
     return {"ok": True, "avatar_actual": archivo}
+
+
+# ---------------------------------------------------------------------------
+# Tienda de tableros — mismo patrón que la de avatares de arriba, calcado
+# endpoint por endpoint. Sin avatar gratis acá (no hace falta: el jugador ya
+# puede jugar sin tablero, se queda con el fondo por defecto).
+# ---------------------------------------------------------------------------
+def _obtener_perfil_tableros(username: str) -> dict:
+    resp = supabase.table("profiles").select(
+        "monedas, tablero_actual, tableros_comprados"
+    ).eq("username", username).execute()
+    if resp.data:
+        fila = resp.data[0]
+        return {
+            "monedas": fila.get("monedas") or 0,
+            "tablero_actual": fila.get("tablero_actual"),
+            "tableros_comprados": fila.get("tableros_comprados") or [],
+        }
+    return {"monedas": 0, "tablero_actual": None, "tableros_comprados": []}
+
+
+@app.get("/tienda-tableros/{username}")
+async def tienda_tableros(username: str):
+    if supabase is None:
+        return {"catalogo": [{**t, "comprado": False} for t in CATALOGO_TABLEROS], "monedas": 0}
+
+    perfil = _obtener_perfil_tableros(username)
+    comprados = set(perfil["tableros_comprados"])
+    catalogo = [{**t, "comprado": t["archivo"] in comprados} for t in CATALOGO_TABLEROS]
+    return {"catalogo": catalogo, "monedas": perfil["monedas"]}
+
+
+@app.get("/tableros/{username}")
+async def tableros_del_jugador(username: str):
+    """Selector: solo los tableros que este jugador ya compró, más cuál
+    tiene puesto ahora mismo (puede ser None: sin tablero, fondo por
+    defecto)."""
+    if supabase is None:
+        return {"tableros": [], "tablero_actual": None}
+    perfil = _obtener_perfil_tableros(username)
+    return {"tableros": perfil["tableros_comprados"], "tablero_actual": perfil["tablero_actual"]}
+
+
+@app.post("/tienda-tableros/comprar")
+async def comprar_tablero(payload: dict, authorization: Optional[str] = Header(None)):
+    if supabase is None:
+        return {"ok": False, "error": "Supabase no configurado."}
+
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
+    archivo = str(payload.get("archivo", "")).strip()
+    if not archivo:
+        return {"ok": False, "error": "Falta el archivo."}
+
+    item = next((t for t in CATALOGO_TABLEROS if t["archivo"] == archivo), None)
+    if item is None:
+        return {"ok": False, "error": "Ese tablero no existe en el catálogo."}
+
+    perfil = _obtener_perfil_tableros(username)
+    comprados = list(perfil["tableros_comprados"])
+    if archivo in comprados:
+        return {"ok": False, "error": "Ya tienes ese tablero."}
+    if perfil["monedas"] < item["precio"]:
+        return {"ok": False, "error": "No te alcanzan las monedas."}
+
+    nuevas_monedas = perfil["monedas"] - item["precio"]
+    comprados.append(archivo)
+    # A diferencia del avatar, comprar un tablero NO lo pone puesto solo —
+    # el jugador ya está jugando sin tablero (fondo por defecto) y puede
+    # preferir seguir así hasta elegirlo a propósito.
+    try:
+        supabase.table("profiles").update({
+            "monedas": nuevas_monedas,
+            "tableros_comprados": comprados,
+        }).eq("username", username).execute()
+    except Exception as e:
+        print(f"❌ ERROR comprando tablero de {username}: {e}")
+        return {"ok": False, "error": "Error guardando la compra."}
+
+    print(f"🖼️  {username} compró el tablero {archivo}.")
+    return {"ok": True, "monedas": nuevas_monedas}
+
+
+@app.post("/tablero/elegir")
+async def elegir_tablero(payload: dict, authorization: Optional[str] = Header(None)):
+    """Cambia el tablero_actual del jugador a uno que ya tiene comprado, o
+    lo quita (archivo vacío/null) para volver al fondo por defecto."""
+    if supabase is None:
+        return {"ok": False, "error": "Supabase no configurado."}
+
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
+    archivo = str(payload.get("archivo") or "").strip() or None
+
+    if archivo is not None:
+        perfil = _obtener_perfil_tableros(username)
+        if archivo not in perfil["tableros_comprados"]:
+            return {"ok": False, "error": "No has comprado ese tablero todavía."}
+
+    try:
+        supabase.table("profiles").update({"tablero_actual": archivo}).eq("username", username).execute()
+    except Exception as e:
+        print(f"❌ ERROR cambiando tablero de {username}: {e}")
+        return {"ok": False, "error": "Error guardando el cambio."}
+
+    return {"ok": True, "tablero_actual": archivo}
 
 
 @app.get("/avatar/solicitar/estado/{username}")
@@ -1223,13 +1393,14 @@ BATALLA_NOMBRE_CAPA = {
 
 class BatallaPlayer:
     def __init__(self, pid: str, name: str, ws: Optional[WebSocket], avatar: Optional[str] = None,
-                 rango: Optional[str] = None, is_bot: bool = False):
+                 rango: Optional[str] = None, is_bot: bool = False, tablero: Optional[str] = None):
         self.id = pid
         self.name = name
         self.ws = ws
         self.avatar = avatar
         self.rango = rango or obtener_rango(0, 0)
         self.is_bot = is_bot
+        self.tablero = tablero
         self.connected = True
         self.en_pie = BATALLA_PERSONAJES_INICIALES
         self.personajes: List[dict] = [_personaje_nuevo() for _ in range(BATALLA_PERSONAJES_INICIALES)]
@@ -1248,6 +1419,7 @@ class BatallaPlayer:
             "name": self.name,
             "avatar": self.avatar,
             "rango": self.rango,
+            "tablero": self.tablero,
             "en_pie": self.en_pie,
             "personajes": self.personajes,
             "mano_count": len(self.mano),
@@ -2105,7 +2277,7 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
             return
 
         pid = f"{clean_name}-{random.randint(1000, 9999)}"
-        avatar, rango = obtener_avatar_y_rango(clean_name)
+        avatar, rango, _tablero = obtener_avatar_y_rango(clean_name)
         player = Player(pid, clean_name, websocket, avatar=avatar, rango=rango)
         room.players.append(player)
         room.log.append(f"{clean_name} se unió a la sala.")
@@ -2313,8 +2485,8 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
             return
 
         pid = f"{clean_name}-{random.randint(1000, 9999)}"
-        avatar, rango = obtener_avatar_y_rango(clean_name, "puntos_batalla", "victorias_batalla")
-        player = BatallaPlayer(pid, clean_name, websocket, avatar=avatar, rango=rango)
+        avatar, rango, tablero = obtener_avatar_y_rango(clean_name, "puntos_batalla", "victorias_batalla")
+        player = BatallaPlayer(pid, clean_name, websocket, avatar=avatar, rango=rango, tablero=tablero)
         room.players.append(player)
         room.log.append(f"{clean_name} se unió a la sala.")
 

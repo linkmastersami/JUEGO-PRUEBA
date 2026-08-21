@@ -739,9 +739,27 @@
   .avatar-item:active { transform: scale(0.96); }
   .avatar-item.activo { border-color: var(--good); }
   .avatar-item.bloqueado { opacity: 0.55; }
+  /* Fondo del tablero elegido (si tiene uno) detrás de la ficha de perfil. */
+  #perfilJugador { background-size: cover; background-position: center; }
   .avatar-item img { width: 56px; height: 56px; object-fit: contain; border-radius: 8px; }
   .avatar-item .avatar-precio { font-size: 0.72rem; color: gold; font-weight: 800; margin-top: 4px; }
   .avatar-item .avatar-check { font-size: 0.72rem; color: var(--good); font-weight: 800; margin-top: 4px; }
+  /* "Sin tablero" (volver al fondo por defecto) en el selector de Mis
+     tableros: mismo tamaño que el img de al lado, sin imagen real. */
+  .avatar-item .tablero-vacio {
+    width: 56px; height: 56px; border-radius: 8px; background: #2a2e3d;
+    display: flex; align-items: center; justify-content: center; font-size: 1.4rem;
+    margin: 0 auto;
+  }
+  #tienda-grid.carrusel .avatar-item .tablero-vacio { width: 110px; height: 110px; font-size: 2rem; }
+
+  /* --- Pestañas de la tienda: Avatares / Tableros --- */
+  #tienda-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+  .tienda-tab {
+    flex: 1; padding: 8px; border-radius: 10px; font-size: 0.82rem; font-weight: 700;
+    background: #2a2e3d; color: var(--muted); border: 2px solid transparent;
+  }
+  .tienda-tab.activo { background: var(--accent); color: #1a1a1a; }
   #tienda-btn-cerrar {
     margin-top: 18px;
     padding: 10px 34px;
@@ -1416,6 +1434,10 @@
 
 <div id="overlay-tienda">
     <div id="tienda-header">
+      <div id="tienda-tabs">
+        <button class="tienda-tab activo" id="tienda-tab-avatar" data-cat="avatar">🎭 Avatares</button>
+        <button class="tienda-tab" id="tienda-tab-tablero" data-cat="tablero">🖼️ Tableros</button>
+      </div>
       <h2>🛍️ Tienda de avatares</h2>
       <div id="tienda-monedas">🪙 0 monedas</div>
       <div id="tienda-aviso-obligatoria" class="hidden">Elige tu primer avatar gratis para continuar</div>
@@ -2563,6 +2585,15 @@ async function actualizarPerfilHUD(name) {
         }
         animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 800);
         animarPuntajeHUD("uiMonedas", monedasAnteriores, monedasActuales, 800);
+        const perfilCard = document.getElementById("perfilJugador");
+        if (data.tablero_actual) {
+            // Degradado oscuro debajo de la imagen para que el texto siga
+            // siendo legible encima de cualquier tablero.
+            perfilCard.style.backgroundImage =
+                `linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55)), url('/tableros/${data.tablero_actual}')`;
+        } else {
+            perfilCard.style.backgroundImage = 'none';
+        }
     } catch (e) {
         document.getElementById("uiRango").innerText = "Novato en Desactivación";
     }
@@ -2577,13 +2608,31 @@ async function actualizarPerfilHUD(name) {
 let tiendaForzada = false;
 let tiendaUsuarioActual = null;
 let tiendaModo = 'tienda'; // 'tienda' = comprar lo que falta · 'mis' = elegir lo ya comprado
-let carruselSetSize = 0; // nº de avatares "reales" por vuelta del carrusel en bucle
+let tiendaCategoria = 'avatar'; // 'avatar' | 'tablero'
+let carruselSetSize = 0; // nº de items "reales" por vuelta del carrusel en bucle
+
+function tituloTienda() {
+    if (tiendaCategoria === 'tablero') return tiendaModo === 'tienda' ? '🛍️ Tienda de tableros' : '🖼️ Mis tableros';
+    return tiendaModo === 'tienda' ? '🛍️ Tienda de avatares' : '🎭 Mis avatares';
+}
+
+function cambiarCategoriaTienda(cat) {
+    if (tiendaCategoria === cat) return;
+    tiendaCategoria = cat;
+    document.querySelectorAll('.tienda-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.cat === cat));
+    document.getElementById('tienda-header').querySelector('h2').textContent = tituloTienda();
+    cargarTienda();
+}
+document.getElementById('tienda-tab-avatar').onclick = () => cambiarCategoriaTienda('avatar');
+document.getElementById('tienda-tab-tablero').onclick = () => cambiarCategoriaTienda('tablero');
 
 async function abrirTienda(forzado = false) {
     tiendaModo = 'tienda';
+    tiendaCategoria = 'avatar';
     tiendaForzada = forzado;
     tiendaUsuarioActual = document.getElementById('name-input').value;
-    document.getElementById('tienda-header').querySelector('h2').textContent = '🛍️ Tienda de avatares';
+    document.querySelectorAll('.tienda-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.cat === 'avatar'));
+    document.getElementById('tienda-header').querySelector('h2').textContent = tituloTienda();
     document.getElementById('tienda-aviso-obligatoria').classList.toggle('hidden', !forzado);
     document.getElementById('tienda-btn-cerrar').classList.toggle('hidden', forzado);
     document.getElementById('tienda-error').textContent = '';
@@ -2595,9 +2644,11 @@ async function abrirTienda(forzado = false) {
 
 async function abrirSelectorAvatares() {
     tiendaModo = 'mis';
+    tiendaCategoria = 'avatar';
     tiendaForzada = false;
     tiendaUsuarioActual = document.getElementById('name-input').value;
-    document.getElementById('tienda-header').querySelector('h2').textContent = '🎭 Mis avatares';
+    document.querySelectorAll('.tienda-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.cat === 'avatar'));
+    document.getElementById('tienda-header').querySelector('h2').textContent = tituloTienda();
     document.getElementById('tienda-aviso-obligatoria').classList.add('hidden');
     document.getElementById('tienda-btn-cerrar').classList.remove('hidden');
     document.getElementById('tienda-error').textContent = '';
@@ -2612,7 +2663,7 @@ function cerrarTienda() {
     document.getElementById('overlay-tienda').classList.remove('activo');
 }
 
-// Tarjeta de un avatar comprable (dentro del carrusel de la tienda). Al
+// Tarjeta de un item comprable (dentro del carrusel de la tienda). Al
 // tocarla NO compra directo: abre la confirmación (ver abrirConfirmarCompra)
 // para evitar compras accidentales mientras se desliza el carrusel.
 function crearAvatarItemCompra(item, esGratis) {
@@ -2622,29 +2673,43 @@ function crearAvatarItemCompra(item, esGratis) {
         <img src="/gif/${item.archivo}" alt="avatar" loading="lazy">
         <div class="avatar-precio${esGratis ? ' gratis' : ''}">${esGratis ? 'GRATIS' : `🪙 ${item.precio}`}</div>
     `;
-    div.onclick = () => abrirConfirmarCompra(item, esGratis);
+    div.onclick = () => abrirConfirmarCompra(item, 'avatar', esGratis);
+    return div;
+}
+
+function crearTableroItemCompra(item) {
+    const div = document.createElement('div');
+    div.className = 'avatar-item';
+    div.innerHTML = `
+        <img src="/tableros/${item.archivo}" alt="tablero" loading="lazy">
+        <div class="avatar-precio">🪙 ${item.precio}</div>
+    `;
+    div.onclick = () => abrirConfirmarCompra(item, 'tablero', false);
     return div;
 }
 
 async function cargarTienda() {
     const grid = document.getElementById('tienda-grid');
     grid.innerHTML = '<div style="color:var(--muted);">Cargando...</div>';
+    const esTablero = tiendaCategoria === 'tablero';
     try {
-        const resp = await fetch('/tienda/' + encodeURIComponent(tiendaUsuarioActual));
+        const resp = await fetch((esTablero ? '/tienda-tableros/' : '/tienda/') + encodeURIComponent(tiendaUsuarioActual));
         const data = await resp.json();
         document.getElementById('tienda-monedas').textContent = `🪙 ${(data.monedas || 0).toLocaleString()} monedas`;
 
         // Si ya no es cuenta nueva (por ejemplo, recién reclamó su primer
         // avatar), deja de ser obligatoria y aparece el botón de cerrar.
-        if (tiendaForzada && !data.es_cuenta_nueva) {
+        // (Los tableros no tienen "primero gratis", así que esto solo
+        // puede pasar en la categoría de avatares.)
+        if (!esTablero && tiendaForzada && !data.es_cuenta_nueva) {
             tiendaForzada = false;
             document.getElementById('tienda-aviso-obligatoria').classList.add('hidden');
             document.getElementById('tienda-btn-cerrar').classList.remove('hidden');
         }
 
-        const avatarResp = await fetch('/avatares/' + encodeURIComponent(tiendaUsuarioActual));
-        const avatarData = await avatarResp.json();
-        const actual = avatarData.avatar_actual;
+        const propiosResp = await fetch((esTablero ? '/tableros/' : '/avatares/') + encodeURIComponent(tiendaUsuarioActual));
+        const propiosData = await propiosResp.json();
+        const actual = esTablero ? propiosData.tablero_actual : propiosData.avatar_actual;
 
         grid.innerHTML = '';
 
@@ -2652,13 +2717,13 @@ async function cargarTienda() {
             // Solo lo que todavía no es suyo, con precio.
             const pendientes = (data.catalogo || []).filter(item => !item.comprado);
             if (pendientes.length === 0) {
-                grid.innerHTML = '<div style="color:var(--muted); grid-column: 1/-1; text-align:center;">¡Ya tienes todos los avatares disponibles!</div>';
+                grid.innerHTML = `<div style="color:var(--muted); grid-column: 1/-1; text-align:center;">¡Ya tienes todos los ${esTablero ? 'tableros' : 'avatares'} disponibles!</div>`;
                 carruselSetSize = 0;
                 return;
             }
             const precioGratis = data.precio_avatar_gratis || 150;
 
-            // Modo bucle infinito: si hay más de 1 avatar, triplicamos la
+            // Modo bucle infinito: si hay más de 1 item, triplicamos la
             // lista (set anterior + set real + set siguiente) para que al
             // llegar a una punta, revisarLoopCarrusel() pueda "teletransportar"
             // el scroll al equivalente del set del medio sin que se note
@@ -2670,16 +2735,16 @@ async function cargarTienda() {
             carruselSetSize = pendientes.length > 1 ? pendientes.length : 0;
             for (let copia = 0; copia < copias; copia++) {
                 pendientes.forEach((item, idx) => {
-                    const esGratis = data.es_cuenta_nueva && item.precio === precioGratis;
-                    const div = crearAvatarItemCompra(item, esGratis);
+                    const esGratis = !esTablero && data.es_cuenta_nueva && item.precio === precioGratis;
+                    const div = esTablero ? crearTableroItemCompra(item) : crearAvatarItemCompra(item, esGratis);
                     div.dataset.copia = copia;
                     div.dataset.idx = idx;
                     grid.appendChild(div);
                 });
             }
 
-            // Deja el carrusel centrado en el primer avatar del set del
-            // medio (o del único set, si solo hay 1 avatar) y activa el
+            // Deja el carrusel centrado en el primer item del set del
+            // medio (o del único set, si solo hay 1 item) y activa el
             // resaltado del que queda en el centro al arrastrar.
             requestAnimationFrame(() => {
                 const items = grid.querySelectorAll('.avatar-item');
@@ -2687,9 +2752,39 @@ async function cargarTienda() {
                 if (items[inicio]) centrarItemCarrusel(items[inicio], true);
                 actualizarCarruselTienda();
             });
+        } else if (esTablero) {
+            // Mis tableros: lo ya comprado, más la opción de no llevar
+            // ninguno (vuelve al fondo por defecto).
+            const propios = propiosData.tableros || [];
+            const divNinguno = document.createElement('div');
+            divNinguno.className = 'avatar-item' + (!actual ? ' activo' : '');
+            divNinguno.innerHTML = `
+                <div class="tablero-vacio">🚫</div>
+                ${!actual ? '<div class="avatar-check">✓ Puesto</div>' : '<div class="avatar-check">Elegir</div>'}
+            `;
+            divNinguno.onclick = () => onClickElegirTablero(null);
+            grid.appendChild(divNinguno);
+
+            if (propios.length === 0) {
+                const aviso = document.createElement('div');
+                aviso.style.cssText = 'color:var(--muted); grid-column: 1/-1; text-align:center; margin-top:8px;';
+                aviso.textContent = 'Todavía no tienes ningún tablero. ¡Mirá la pestaña de Tableros en la tienda!';
+                grid.appendChild(aviso);
+                return;
+            }
+            propios.forEach(archivo => {
+                const div = document.createElement('div');
+                div.className = 'avatar-item' + (archivo === actual ? ' activo' : '');
+                div.innerHTML = `
+                    <img src="/tableros/${archivo}" alt="tablero" loading="lazy">
+                    ${archivo === actual ? '<div class="avatar-check">✓ Puesto</div>' : '<div class="avatar-check">Elegir</div>'}
+                `;
+                div.onclick = () => onClickElegirTablero(archivo);
+                grid.appendChild(div);
+            });
         } else {
             // Mis avatares: solo lo ya comprado, para elegir cuál llevar puesto.
-            const propios = avatarData.avatares || [];
+            const propios = propiosData.avatares || [];
             if (propios.length === 0) {
                 grid.innerHTML = '<div style="color:var(--muted); grid-column: 1/-1; text-align:center;">Todavía no tienes ningún avatar. ¡Ve a la tienda!</div>';
                 return;
@@ -2728,12 +2823,33 @@ async function onClickComprar(archivo) {
     }
 }
 
+async function onClickComprarTablero(archivo) {
+    const errEl = document.getElementById('tienda-error');
+    errEl.textContent = '';
+    try {
+        const r = await fetch('/tienda-tableros/comprar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+            body: JSON.stringify({ archivo })
+        });
+        const d = await r.json();
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo comprar el tablero.'; return; }
+        await cargarTienda();
+    } catch (e) {
+        errEl.textContent = 'Error de conexión con el servidor.';
+    }
+}
+
 // --- Confirmación de compra (interrumpe antes de cobrar) ---
 let itemPendienteCompra = null;
+let categoriaPendienteCompra = 'avatar';
 
-function abrirConfirmarCompra(item, esGratis) {
+function abrirConfirmarCompra(item, categoria, esGratis) {
     itemPendienteCompra = item;
-    document.getElementById('confirmar-compra-img').src = `/gif/${item.archivo}`;
+    categoriaPendienteCompra = categoria;
+    const esTablero = categoria === 'tablero';
+    document.getElementById('confirmar-compra-img').src = (esTablero ? '/tableros/' : '/gif/') + item.archivo;
+    document.getElementById('confirmar-compra-titulo').textContent = esTablero ? '¿Quieres este tablero?' : '¿Quieres este avatar?';
     const precioEl = document.getElementById('confirmar-compra-precio');
     precioEl.textContent = esGratis ? '🎁 Es tu avatar gratis de bienvenida' : `🪙 ${item.precio} monedas`;
     precioEl.classList.toggle('gratis', esGratis);
@@ -2749,8 +2865,10 @@ function cerrarConfirmarCompra() {
 document.getElementById('btn-confirmar-compra').onclick = () => {
     if (!itemPendienteCompra) return;
     const archivo = itemPendienteCompra.archivo;
+    const categoria = categoriaPendienteCompra;
     cerrarConfirmarCompra();
-    onClickComprar(archivo);
+    if (categoria === 'tablero') onClickComprarTablero(archivo);
+    else onClickComprar(archivo);
 };
 document.getElementById('btn-cancelar-compra').onclick = cerrarConfirmarCompra;
 // Tocar el fondo oscuro (fuera de la tarjeta) también cancela.
@@ -2769,6 +2887,24 @@ async function onClickElegir(archivo) {
         });
         const d = await r.json();
         if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el avatar.'; return; }
+        await cargarTienda();
+        actualizarPerfilHUD(tiendaUsuarioActual);
+    } catch (e) {
+        errEl.textContent = 'Error de conexión con el servidor.';
+    }
+}
+
+async function onClickElegirTablero(archivo) {
+    const errEl = document.getElementById('tienda-error');
+    errEl.textContent = '';
+    try {
+        const r = await fetch('/tablero/elegir', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+            body: JSON.stringify({ archivo })
+        });
+        const d = await r.json();
+        if (!d.ok) { errEl.textContent = d.error || 'No se pudo cambiar el tablero.'; return; }
         await cargarTienda();
         actualizarPerfilHUD(tiendaUsuarioActual);
     } catch (e) {
@@ -5776,6 +5912,17 @@ function rerenderEscuadronesBatalla() {
   renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio', [2, 3]);
 }
 
+// Fondo del tablero comprado (si tiene uno puesto) detrás de la pirámide
+// de ese jugador; si no tiene ninguno, se queda con el degradado por
+// defecto de #batalla-tablero (ver CSS).
+function aplicarFondoTableroBatalla(contenedorId, jugador) {
+  const cont = document.getElementById(contenedorId);
+  if (!cont) return;
+  cont.style.backgroundImage = jugador && jugador.tablero
+    ? `linear-gradient(rgba(18,20,28,0.45), rgba(18,20,28,0.45)), url('/tableros/${jugador.tablero}')`
+    : '';
+}
+
 // `filas` arma la formación en pirámide (ej. [3,2] para el rival, arriba
 // ancho y angosto abajo; [2,3] para la propia, al revés, así las dos
 // "puntas" quedan pegadas en el medio de la pantalla). Sin `filas` cae en
@@ -6110,6 +6257,8 @@ function renderGameBatalla(state) {
   // pegadas una a la otra en el medio de la pantalla.
   renderEscuadronBatalla('batalla-escuadron-rival', rival, objetivos, 'rival', [3, 2]);
   renderEscuadronBatalla('batalla-escuadron-propio', you, objetivos, 'propio', [2, 3]);
+  aplicarFondoTableroBatalla('batalla-tablero-rival', rival);
+  aplicarFondoTableroBatalla('batalla-tablero-propio', you);
 
   const statusLine = document.getElementById('status-line-batalla');
   if (statusLine) {
