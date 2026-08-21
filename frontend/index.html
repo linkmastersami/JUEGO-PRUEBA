@@ -926,6 +926,48 @@
     cursor: pointer;
   }
 
+  /* --- CAPA: INSTRUCCIONES PARA INSTALAR EN iOS (Safari no soporta el
+       prompt automático de instalación, así que se le explica el paso a
+       paso manual de "Agregar a pantalla de inicio") --- */
+  #overlay-instalar {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(10, 8, 20, 0.94);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10003;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    padding: 20px 16px 30px;
+    overflow-y: auto;
+  }
+  #overlay-instalar.activo { opacity: 1; pointer-events: auto; }
+  #instalar-header { width: 100%; max-width: 420px; text-align: center; margin-bottom: 10px; }
+  #instalar-header h2 { margin: 6px 0 2px; font-size: 1.2rem; }
+  #instalar-sub { color: var(--muted); font-size: 0.85rem; }
+  #instalar-pasos {
+    width: 100%; max-width: 420px;
+    background: var(--card); border-radius: 10px;
+    padding: 16px 16px 16px 34px; margin: 14px 0;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: 0.92rem;
+  }
+  #instalar-pasos li { line-height: 1.4; }
+  .instalar-icono { font-size: 0.9em; }
+  #instalar-btn-cerrar {
+    margin-top: 6px;
+    padding: 10px 34px;
+    border-radius: 10px;
+    border: none;
+    background: #fff;
+    color: #1a1a1a;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
   /* --- CAPA: SOLICITAR AVATAR NUEVO (con cooldown de 15 días) --- */
   #overlay-solicitar {
     position: fixed;
@@ -1464,6 +1506,19 @@
   </div>
 </div>
 
+<div id="overlay-instalar">
+    <div id="instalar-header">
+      <h2>📲 Instalar la app</h2>
+      <div id="instalar-sub">En iPhone/iPad, Safari no deja instalar con un solo toque. Hacelo así:</div>
+    </div>
+    <ol id="instalar-pasos">
+      <li>Tocá el botón <b>Compartir</b> <span class="instalar-icono">⬆️</span> en la barra de Safari</li>
+      <li>Elegí <b>"Agregar a pantalla de inicio"</b></li>
+      <li>Confirmá con <b>"Agregar"</b> arriba a la derecha</li>
+    </ol>
+    <button id="instalar-btn-cerrar">Entendido</button>
+</div>
+
 <div id="overlay-solicitar">
     <div id="solicitar-header">
       <h2>📝 Pedir un avatar nuevo</h2>
@@ -1613,6 +1668,8 @@
       <input id="auth-username-input" type="text" placeholder="Nombre de usuario" maxlength="20" autofocus autocomplete="username">
       <input id="auth-password-input" type="password" placeholder="Contraseña" maxlength="72" autocomplete="current-password" style="margin-top:8px;">
 
+      <button class="full ghost btn-instalar-app hidden" id="btn-instalar-login" style="margin-top:10px; font-size:0.9rem; border-color: var(--accent2);">📲 Instalar la app</button>
+
       <button class="full" id="btn-auth-submit" style="font-size: 1.05rem; margin-top:10px;">Iniciar sesión ➜</button>
       <button class="full ghost" id="btn-auth-toggle" style="margin-top:8px; font-size:0.85rem;">
         ¿No tienes cuenta? Regístrate
@@ -1629,6 +1686,8 @@
       <div class="board-title" style="justify-content:center; text-align:center;">
         ¡Hola, <span id="nombre-confirmado-juego"></span>! ¿A qué quieres jugar?
       </div>
+
+      <button class="full ghost btn-instalar-app hidden" id="btn-instalar-juego" style="margin-bottom:14px; font-size:0.9rem; border-color: var(--accent2);">📲 Instalar la app en tu teléfono</button>
 
       <button class="full juego-card" id="btn-elegir-codigos" style="margin-bottom: 12px;">
         <span class="juego-card-emoji">🎯</span>
@@ -1876,6 +1935,66 @@
 </div>
 
 <script>
+// --- Instalar como app (PWA) ---
+// El service worker es lo que hace falta (además del manifest.json) para
+// que Chrome/Android considere instalable el sitio y dispare el evento
+// "beforeinstallprompt" más abajo.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+  });
+}
+
+let promptInstalacionApp = null;
+const esIOSInstalable = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+function appYaInstalada() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+
+function actualizarBotonesInstalar() {
+  const mostrar = !appYaInstalada() && (promptInstalacionApp || esIOSInstalable);
+  document.querySelectorAll('.btn-instalar-app').forEach((btn) => btn.classList.toggle('hidden', !mostrar));
+}
+
+// Chrome guarda este evento en vez de mostrar su propio mini-banner, para
+// poder dispararlo nosotros cuando el jugador toque "Instalar la app".
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  promptInstalacionApp = e;
+  actualizarBotonesInstalar();
+});
+
+window.addEventListener('appinstalled', () => {
+  promptInstalacionApp = null;
+  actualizarBotonesInstalar();
+});
+
+async function instalarApp() {
+  if (typeof reproducirSonido === 'function' && typeof soundUiBoton !== 'undefined') {
+    reproducirSonido(soundUiBoton);
+  }
+  if (promptInstalacionApp) {
+    promptInstalacionApp.prompt();
+    try { await promptInstalacionApp.userChoice; } catch (e) {}
+    promptInstalacionApp = null;
+    actualizarBotonesInstalar();
+    return;
+  }
+  if (esIOSInstalable) {
+    document.getElementById('overlay-instalar').classList.add('activo');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.btn-instalar-app').forEach((btn) => { btn.onclick = instalarApp; });
+  const btnCerrarInstalar = document.getElementById('instalar-btn-cerrar');
+  if (btnCerrarInstalar) {
+    btnCerrarInstalar.onclick = () => document.getElementById('overlay-instalar').classList.remove('activo');
+  }
+  actualizarBotonesInstalar();
+});
+
 function crearExplosionParticulas(contenedor, cantidad = 30) {
     for (let i = 0; i < cantidad; i++) {
         const particula = document.createElement('div');
@@ -2639,8 +2758,8 @@ function cambiarCategoriaTienda(cat) {
     document.getElementById('tienda-header').querySelector('h2').textContent = tituloTienda();
     cargarTienda();
 }
-document.getElementById('tienda-tab-avatar').onclick = () => cambiarCategoriaTienda('avatar');
-document.getElementById('tienda-tab-tablero').onclick = () => cambiarCategoriaTienda('tablero');
+document.getElementById('tienda-tab-avatar').onclick = () => { reproducirSonido(soundUiBoton); cambiarCategoriaTienda('avatar'); };
+document.getElementById('tienda-tab-tablero').onclick = () => { reproducirSonido(soundUiBoton); cambiarCategoriaTienda('tablero'); };
 
 async function abrirTienda(forzado = false) {
     tiendaModo = 'tienda';
@@ -3093,16 +3212,17 @@ function cerrarRanking() {
     document.getElementById('overlay-ranking').classList.remove('activo');
 }
 
-document.getElementById('btn-ranking').onclick = () => abrirRanking(juegoElegido);
-document.getElementById('ranking-btn-cerrar').onclick = cerrarRanking;
-document.getElementById('ranking-tab-codigos').onclick = () => abrirRanking('codigos');
-document.getElementById('ranking-tab-batalla').onclick = () => abrirRanking('batalla');
+document.getElementById('btn-ranking').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking(juegoElegido); };
+document.getElementById('ranking-btn-cerrar').onclick = () => { reproducirSonido(soundUiCerrar); cerrarRanking(); };
+document.getElementById('ranking-tab-codigos').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('codigos'); };
+document.getElementById('ranking-tab-batalla').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('batalla'); };
 
 // ---------------------------------------------------------------------------
 // Solicitar un avatar nuevo (con cooldown de 15 días, ver /avatar/solicitar)
 // ---------------------------------------------------------------------------
 async function abrirSolicitarAvatar() {
     const username = document.getElementById('name-input').value;
+    reproducirSonido(soundUiBoton);
     document.getElementById('overlay-solicitar').classList.add('activo');
     document.getElementById('solicitar-texto').value = '';
     document.getElementById('solicitar-error').textContent = '';
@@ -3776,6 +3896,7 @@ document.getElementById('join-btn').onclick = () => {
     document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  reproducirSonido(soundUiBoton);
   conectarSala(room, name);
 };
 
@@ -3787,9 +3908,10 @@ document.getElementById('btn-auto-join').onclick = async () => {
     return;
   }
   errEl.textContent = 'Buscando sala disponible...';
-  
+  reproducirSonido(soundUiBoton);
+
   try {
-    const response = await fetch('/matchmake'); 
+    const response = await fetch('/matchmake');
     const data = await response.json();
     
     if (response.ok && data.room) {
@@ -3813,6 +3935,7 @@ document.getElementById('btn-solo').onclick = () => {
     document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  reproducirSonido(soundUiBoton);
   const room = 'SOLO-' + Math.random().toString(36).slice(2, 8).toUpperCase();
   conectarSala(room, name, true);
 };
@@ -4654,6 +4777,7 @@ document.getElementById('btn-tutorial').onclick = () => {
     document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  reproducirSonido(soundUiBoton);
   iniciarTutorial();
 };
 
@@ -5542,6 +5666,7 @@ function renderGame(state) {
       // rápida o sala privada) — mismo destino que antes armaba con
       // localStorage + reload, resuelto ahora dentro de la misma SPA.
       document.getElementById('btn-jugar-de-nuevo').onclick = () => {
+        reproducirSonido(soundUiBoton);
         const nombre = nombreParaReinicio();
         const tipo = tipoDeSala(currentRoomCode);
         if (nombre) localStorage.setItem('edc_name', nombre);
@@ -5559,6 +5684,7 @@ function renderGame(state) {
       // "Elegir cómo jugar": vuelve a la pantalla de selección de modo sin
       // reingresar automáticamente a ninguna partida, sin recargar la página.
       document.getElementById('btn-reinicio').onclick = () => {
+        reproducirSonido(soundUiBoton);
         const nombre = nombreParaReinicio();
         if (nombre) localStorage.setItem('edc_name', nombre);
         localStorage.removeItem('edc_restart');
@@ -5766,6 +5892,7 @@ document.getElementById('btn-elegir-batalla').onclick = (e) => {
 };
 document.getElementById('btn-cambiar-nombre-juego').onclick = () => cerrarSesion();
 document.getElementById('btn-cambiar-juego').onclick = () => {
+  reproducirSonido(soundUiBoton);
   document.getElementById('join-step-modo').classList.add('hidden');
   document.getElementById('nombre-confirmado-juego').textContent = document.getElementById('name-input').value.trim();
   document.getElementById('join-step-juego').classList.remove('hidden');
@@ -5918,6 +6045,7 @@ document.getElementById('btn-auto-join-batalla').onclick = async () => {
     errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  reproducirSonido(soundUiBoton);
   await buscarPartidaRapidaBatalla(name);
 };
 
@@ -5928,6 +6056,7 @@ document.getElementById('join-btn-batalla').onclick = () => {
     document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  reproducirSonido(soundUiBoton);
   conectarSalaBatalla(room, name);
 };
 
