@@ -1496,8 +1496,9 @@ class BatallaRoom:
     def agregar_bot(self) -> None:
         nombre = random.choice(BATALLA_NOMBRES_BOT)
         avatar = random.choice(CATALOGO_AVATARES)["archivo"] if CATALOGO_AVATARES else None
+        tablero = random.choice(CATALOGO_TABLEROS)["archivo"] if CATALOGO_TABLEROS else None
         pid = f"bot-{random.randint(100000, 999999)}"
-        bot = BatallaPlayer(pid, nombre, None, avatar=avatar, rango=obtener_rango(0, 0), is_bot=True)
+        bot = BatallaPlayer(pid, nombre, None, avatar=avatar, rango=obtener_rango(0, 0), is_bot=True, tablero=tablero)
         self.players.append(bot)
         self.log.append(f"{nombre} se unió a la sala.")
 
