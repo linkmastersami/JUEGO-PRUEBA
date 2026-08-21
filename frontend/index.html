@@ -5381,6 +5381,7 @@ function limpiarEstadoDePartidaBatalla() {
   document.getElementById('wait-screen-batalla').classList.add('hidden');
   document.getElementById('game-screen-batalla').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
+  mostrandoListosComiencen = false;
   ocultarRpsBatalla();
   ocultarPantallaFinalBatalla();
   // Fuera del área de batalla la ficha de perfil vuelve a tener sentido.
@@ -5819,7 +5820,15 @@ function renderRpsBatalla(state) {
   });
 }
 
+// Mientras el "¡LISTOS! ¡COMIENCEN!" está en curso, ocultarRpsBatalla() no
+// debe tapar nada: si no, el próximo renderGameBatalla(state) (que se
+// llama en el mismo instante en que arranca la secuencia, para dibujar el
+// tablero por debajo) lo cerraba antes de que el navegador llegara a
+// pintar un solo frame — por eso nunca se veía.
+let mostrandoListosComiencen = false;
+
 function ocultarRpsBatalla() {
+  if (mostrandoListosComiencen) return;
   document.getElementById('overlay-batalla-rps').classList.remove('activo');
 }
 
@@ -5827,6 +5836,7 @@ function ocultarRpsBatalla() {
 // cortos y recién ahí se destapa el tablero (que ya se renderizó debajo,
 // tapado por este mismo overlay).
 function mostrarListosComiencen() {
+  mostrandoListosComiencen = true;
   const overlay = document.getElementById('overlay-batalla-rps');
   const cont = document.getElementById('obr-contenido');
   overlay.classList.add('activo');
@@ -5834,6 +5844,7 @@ function mostrarListosComiencen() {
   setTimeout(() => {
     cont.innerHTML = `<div class="obr-listos">¡COMIENCEN!</div>`;
     setTimeout(() => {
+      mostrandoListosComiencen = false;
       overlay.classList.remove('activo');
     }, 750);
   }, 750);
