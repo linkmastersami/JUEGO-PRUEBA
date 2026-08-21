@@ -188,8 +188,10 @@ CATALOGO_TABLEROS: List[dict] = cargar_catalogo_tableros()
 def obtener_rango(puntos: int, victorias: int):
     if victorias == 0:
         return "Novato en Desactivación"
-    
-    indice = (puntos - 1) // 60000 if puntos > 0 else 0
+
+    # 30000 = 60 fichas * PUNTOS_POR_FICHA: cada rango sigue valiendo "una
+    # partida ganada con el mazo lleno", ahora que cada ficha vale la mitad.
+    indice = (puntos - 1) // (60 * PUNTOS_POR_FICHA) if puntos > 0 else 0
     indice = max(0, min(14, indice))
     return RANGOS[indice]
 
@@ -249,6 +251,11 @@ COIN_REWARD_OPTIONS = [100, 75, 50]
 # Batalla de Avatares da partidas más rápidas, así que la caja fuerte paga
 # un poco menos para compensar.
 COIN_REWARD_OPTIONS_BATALLA = [75, 50, 25]
+
+# Puntos que vale cada ficha restante del mazo al calcular una recompensa o
+# penalización en Estratega de Códigos (deck_remaining() * PUNTOS_POR_FICHA).
+# Antes era 1000; se bajó a la mitad a pedido del usuario.
+PUNTOS_POR_FICHA = 500
 
 
 def add_coins(username: str, amount: int) -> int:
@@ -1146,7 +1153,7 @@ class Room:
         if len(active) == 1:
             last = active[0]
             if trigger_type == "exploded":
-                bonus = self.deck_remaining() * 1000
+                bonus = self.deck_remaining() * PUNTOS_POR_FICHA
                 update_player_score(last.name, bonus)
                 self.winner = last.id
                 self.log.append(
@@ -1155,7 +1162,7 @@ class Room:
                 self._record_event("auto_win", last, bonus, multiplier=1)
             else:  
                 last.eliminated = True
-                penalty = self.deck_remaining() * 1000
+                penalty = self.deck_remaining() * PUNTOS_POR_FICHA
                 update_player_score(last.name, -penalty)
                 self.winner = self.last_event["player_id"] if self.last_event else None
                 self.log.append(
@@ -1182,7 +1189,7 @@ class Room:
         su propio código. Si falla, la partida termina sin puntos."""
         if numbers == correct:
             cur.resolved = True
-            earned_points = (self.deck_remaining() // 2) * 1000
+            earned_points = (self.deck_remaining() // 2) * PUNTOS_POR_FICHA
             update_player_score(cur.name, earned_points)
             coins = self.grant_coin_reward(cur)
             self.status = "finished"
@@ -1220,7 +1227,7 @@ class Room:
             multiplier = max(1, len(active_opponents))
             cur.resolved = True
 
-            earned_points = self.deck_remaining() * 1000 * multiplier
+            earned_points = self.deck_remaining() * PUNTOS_POR_FICHA * multiplier
             update_player_score(cur.name, earned_points)
             coins = self.grant_coin_reward(cur)
             self.log.append(
@@ -1235,7 +1242,7 @@ class Room:
             return
 
         cur.eliminated = True
-        lost_points = self.deck_remaining() * 1000
+        lost_points = self.deck_remaining() * PUNTOS_POR_FICHA
         update_player_score(cur.name, -lost_points)
         self.log.append(
             f"{cur.name} gritó DESACTIVAR! pero falló y pierde {lost_points} puntos. Queda eliminado."

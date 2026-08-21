@@ -2523,6 +2523,13 @@ function procesarRondaMultijugador(nuevos, state) {
 
 let puntosActuales = 0;
 let monedasActuales = 0;
+// Ranking de Batalla de Avatares: totalmente separado del de Estratega de
+// Códigos de acá para arriba (puntosActuales/uiPuntos), pero comparten la
+// misma tarjeta de perfil — cuál de los dos se muestra depende de
+// juegoElegido (ver refrescarHudSegunJuego).
+let puntosActualesBatalla = 0;
+let rangoActualCodigos = 'Novato en Desactivación';
+let rangoActualBatalla = 'Novato en Desactivación';
 
 // ---------------------------------------------------------------------------
 // LOGIN / REGISTRO CON SUPABASE
@@ -2718,11 +2725,16 @@ async function actualizarPerfilHUD(name) {
     try {
         const respuesta = await fetch('/perfil/' + encodeURIComponent(name));
         const data = await respuesta.json();
-        let puntajeAnterior = puntosActuales;
+        // El "antes" de la animación tiene que ser el valor que ya se veía
+        // en pantalla (del juego activo), no el total del otro juego.
+        let puntajeAnterior = juegoElegido === 'batalla' ? puntosActualesBatalla : puntosActuales;
         puntosActuales = data.puntos || 0;
+        puntosActualesBatalla = data.puntos_batalla || 0;
+        rangoActualCodigos = data.rango || 'Novato en Desactivación';
+        rangoActualBatalla = data.rango_batalla || 'Novato en Desactivación';
         let monedasAnteriores = monedasActuales;
         monedasActuales = data.monedas || 0;
-        document.getElementById("uiRango").innerText = data.rango || "Novato en Desactivación";
+        document.getElementById("uiRango").innerText = juegoElegido === 'batalla' ? rangoActualBatalla : rangoActualCodigos;
         const avatarImg = document.getElementById("uiAvatarImg");
         if (data.avatar_actual) {
             avatarImg.src = '/gif/' + data.avatar_actual;
@@ -2731,7 +2743,7 @@ async function actualizarPerfilHUD(name) {
             avatarImg.style.display = 'none';
         }
         reproducirMusicaParaAvatar(data.avatar_actual || null);
-        animarPuntajeHUD("uiPuntos", puntajeAnterior, puntosActuales, 800);
+        animarPuntajeHUD("uiPuntos", puntajeAnterior, juegoElegido === 'batalla' ? puntosActualesBatalla : puntosActuales, 800);
         animarPuntajeHUD("uiMonedas", monedasAnteriores, monedasActuales, 800);
         const perfilCard = document.getElementById("perfilJugador");
         if (data.tablero_actual) {
@@ -3887,6 +3899,7 @@ function irASeleccionModo(nombre) {
   currentPlayerName = null;
   limpiarEstadoDePartida();
   juegoElegido = 'codigos';
+  refrescarHudSegunJuego();
 
   document.getElementById('join-screen').classList.remove('hidden');
   document.getElementById('join-step-name').classList.add('hidden');
@@ -5891,8 +5904,20 @@ function animarTransicionJuego(sourceEl, emoji, callback) {
   }, 850);
 }
 
+// La tarjeta de perfil (uiPuntos/uiRango) es una sola, pero cada juego tiene
+// su propio ranking — al cambiar de juego, la actualiza al toque con los
+// valores ya cacheados (sin pedirle nada de nuevo al servidor).
+function refrescarHudSegunJuego() {
+  const rangoEl = document.getElementById('uiRango');
+  const puntosEl = document.getElementById('uiPuntos');
+  if (!rangoEl || !puntosEl) return;
+  rangoEl.innerText = juegoElegido === 'batalla' ? rangoActualBatalla : rangoActualCodigos;
+  puntosEl.innerText = (juegoElegido === 'batalla' ? puntosActualesBatalla : puntosActuales).toLocaleString();
+}
+
 function elegirJuego(juego) {
   juegoElegido = juego;
+  refrescarHudSegunJuego();
   document.getElementById('join-step-modo').classList.remove('hidden');
   mostrarModoParaJuego(juego);
   document.getElementById('join-step-juego').classList.add('hidden');
@@ -5919,6 +5944,7 @@ function irASeleccionModoBatalla(nombre) {
   currentPlayerNameBatalla = null;
   limpiarEstadoDePartidaBatalla();
   juegoElegido = 'batalla';
+  refrescarHudSegunJuego();
 
   document.getElementById('join-screen').classList.remove('hidden');
   document.getElementById('join-step-name').classList.add('hidden');
@@ -6173,10 +6199,9 @@ function mostrarResultadoBatalla(state) {
   // Las monedas NO se mencionan acá a propósito: el monto se revela recién
   // al elegir una caja fuerte (ver mostrarCajasFuertes) — si ya lo decimos
   // acá, elegir la caja deja de tener sentido porque ya sabés cuánto es.
-  const chips = [];
-  if (gane) {
-    chips.push({ tipo: 'gano', texto: `+${(state.points_gained || 0).toLocaleString()} puntos` });
-  }
+  // Los puntos tampoco van en un chip de texto acá: se muestran con la
+  // misma animación grande de conteo que usa Estratega de Códigos, justo
+  // después de aceptar este mensaje (ver ejecutarAnimacionPuntos).
   mostrarResultadoRonda({
     icono: empate ? '🤝' : (gane ? '🏆' : '💥'),
     titulo: empate
@@ -6184,12 +6209,29 @@ function mostrarResultadoBatalla(state) {
       : (gane
         ? '¡Ganaste la batalla!'
         : `Perdiste contra ${rival ? escaparHtml(rival.name) : 'tu rival'}.`),
-    chips,
+    chips: [],
   }, () => {
-    if (gane && state.coins_gained) {
-      mostrarCajasFuertes(state.coins_gained, () => mostrarPantallaFinalBatalla(state), [75, 50, 25]);
+    const continuarAlCierre = () => {
+      if (gane && state.coins_gained) {
+        mostrarCajasFuertes(state.coins_gained, () => mostrarPantallaFinalBatalla(state), [75, 50, 25]);
+      } else {
+        mostrarPantallaFinalBatalla(state);
+      }
+    };
+
+    if (gane) {
+      const puntosGanados = state.points_gained || 0;
+      const puntajeAnterior = puntosActualesBatalla;
+      puntosActualesBatalla += puntosGanados;
+      ejecutarAnimacionPuntos(true, 0, puntosGanados, () => {
+        // La ficha de perfil está oculta durante la partida: esto solo se
+        // ve si en ese momento estaba mostrando el ranking de Batalla,
+        // pero deja el número al día para la próxima vez que se muestre.
+        if (juegoElegido === 'batalla') animarPuntajeHUD('uiPuntos', puntajeAnterior, puntosActualesBatalla, 1000);
+        continuarAlCierre();
+      });
     } else {
-      mostrarPantallaFinalBatalla(state);
+      continuarAlCierre();
     }
   });
 }
