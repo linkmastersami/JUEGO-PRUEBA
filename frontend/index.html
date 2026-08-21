@@ -2707,7 +2707,7 @@ async function cargarTienda() {
             document.getElementById('tienda-btn-cerrar').classList.remove('hidden');
         }
 
-        const propiosResp = await fetch((esTablero ? '/tableros/' : '/avatares/') + encodeURIComponent(tiendaUsuarioActual));
+        const propiosResp = await fetch((esTablero ? '/mis-tableros/' : '/avatares/') + encodeURIComponent(tiendaUsuarioActual));
         const propiosData = await propiosResp.json();
         const actual = esTablero ? propiosData.tablero_actual : propiosData.avatar_actual;
 
@@ -2848,7 +2848,9 @@ function abrirConfirmarCompra(item, categoria, esGratis) {
     itemPendienteCompra = item;
     categoriaPendienteCompra = categoria;
     const esTablero = categoria === 'tablero';
-    document.getElementById('confirmar-compra-img').src = (esTablero ? '/tableros/' : '/gif/') + item.archivo;
+    const confirmarImg = document.getElementById('confirmar-compra-img');
+    confirmarImg.src = (esTablero ? '/tableros/' : '/gif/') + item.archivo;
+    confirmarImg.alt = esTablero ? 'tablero' : 'avatar';
     document.getElementById('confirmar-compra-titulo').textContent = esTablero ? '¿Quieres este tablero?' : '¿Quieres este avatar?';
     const precioEl = document.getElementById('confirmar-compra-precio');
     precioEl.textContent = esGratis ? '🎁 Es tu avatar gratis de bienvenida' : `🪙 ${item.precio} monedas`;

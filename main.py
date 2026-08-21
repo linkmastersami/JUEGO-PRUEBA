@@ -587,11 +587,19 @@ async def tienda_tableros(username: str):
     return {"catalogo": catalogo, "monedas": perfil["monedas"]}
 
 
-@app.get("/tableros/{username}")
+@app.get("/mis-tableros/{username}")
 async def tableros_del_jugador(username: str):
     """Selector: solo los tableros que este jugador ya compró, más cuál
     tiene puesto ahora mismo (puede ser None: sin tablero, fondo por
-    defecto)."""
+    defecto).
+
+    OJO: este endpoint NO puede llamarse "/tableros/{username}" — las
+    imágenes de los tableros se sirven como archivos estáticos bajo ese
+    mismo prefijo (frontend/tableros/300001.png -> /tableros/300001.png,
+    vía el StaticFiles montado en "/"), así que "/tableros/{username}"
+    le "robaba" esas rutas: /tableros/300001.png se resolvía contra este
+    endpoint (con "300001.png" como si fuera el username) en vez de
+    servir la imagen, y por eso los tableros nunca se veían."""
     if supabase is None:
         return {"tableros": [], "tablero_actual": None}
     perfil = _obtener_perfil_tableros(username)
