@@ -1277,6 +1277,12 @@ class BatallaRoom:
         self.chat_messages: List[dict] = []
         self.chat_seq = 0
         self.spectators: Dict[str, WebSocket] = {}
+        # Piedra/Papel/Tijera para decidir quién arranca (status == "rps").
+        self.rps_choices: Dict[str, str] = {}
+        self.rps_resultado: Optional[dict] = None
+        # Revancha al terminar (status == "finished"): si los dos la piden
+        # se reinicia la sala entera, de vuelta al piedra/papel/tijera.
+        self.rematch_requested: Dict[str, bool] = {}
 
     def get_player(self, pid: str) -> Optional[BatallaPlayer]:
         return next((p for p in self.players if p.id == pid), None)
@@ -1317,17 +1323,78 @@ class BatallaRoom:
         self.players.append(bot)
         self.log.append(f"{nombre} se unió a la sala.")
 
-    def start(self) -> None:
+    def start(self, primero: Optional[str] = None) -> None:
         self.mazo = _crear_mazo_batalla()
         self.descarte = []
         for jugador in self.players:
             jugador.en_pie = BATALLA_PERSONAJES_INICIALES
             jugador.personajes = [_personaje_nuevo() for _ in range(BATALLA_PERSONAJES_INICIALES)]
             jugador.mano = [self.mazo.pop() for _ in range(BATALLA_MANO_SIZE)]
-        self.turn_index = random.randint(0, 1)
+        if primero is not None and self.get_player(primero) is not None:
+            self.turn_index = self.players.index(self.get_player(primero))
+        else:
+            self.turn_index = random.randint(0, 1)
         self.status = "playing"
         self.matchmaking_deadline = None
+        self.winner = None
+        self.points_gained = 0
+        self.coins_gained = 0
+        self.coin_rewards = {}
+        self.rps_choices = {}
+        self.rps_resultado = None
+        self.rematch_requested = {}
         self.log.append("¡La batalla ha comenzado! Que gane el mejor escuadrón.")
+
+    def iniciar_rps(self) -> None:
+        """Antes de empezar (o de una revancha) se juega piedra/papel/
+        tijera para decidir quién tiene el primer turno."""
+        self.status = "rps"
+        self.rps_choices = {}
+        self.rps_resultado = None
+        self.matchmaking_deadline = None
+        self.log.append("¡Piedra, papel o tijera para ver quién empieza!")
+
+    def elegir_rps(self, pid: str, opcion: str) -> Tuple[bool, str]:
+        if self.status != "rps":
+            return False, "No estamos en la elección de quién empieza."
+        if opcion not in ("piedra", "papel", "tijera"):
+            return False, "Elegí piedra, papel o tijera."
+        if self.get_player(pid) is None:
+            return False, "No estás en esta sala."
+        if pid in self.rps_choices:
+            return False, "Ya elegiste."
+        self.rps_resultado = None
+        self.rps_choices[pid] = opcion
+        if len(self.rps_choices) < len(self.players):
+            return True, ""
+
+        gana_a = {"piedra": "tijera", "papel": "piedra", "tijera": "papel"}
+        a, b = self.players[0], self.players[1]
+        ea, eb = self.rps_choices[a.id], self.rps_choices[b.id]
+        if ea == eb:
+            self.rps_resultado = {"empate": True, "choices": dict(self.rps_choices)}
+            self.rps_choices = {}
+            self.log.append(f"Piedra/papel/tijera: empate ({ea} contra {eb}), tiran de nuevo.")
+        else:
+            ganador = a if gana_a[ea] == eb else b
+            self.rps_resultado = {"empate": False, "choices": dict(self.rps_choices), "ganador": ganador.id}
+            self.log.append(f"Piedra/papel/tijera: {ganador.name} gana ({ea} contra {eb}) y empieza.")
+        return True, ""
+
+    def pedir_revancha(self, pid: str) -> Tuple[bool, str]:
+        if self.status != "finished":
+            return False, "La partida todavía no terminó."
+        jugador = self.get_player(pid)
+        if jugador is None:
+            return False, "No estás en esta sala."
+        self.rematch_requested[pid] = True
+        rival = self._rival(jugador)
+        # Contra un bot no tiene sentido hacerlo esperar: acepta al toque.
+        if rival and rival.is_bot:
+            self.rematch_requested[rival.id] = True
+        if rival and self.rematch_requested.get(rival.id):
+            self.iniciar_rps()
+        return True, ""
 
     def _reponer_mano(self, jugador: BatallaPlayer) -> None:
         while len(jugador.mano) < BATALLA_MANO_SIZE:
@@ -1504,8 +1571,11 @@ class BatallaRoom:
                 p["estado"] = "caido"
             player.en_pie = 0
             self._revisar_victoria()
-        elif self.status == "waiting":
+        elif self.status in ("waiting", "rps"):
             self.players = [p for p in self.players if p.id != player.id]
+            self.status = "waiting"
+            self.rps_choices = {}
+            self.rps_resultado = None
             self.log.append(f"{player.name} salió de la sala.")
 
     def _revisar_victoria(self) -> bool:
@@ -1535,6 +1605,34 @@ class BatallaRoom:
 
     def state_for(self, viewer_id: str) -> dict:
         cur = self.current_player() if self.players and self.status == "playing" else None
+        rival = next((p for p in self.players if p.id != viewer_id), None)
+
+        # Mientras se está eligiendo piedra/papel/tijera no se revela qué
+        # eligió cada uno (solo si YA eligió, para que "esperando a tu
+        # rival" tenga sentido) — recién se revela el valor real en
+        # rps_resultado, una vez que los dos ya tiraron.
+        rps = None
+        if self.status == "rps":
+            rps = {
+                "ya_elegiste": viewer_id in self.rps_choices,
+                "rival_eligio": bool(rival and rival.id in self.rps_choices),
+            }
+        rps_resultado = None
+        if self.rps_resultado:
+            choices = self.rps_resultado["choices"]
+            rps_resultado = {
+                "empate": self.rps_resultado["empate"],
+                "tu_eleccion": choices.get(viewer_id),
+                "rival_eleccion": next((v for pid, v in choices.items() if pid != viewer_id), None),
+                "ganaste": (not self.rps_resultado["empate"]) and self.rps_resultado.get("ganador") == viewer_id,
+            }
+        rematch = None
+        if self.status == "finished":
+            rematch = {
+                "vos": self.rematch_requested.get(viewer_id, False),
+                "rival": bool(rival and self.rematch_requested.get(rival.id, False)),
+            }
+
         return {
             "type": "state",
             "game": "batalla",
@@ -1558,6 +1656,9 @@ class BatallaRoom:
             "is_spectator": False,
             "spectator_count": len(self.spectators),
             "matchmaking_deadline_ms": int(self.matchmaking_deadline * 1000) if self.matchmaking_deadline else None,
+            "rps": rps,
+            "rps_resultado": rps_resultado,
+            "rematch": rematch,
         }
 
     def spectator_state_for(self) -> dict:
@@ -1676,6 +1777,58 @@ def decidir_jugada_bot(room: BatallaRoom, bot: BatallaPlayer):
     return None
 
 
+def _lanzar_bot_rps_si_hace_falta(room: BatallaRoom) -> None:
+    """Si la sala está en piedra/papel/tijera y hay un bot que todavía no
+    tiró, le programa la tirada (con una demora corta para que no se
+    sienta instantáneo)."""
+    if room.status != "rps":
+        return
+    bot = next((p for p in room.players if p.is_bot), None)
+    if bot is not None and bot.id not in room.rps_choices:
+        asyncio.create_task(_bot_elegir_rps(room.code))
+
+
+async def _bot_elegir_rps(room_code: str):
+    await asyncio.sleep(0.7 + random.random() * 0.9)
+    room = rooms.get(room_code)
+    if not isinstance(room, BatallaRoom) or room.status != "rps":
+        return
+    bot = next((p for p in room.players if p.is_bot), None)
+    if bot is None or bot.id in room.rps_choices:
+        return
+    ok, _ = room.elegir_rps(bot.id, random.choice(["piedra", "papel", "tijera"]))
+    if not ok:
+        return
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    if room.rps_resultado and not room.rps_resultado.get("empate"):
+        asyncio.create_task(_watch_rps_resolucion(room.code))
+    else:
+        _lanzar_bot_rps_si_hace_falta(room)
+
+
+async def _watch_rps_resolucion(room_code: str):
+    """Tras un piedra/papel/tijera resuelto (no empate), deja un momento
+    para que los dos vean la revelación de qué tiró cada uno antes de que
+    arranque la partida de verdad."""
+    await asyncio.sleep(2.2)
+    room = rooms.get(room_code)
+    if not isinstance(room, BatallaRoom) or room.status != "rps" or not room.rps_resultado:
+        return
+    if room.rps_resultado.get("empate"):
+        return
+    ganador_id = room.rps_resultado.get("ganador")
+    room.start(primero=ganador_id)
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_batalla(room.code))
+
+
 async def _bot_jugar_batalla(room_code: str):
     """Hace jugar al bot su turno, con una pequeña demora para que no se
     sienta instantáneo/robótico (parte de que el rival no note que es un
@@ -1721,13 +1874,12 @@ async def _watch_batalla_matchmake(room_code: str):
     if room.status != "waiting" or len(room.players) != 1:
         return
     room.agregar_bot()
-    room.start()
+    room.iniciar_rps()
     try:
         await broadcast(room)
     except Exception:
         pass
-    if room.current_player().is_bot:
-        asyncio.create_task(_bot_jugar_batalla(room.code))
+    _lanzar_bot_rps_si_hace_falta(room)
 
 
 async def _watch_disconnect(room_code: str, pid: str, token: int):
@@ -2138,11 +2290,9 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
             room.matchmaking_deadline = time.time() + BATALLA_MATCHMAKE_TIMEOUT
             asyncio.create_task(_watch_batalla_matchmake(room_code))
         elif len(room.players) == 2:
-            room.start()
+            room.iniciar_rps()
 
         await broadcast(room)
-        if room.status == "playing" and room.current_player().is_bot:
-            asyncio.create_task(_bot_jugar_batalla(room.code))
 
     _add_online(clean_name)
     await _broadcast_lobby()
@@ -2173,6 +2323,25 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
 
             if mtype == "ping":
                 continue
+
+            elif mtype == "elegir_rps" and room.status == "rps":
+                ok, motivo = room.elegir_rps(player.id, msg.get("opcion"))
+                if ok:
+                    await broadcast(room)
+                    if room.rps_resultado and not room.rps_resultado.get("empate"):
+                        asyncio.create_task(_watch_rps_resolucion(room.code))
+                    else:
+                        _lanzar_bot_rps_si_hace_falta(room)
+                else:
+                    await websocket.send_text(json.dumps({"type": "error", "message": motivo}))
+
+            elif mtype == "revancha" and room.status == "finished":
+                ok, motivo = room.pedir_revancha(player.id)
+                if ok:
+                    await broadcast(room)
+                    _lanzar_bot_rps_si_hace_falta(room)
+                else:
+                    await websocket.send_text(json.dumps({"type": "error", "message": motivo}))
 
             elif mtype == "jugar_carta" and room.status == "playing":
                 if room.current_player().id == player.id:

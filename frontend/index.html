@@ -970,6 +970,69 @@
     will-change: transform;
     transition: transform 0.55s cubic-bezier(0.22, 0.85, 0.28, 1);
   }
+  /* --- Piedra/Papel/Tijera + "¡Listos! ¡Comiencen!" antes de la partida
+     de Batalla de Avatares --- */
+  #overlay-batalla-rps {
+    position: fixed; inset: 0; z-index: 400;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10, 11, 16, 0.97);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+    padding: 20px;
+    text-align: center;
+  }
+  #overlay-batalla-rps.activo { opacity: 1; pointer-events: auto; }
+  #obr-contenido { width: 100%; max-width: 420px; }
+  .obr-titulo { font-size: 1.5rem; font-weight: 900; margin-bottom: 6px; }
+  .obr-sub { color: var(--muted); font-size: 0.95rem; margin-bottom: 22px; }
+  .obr-opciones { display: flex; gap: 14px; justify-content: center; }
+  .obr-opcion {
+    width: 88px; height: 96px; border-radius: 16px; background: var(--card);
+    border: 2px solid #3a3f52; color: var(--text);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    font-size: 2.4rem; cursor: pointer;
+  }
+  .obr-opcion span { font-size: 0.72rem; font-weight: 700; color: var(--muted); }
+  .obr-opcion:active { transform: scale(0.94); }
+  .obr-opcion.elegida { font-size: 2rem; cursor: default; opacity: 0.7; }
+  .obr-reveal { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 18px; }
+  .obr-lado {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    font-size: 0.85rem; font-weight: 700; color: var(--muted);
+  }
+  .obr-emoji-grande { font-size: 3.2rem; }
+  .obr-vs { font-weight: 900; color: var(--accent); font-size: 1rem; }
+  .obr-listos {
+    font-size: 2.6rem; font-weight: 900; color: var(--accent);
+    animation: obrListosPop 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes obrListosPop {
+    0% { transform: scale(0.5); opacity: 0; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  /* --- Pantalla final de Batalla de Avatares: Revancha / Salir --- */
+  #overlay-batalla-final {
+    position: fixed; inset: 0; z-index: 410;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(10, 11, 16, 0.97);
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+    padding: 20px; text-align: center;
+  }
+  #overlay-batalla-final.activo { opacity: 1; pointer-events: auto; }
+  #obf-contenido { width: 100%; max-width: 420px; }
+  .obf-titulo { font-size: 2rem; font-weight: 900; margin-bottom: 10px; }
+  .obf-sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 28px; }
+  .obf-botones { display: flex; flex-direction: column; gap: 12px; }
+  .obf-boton {
+    width: 100%; padding: 16px; border-radius: 12px; font-size: 1.05rem; font-weight: 800;
+    border: 2px solid transparent;
+  }
+  .obf-boton.obf-revancha { background: var(--accent); color: #1a1a1a; }
+  .obf-boton.obf-revancha:disabled { background: #3a3f52; color: var(--muted); }
+  .obf-boton.obf-salir { background: transparent; border-color: #3a3f52; color: var(--text); }
+
   .ranking-tab.activo { background: var(--accent2); color: #fff; border-color: var(--accent2); }
   #btn-salir {
     position: fixed;
@@ -1257,6 +1320,17 @@
 </div>
 
 <div id="overlay-transicion-juego"><span id="otj-emoji"></span></div>
+
+<!-- Piedra/Papel/Tijera para decidir quién empieza en Batalla de Avatares,
+     y el "¡Listos! ¡Comiencen!" antes de que arranque de verdad. -->
+<div id="overlay-batalla-rps">
+  <div id="obr-contenido"></div>
+</div>
+
+<!-- Pantalla final de Batalla de Avatares: Revancha / Salir. -->
+<div id="overlay-batalla-final">
+  <div id="obf-contenido"></div>
+</div>
 
 <div id="overlay-tienda">
     <div id="tienda-header">
@@ -5208,6 +5282,8 @@ let cartaSeleccionadaBatalla = null;
 let modoDescarteBatalla = false;
 let cartasParaDescartar = [];
 let matchmakingIntervalBatalla = null;
+let pantallaFinalBatallaMostrada = false;
+let intervaloFinalBatalla = null;
 
 // --- Selector de juego ---
 function mostrarModoParaJuego(juego) {
@@ -5305,6 +5381,8 @@ function limpiarEstadoDePartidaBatalla() {
   document.getElementById('wait-screen-batalla').classList.add('hidden');
   document.getElementById('game-screen-batalla').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
+  ocultarRpsBatalla();
+  ocultarPantallaFinalBatalla();
   // Fuera del área de batalla la ficha de perfil vuelve a tener sentido.
   document.getElementById('perfilJugador').classList.remove('hidden');
 }
@@ -5391,6 +5469,23 @@ async function abrirWebSocketBatalla(room, name) {
   };
 }
 
+async function buscarPartidaRapidaBatalla(name) {
+  const errEl = document.getElementById('join-error');
+  if (errEl) errEl.textContent = 'Buscando rival...';
+  try {
+    const resp = await fetch('/matchmake?game=batalla');
+    const data = await resp.json();
+    if (resp.ok && data.room) {
+      if (errEl) errEl.textContent = '';
+      conectarSalaBatalla(data.room, name);
+    } else if (errEl) {
+      errEl.textContent = data.detail || 'No se pudo encontrar partida.';
+    }
+  } catch (e) {
+    if (errEl) errEl.textContent = 'Error de conexión con el servidor.';
+  }
+}
+
 document.getElementById('btn-auto-join-batalla').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
   const errEl = document.getElementById('join-error');
@@ -5398,19 +5493,7 @@ document.getElementById('btn-auto-join-batalla').onclick = async () => {
     errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
-  errEl.textContent = 'Buscando rival...';
-  try {
-    const resp = await fetch('/matchmake?game=batalla');
-    const data = await resp.json();
-    if (resp.ok && data.room) {
-      errEl.textContent = '';
-      conectarSalaBatalla(data.room, name);
-    } else {
-      errEl.textContent = data.detail || 'No se pudo encontrar partida.';
-    }
-  } catch (e) {
-    errEl.textContent = 'Error de conexión con el servidor.';
-  }
+  await buscarPartidaRapidaBatalla(name);
 };
 
 document.getElementById('join-btn-batalla').onclick = () => {
@@ -5461,6 +5544,16 @@ function handleStateBatalla(state) {
       lanzarConfeti();
       vibrar([100, 60, 100, 60, 220]);
     }
+    // De la revelación del piedra/papel/tijera a la partida de verdad:
+    // un par de avisos cortos antes de destapar el tablero.
+    if (anterior.status === 'rps' && state.status === 'playing') {
+      mostrarListosComiencen();
+    }
+    // Se pidió una revancha y arrancó de nuevo (vuelve al piedra/papel/
+    // tijera): la pantalla de Revancha/Salir ya no pinta nada.
+    if (anterior.status === 'finished' && state.status === 'rps') {
+      ocultarPantallaFinalBatalla();
+    }
   }
 
   lastStateBatalla = state;
@@ -5492,7 +5585,9 @@ function mostrarResultadoBatalla(state) {
     chips,
   }, () => {
     if (gane && state.coins_gained) {
-      mostrarCajasFuertes(state.coins_gained, () => {}, [75, 50, 25]);
+      mostrarCajasFuertes(state.coins_gained, () => mostrarPantallaFinalBatalla(state), [75, 50, 25]);
+    } else {
+      mostrarPantallaFinalBatalla(state);
     }
   });
 }
@@ -5616,10 +5711,21 @@ function renderGameBatalla(state) {
     return;
   }
 
+  if (state.status === 'rps') {
+    document.getElementById('wait-screen-batalla').classList.add('hidden');
+    document.getElementById('btn-salir').classList.remove('hidden');
+    renderRpsBatalla(state);
+    return;
+  }
+  ocultarRpsBatalla();
+
   clearInterval(matchmakingIntervalBatalla);
   document.getElementById('wait-screen-batalla').classList.add('hidden');
   document.getElementById('game-screen-batalla').classList.remove('hidden');
-  document.getElementById('btn-salir').classList.remove('hidden');
+  // En la pantalla final ya hay botones grandes de Revancha/Salir propios
+  // (ver mostrarPantallaFinalBatalla) — el botoncito de salir de siempre
+  // sobra ahí y queda escondido.
+  document.getElementById('btn-salir').classList.toggle('hidden', state.status === 'finished');
 
   if (!you || !rival) return;
 
@@ -5646,6 +5752,178 @@ function renderGameBatalla(state) {
 
   renderManoBatalla(you, esTuTurno);
   renderAccionBatalla(you, rival, esTuTurno);
+
+  if (state.status === 'finished' && pantallaFinalBatallaMostrada) {
+    actualizarPantallaFinalBatalla(state);
+  }
+}
+
+// --- Piedra/Papel/Tijera + "¡Listos! ¡Comiencen!" ---
+const BATALLA_RPS_EMOJI = { piedra: '🪨', papel: '📄', tijera: '✂️' };
+
+function renderRpsBatalla(state) {
+  const overlay = document.getElementById('overlay-batalla-rps');
+  const cont = document.getElementById('obr-contenido');
+  overlay.classList.add('activo');
+
+  const resultado = state.rps_resultado;
+  if (resultado) {
+    if (resultado.empate) {
+      cont.innerHTML = `
+        <div class="obr-titulo">¡Empate!</div>
+        <div class="obr-reveal">
+          <div class="obr-lado">Vos<span class="obr-emoji-grande">${BATALLA_RPS_EMOJI[resultado.tu_eleccion] || '❓'}</span></div>
+          <div class="obr-vs">VS</div>
+          <div class="obr-lado">Rival<span class="obr-emoji-grande">${BATALLA_RPS_EMOJI[resultado.rival_eleccion] || '❓'}</span></div>
+        </div>
+        <div class="obr-sub">Tiran de nuevo...</div>
+      `;
+    } else {
+      cont.innerHTML = `
+        <div class="obr-titulo">${resultado.ganaste ? '¡Ganaste!' : 'Perdiste'}</div>
+        <div class="obr-reveal">
+          <div class="obr-lado">Vos<span class="obr-emoji-grande">${BATALLA_RPS_EMOJI[resultado.tu_eleccion] || '❓'}</span></div>
+          <div class="obr-vs">VS</div>
+          <div class="obr-lado">Rival<span class="obr-emoji-grande">${BATALLA_RPS_EMOJI[resultado.rival_eleccion] || '❓'}</span></div>
+        </div>
+        <div class="obr-sub">${resultado.ganaste ? 'Empezás vos' : 'Empieza tu rival'}</div>
+      `;
+    }
+    return;
+  }
+
+  const rps = state.rps || { ya_elegiste: false, rival_eligio: false };
+  if (rps.ya_elegiste) {
+    cont.innerHTML = `
+      <div class="obr-titulo">¡Piedra, Papel o Tijera!</div>
+      <div class="obr-sub">Ya elegiste. Esperando a tu rival...</div>
+      <div class="obr-opciones"><div class="obr-opcion elegida">⏳</div></div>
+    `;
+    return;
+  }
+
+  cont.innerHTML = `
+    <div class="obr-titulo">¡Piedra, Papel o Tijera!</div>
+    <div class="obr-sub">Elegí para ver quién empieza</div>
+    <div class="obr-opciones">
+      <button class="obr-opcion" data-opcion="piedra">🪨<span>Piedra</span></button>
+      <button class="obr-opcion" data-opcion="papel">📄<span>Papel</span></button>
+      <button class="obr-opcion" data-opcion="tijera">✂️<span>Tijera</span></button>
+    </div>
+  `;
+  cont.querySelectorAll('.obr-opcion[data-opcion]').forEach(btn => {
+    btn.onclick = () => {
+      if (!wsBatalla || wsBatalla.readyState !== WebSocket.OPEN) return;
+      wsBatalla.send(JSON.stringify({ type: 'elegir_rps', opcion: btn.dataset.opcion }));
+    };
+  });
+}
+
+function ocultarRpsBatalla() {
+  document.getElementById('overlay-batalla-rps').classList.remove('activo');
+}
+
+// Se dispara cuando el estado pasa de 'rps' a 'playing': dos avisos
+// cortos y recién ahí se destapa el tablero (que ya se renderizó debajo,
+// tapado por este mismo overlay).
+function mostrarListosComiencen() {
+  const overlay = document.getElementById('overlay-batalla-rps');
+  const cont = document.getElementById('obr-contenido');
+  overlay.classList.add('activo');
+  cont.innerHTML = `<div class="obr-listos">¡LISTOS!</div>`;
+  setTimeout(() => {
+    cont.innerHTML = `<div class="obr-listos">¡COMIENCEN!</div>`;
+    setTimeout(() => {
+      overlay.classList.remove('activo');
+    }, 750);
+  }, 750);
+}
+
+// --- Pantalla final: Revancha / Salir ---
+function mostrarPantallaFinalBatalla(state) {
+  pantallaFinalBatallaMostrada = true;
+  document.getElementById('overlay-batalla-final').classList.add('activo');
+  document.getElementById('btn-salir').classList.add('hidden');
+  const deadline = Date.now() + 20000;
+  clearInterval(intervaloFinalBatalla);
+  const tick = () => {
+    const st = lastStateBatalla;
+    if (!st || st.status !== 'finished') { clearInterval(intervaloFinalBatalla); return; }
+    const rival = (st.players || []).find(p => p.id !== myIdBatalla);
+    if (rival && rival.connected === false) {
+      clearInterval(intervaloFinalBatalla);
+      autoRequeueBatalla();
+      return;
+    }
+    const restante = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    renderContenidoPantallaFinalBatalla(st, restante);
+    if (restante <= 0) {
+      clearInterval(intervaloFinalBatalla);
+      autoRequeueBatalla();
+    }
+  };
+  tick();
+  intervaloFinalBatalla = setInterval(tick, 500);
+}
+
+// Llamado desde renderGameBatalla en cada estado nuevo mientras la
+// pantalla final ya está mostrándose, para reflejar si tu rival ya pidió
+// revancha (el countdown en sí lo lleva mostrarPantallaFinalBatalla).
+function actualizarPantallaFinalBatalla(state) {
+  const restanteActual = document.getElementById('obf-restante');
+  const restante = restanteActual ? parseInt(restanteActual.textContent, 10) || 0 : 20;
+  renderContenidoPantallaFinalBatalla(state, restante);
+}
+
+function renderContenidoPantallaFinalBatalla(state, restante) {
+  const cont = document.getElementById('obf-contenido');
+  if (!cont) return;
+  const empate = state.winner === null || state.winner === undefined;
+  const gane = !empate && state.winner === myIdBatalla;
+  const rem = state.rematch || { vos: false, rival: false };
+  let estadoTexto;
+  if (rem.vos && !rem.rival) estadoTexto = 'Esperando a tu rival...';
+  else if (!rem.vos && rem.rival) estadoTexto = '¡Tu rival ya está listo para la revancha!';
+  else estadoTexto = 'Si no hay revancha a tiempo, buscamos otra partida.';
+
+  cont.innerHTML = `
+    <div class="obf-titulo">${empate ? '🤝 Empate' : (gane ? '🏆 ¡Ganaste!' : '💥 Perdiste')}</div>
+    <div class="obf-sub">${escaparHtml(estadoTexto)} <span id="obf-restante">${restante}</span>s</div>
+    <div class="obf-botones">
+      <button class="obf-boton obf-revancha" id="btn-revancha-batalla" ${rem.vos ? 'disabled' : ''}>
+        ${rem.vos ? '✅ Revancha pedida' : '🔁 Revancha'}
+      </button>
+      <button class="obf-boton obf-salir" id="btn-salir-batalla-final">🚪 Salir</button>
+    </div>
+  `;
+  if (!rem.vos) {
+    document.getElementById('btn-revancha-batalla').onclick = () => {
+      if (wsBatalla && wsBatalla.readyState === WebSocket.OPEN) {
+        wsBatalla.send(JSON.stringify({ type: 'revancha' }));
+      }
+    };
+  }
+  document.getElementById('btn-salir-batalla-final').onclick = () => {
+    clearInterval(intervaloFinalBatalla);
+    salirDeBatalla();
+  };
+}
+
+function ocultarPantallaFinalBatalla() {
+  pantallaFinalBatallaMostrada = false;
+  clearInterval(intervaloFinalBatalla);
+  document.getElementById('overlay-batalla-final').classList.remove('activo');
+}
+
+// Se llama cuando pasaron los 20s sin que los dos confirmaran la
+// revancha, o cuando el rival se fue: en vez de dejarte mirando una
+// pantalla muerta, te manda directo a buscar otra partida.
+function autoRequeueBatalla() {
+  const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
+  ocultarPantallaFinalBatalla();
+  esSalidaIntencionalBatalla = true;
+  limpiarEstadoDePartidaBatalla();
+  if (nombre) buscarPartidaRapidaBatalla(nombre);
 }
 
 function renderManoBatalla(you, esTuTurno) {
