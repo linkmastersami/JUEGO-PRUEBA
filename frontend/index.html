@@ -5661,7 +5661,14 @@ function handleStateBatalla(state) {
   }
 
   if (anterior && anterior.status !== 'finished' && state.status === 'finished') {
-    mostrarResultadoBatalla(state);
+    // Le da tiempo a la animación de la última jugada (la que terminó la
+    // partida) a llegar a su impacto antes de tapar todo con el aviso de
+    // victoria/derrota/empate — si no, quedaban una encima de la otra.
+    setTimeout(() => {
+      if (lastStateBatalla && lastStateBatalla.status === 'finished') {
+        mostrarResultadoBatalla(lastStateBatalla);
+      }
+    }, 3000);
   }
 }
 
@@ -5801,8 +5808,16 @@ function crearProyectilBatalla(emoji, x, y) {
   const el = document.createElement('div');
   el.className = 'batalla-proyectil';
   el.textContent = emoji;
+  el.style.transition = 'none';
   el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
   document.body.appendChild(el);
+  // Fuerza que el navegador "pinte" esta posición de arranque antes de
+  // que le pidamos animar hacia otra — sin esto, el cambio de transform
+  // de acá y el de moverProyectilBatalla() (llamado casi al instante,
+  // dentro de un solo requestAnimationFrame) podían quedar pegados en el
+  // mismo cuadro y el proyectil aparecía directo en el destino, sin
+  // ningún recorrido visible.
+  void el.offsetWidth;
   return el;
 }
 
@@ -5898,6 +5913,7 @@ function animarMisilBatalla(actorEsPropio, objetivoId, slot, capa) {
   const origen = origenAtaqueBatalla(actorEsPropio);
   const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
   proy.style.transform += ' rotate(-90deg)';
+  void proy.offsetWidth;
   const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 90 };
   requestAnimationFrame(() => {
     moverProyectilBatalla(proy, alto.x, alto.y, 'rotate(-90deg)', 550, 'ease-out');
@@ -5928,6 +5944,7 @@ function animarBombardeoBatalla(accion) {
       const destino = centroDeRect(el.getBoundingClientRect());
       const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 180);
       proy.style.transform += ' rotate(90deg)';
+      void proy.offsetWidth;
       requestAnimationFrame(() => {
         moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(90deg)', 480, 'ease-in');
       });

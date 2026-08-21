@@ -1360,6 +1360,14 @@ class BatallaRoom:
         self.rps_choices = {}
         self.rps_resultado = None
         self.matchmaking_deadline = None
+        # Si esto es una revancha, la última jugada de la partida anterior
+        # (ej. el Bombardeo que la terminó) seguía viajando en el estado —
+        # el cliente la volvía a animar al entrar acá, y encima eso le
+        # descuadraba el contador para la primera jugada de la partida
+        # nueva (nunca se llegaba a animar porque el seq quedaba "gastado"
+        # en la jugada vieja).
+        self.action_seq = 0
+        self.last_action = None
         self.log.append("¡Piedra, papel o tijera para ver quién empieza!")
 
     def elegir_rps(self, pid: str, opcion: str) -> Tuple[bool, str]:
