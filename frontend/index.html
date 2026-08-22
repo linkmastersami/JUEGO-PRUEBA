@@ -981,6 +981,59 @@
     cursor: pointer;
   }
 
+  /* --- CAPA: PANEL DE VOLUMEN (4 canales independientes) --- */
+  #overlay-volumen {
+    position: fixed;
+    top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(10, 8, 20, 0.94);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 10002;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    padding: 20px 16px 30px;
+  }
+  #overlay-volumen.activo { opacity: 1; pointer-events: auto; }
+  #volumen-header { text-align: center; margin-bottom: 14px; }
+  #volumen-header h2 { margin: 0; font-size: 1.2rem; }
+  #volumen-lista {
+    width: 100%; max-width: 420px;
+    display: flex; flex-direction: column; gap: 14px;
+    background: var(--card); border-radius: 14px; padding: 18px;
+  }
+  .volumen-fila { display: flex; align-items: center; gap: 12px; }
+  .volumen-icono { font-size: 1.3rem; width: 28px; text-align: center; flex-shrink: 0; }
+  .volumen-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .volumen-nombre { font-size: 0.85rem; color: var(--muted); }
+  .volumen-valor { width: 42px; text-align: right; font-variant-numeric: tabular-nums; font-size: 0.85rem; color: var(--text); flex-shrink: 0; }
+  .volumen-slider {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 6px; border-radius: 4px;
+    background: #3a3f52; outline: none; cursor: pointer;
+  }
+  .volumen-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent2); border: 2px solid var(--text); cursor: pointer;
+  }
+  .volumen-slider::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent2); border: 2px solid var(--text); cursor: pointer;
+  }
+  #volumen-btn-cerrar {
+    margin-top: 18px;
+    padding: 10px 34px;
+    border-radius: 10px;
+    border: none;
+    background: #fff;
+    color: #1a1a1a;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
   /* --- CAPA: SOLICITAR AVATAR NUEVO (con cooldown de 15 días) --- */
   #overlay-solicitar {
     position: fixed;
@@ -1492,6 +1545,50 @@
   <div id="obf-contenido"></div>
 </div>
 
+<!-- Panel de volumen: 4 canales independientes (música, efectos de Batalla,
+     efectos de sonido general/Estratega, voz del tutorial). Se abre al
+     tocar el botón de parlante de arriba a la izquierda. -->
+<div id="overlay-volumen">
+  <div id="volumen-header">
+    <h2>🔊 Volumen</h2>
+  </div>
+  <div id="volumen-lista">
+    <div class="volumen-fila">
+      <span class="volumen-icono">🎵</span>
+      <div class="volumen-info">
+        <div class="volumen-nombre">Música</div>
+        <input type="range" min="0" max="100" step="1" class="volumen-slider" id="vol-musica">
+      </div>
+      <span class="volumen-valor" id="vol-musica-valor">100%</span>
+    </div>
+    <div class="volumen-fila">
+      <span class="volumen-icono">⚔️</span>
+      <div class="volumen-info">
+        <div class="volumen-nombre">Efectos de Batalla</div>
+        <input type="range" min="0" max="100" step="1" class="volumen-slider" id="vol-batalla">
+      </div>
+      <span class="volumen-valor" id="vol-batalla-valor">100%</span>
+    </div>
+    <div class="volumen-fila">
+      <span class="volumen-icono">🔔</span>
+      <div class="volumen-info">
+        <div class="volumen-nombre">Efectos de sonido</div>
+        <input type="range" min="0" max="100" step="1" class="volumen-slider" id="vol-efectos">
+      </div>
+      <span class="volumen-valor" id="vol-efectos-valor">100%</span>
+    </div>
+    <div class="volumen-fila">
+      <span class="volumen-icono">🗣️</span>
+      <div class="volumen-info">
+        <div class="volumen-nombre">Voz del tutorial</div>
+        <input type="range" min="0" max="100" step="1" class="volumen-slider" id="vol-voz">
+      </div>
+      <span class="volumen-valor" id="vol-voz-valor">100%</span>
+    </div>
+  </div>
+  <button id="volumen-btn-cerrar">Cerrar</button>
+</div>
+
 <div id="overlay-tienda">
     <div id="tienda-header">
       <div id="tienda-tabs">
@@ -1612,7 +1709,7 @@
 
 <!-- CONTENEDOR DEL JUEGO -->
 <div class="wrap" id="pantallaJuego" style="position:relative;">
-  <button id="btn-mute" title="Silenciar sonido" aria-label="Silenciar sonido"
+  <button id="btn-mute" title="Volumen" aria-label="Volumen"
     style="position:absolute; top:14px; left:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
   <h1 id="titulo-app"><span id="titulo-app-principal">LINK MASTER</span><span id="titulo-app-firma">SAMI</span></h1>
   <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
@@ -3341,69 +3438,96 @@ let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
+// --- Volumen: 4 canales independientes, cada uno persistido aparte en
+// localStorage. VOLUMEN_POR_DEFECTO es lo que trae de fábrica cualquier
+// cuenta que todavía no tocó ningún control — hoy están los 4 al máximo a
+// pedido del usuario mientras prueba y encuentra la mezcla ideal; una vez
+// que la confirme, estos 4 números son los únicos que hay que cambiar. Si
+// una persona sí mueve algún slider, esa preferencia queda guardada para
+// ella sola (no pisa el valor de fábrica de nadie más). ---
+const VOLUMEN_POR_DEFECTO = { musica: 1, batalla: 1, efectos: 1, voz: 1 };
+const CANALES_VOLUMEN = ['musica', 'batalla', 'efectos', 'voz'];
+const canalVolumen = {};
+CANALES_VOLUMEN.forEach((canal) => {
+  const guardado = localStorage.getItem('edc_vol_' + canal);
+  const valor = guardado !== null ? parseFloat(guardado) : VOLUMEN_POR_DEFECTO[canal];
+  canalVolumen[canal] = Number.isFinite(valor) ? Math.min(1, Math.max(0, valor)) : VOLUMEN_POR_DEFECTO[canal];
+});
+function guardarVolumenCanal(canal, valor) {
+  canalVolumen[canal] = valor;
+  localStorage.setItem('edc_vol_' + canal, String(valor));
+}
+
 // --- Efectos de sonido (ver la Hoja de Pistas Sonoras para qué es cada uno) ---
-const soundTachar = new Audio('tachar.mp3');
-const soundCarta = new Audio('carta.mp3');
-const soundTurno = new Audio('turno.mp3');
+// sonidoEfecto() = canal "Efectos de sonido" (interfaz general + Estratega
+// de Códigos). sonidoBatalla() = canal "Efectos de Batalla" (todo lo que
+// solo pasa dentro de una partida de Batalla de Avatares). El canal queda
+// grabado en el propio objeto Audio (audio._canal), así reproducirSonido()
+// sabe con qué volumen tocar cada uno sin tener que pasarlo aparte.
+function sonidoEfecto(archivo) { const a = new Audio(archivo); a._canal = 'efectos'; return a; }
+function sonidoBatalla(archivo) { const a = new Audio(archivo); a._canal = 'batalla'; return a; }
+
+const soundTachar = sonidoEfecto('tachar.mp3');
+const soundCarta = sonidoEfecto('carta.mp3');
+const soundTurno = sonidoEfecto('turno.mp3');
 
 // Interfaz general
-const soundUiBoton = new Audio('ui-boton.mp3');
-const soundUiError = new Audio('ui-error.mp3');
-const soundUiMensaje = new Audio('ui-mensaje.mp3');
-const soundUiJugadorEntra = new Audio('ui-jugador-entra.mp3');
-const soundUiJugadorSale = new Audio('ui-jugador-sale.mp3');
-const soundUiCerrar = new Audio('ui-cerrar.mp3');
-const soundUiLogin = new Audio('ui-login.mp3');
-const soundTransicionJuego = new Audio('transicion-juego.mp3');
-const soundTiendaAbrir = new Audio('tienda-abrir.mp3');
-const soundTiendaComprar = new Audio('tienda-comprar.mp3');
-const soundTiendaElegir = new Audio('tienda-elegir.mp3');
+const soundUiBoton = sonidoEfecto('ui-boton.mp3');
+const soundUiError = sonidoEfecto('ui-error.mp3');
+const soundUiMensaje = sonidoEfecto('ui-mensaje.mp3');
+const soundUiJugadorEntra = sonidoEfecto('ui-jugador-entra.mp3');
+const soundUiJugadorSale = sonidoEfecto('ui-jugador-sale.mp3');
+const soundUiCerrar = sonidoEfecto('ui-cerrar.mp3');
+const soundUiLogin = sonidoEfecto('ui-login.mp3');
+const soundTransicionJuego = sonidoEfecto('transicion-juego.mp3');
+const soundTiendaAbrir = sonidoEfecto('tienda-abrir.mp3');
+const soundTiendaComprar = sonidoEfecto('tienda-comprar.mp3');
+const soundTiendaElegir = sonidoEfecto('tienda-elegir.mp3');
 
 // Estratega de Códigos
-const soundFichaTomar = new Audio('ficha-tomar.mp3');
-const soundFichaRival = new Audio('ficha-rival.mp3');
-const soundPistaElegir = new Audio('pista-elegir.mp3');
-const soundPistaMover = new Audio('pista-mover.mp3');
-const soundCuentaTick = new Audio('cuenta-tick.mp3');
-const soundDesactivarCorrecto = new Audio('desactivar-correcto.mp3');
-const soundDesactivarExplota = new Audio('desactivar-explota.mp3');
-const soundDesconexionAlerta = new Audio('desconexion-alerta.mp3');
-const soundCofreRevolver = new Audio('cofre-revolver.mp3');
-const soundCofreAbrir = new Audio('cofre-abrir.mp3');
-const soundVictoriaPartida = new Audio('victoria-partida.mp3');
-const soundDerrotaPartida = new Audio('derrota-partida.mp3');
-const soundTutorialCompletado = new Audio('tutorial-completado.mp3');
+const soundFichaTomar = sonidoEfecto('ficha-tomar.mp3');
+const soundFichaRival = sonidoEfecto('ficha-rival.mp3');
+const soundPistaElegir = sonidoEfecto('pista-elegir.mp3');
+const soundPistaMover = sonidoEfecto('pista-mover.mp3');
+const soundCuentaTick = sonidoEfecto('cuenta-tick.mp3');
+const soundDesactivarCorrecto = sonidoEfecto('desactivar-correcto.mp3');
+const soundDesactivarExplota = sonidoEfecto('desactivar-explota.mp3');
+const soundDesconexionAlerta = sonidoEfecto('desconexion-alerta.mp3');
+const soundCofreRevolver = sonidoEfecto('cofre-revolver.mp3');
+const soundCofreAbrir = sonidoEfecto('cofre-abrir.mp3');
+const soundVictoriaPartida = sonidoEfecto('victoria-partida.mp3');
+const soundDerrotaPartida = sonidoEfecto('derrota-partida.mp3');
+const soundTutorialCompletado = sonidoEfecto('tutorial-completado.mp3');
 
 // Batalla de Avatares
-const soundMatchmakingEncontrado = new Audio('matchmaking-encontrado.mp3');
-const soundRpsElegir = new Audio('rps-elegir.mp3');
-const soundRpsEmpate = new Audio('rps-empate.mp3');
-const soundRpsGana = new Audio('rps-gana.mp3');
-const soundRpsPierde = new Audio('rps-pierde.mp3');
-const soundListos = new Audio('listos.mp3');
-const soundComienza = new Audio('comienza.mp3');
-const soundCartaElegir = new Audio('carta-elegir.mp3');
-const soundCartaDescartar = new Audio('carta-descartar.mp3');
-const soundBombaLanzar = new Audio('bomba-lanzar.mp3');
-const soundBombaImpacto = new Audio('bomba-impacto.mp3');
-const soundMisilLanzar = new Audio('misil-lanzar.mp3');
-const soundMisilImpacto = new Audio('misil-impacto.mp3');
-const soundBombardeoSirena = new Audio('bombardeo-sirena.mp3');
-const soundBombardeoImpacto = new Audio('bombardeo-impacto.mp3');
-const soundEscudoColocar = new Audio('escudo-colocar.mp3');
-const soundEscudoRomper = new Audio('escudo-romper.mp3');
-const soundHadaCurar = new Audio('hada-curar.mp3');
-const soundBatallaGana = new Audio('batalla-gana.mp3');
-const soundBatallaPierde = new Audio('batalla-pierde.mp3');
-const soundBatallaEmpate = new Audio('batalla-empate.mp3');
-const soundRevanchaPedida = new Audio('revancha-pedida.mp3');
-
-// --- Silenciar sonido (persistido, para no reproducir nada sin que el
-// jugador pueda apagarlo) ---
-let sonidoSilenciado = localStorage.getItem('edc_muted') === '1';
+const soundMatchmakingEncontrado = sonidoBatalla('matchmaking-encontrado.mp3');
+const soundRpsElegir = sonidoBatalla('rps-elegir.mp3');
+const soundRpsEmpate = sonidoBatalla('rps-empate.mp3');
+const soundRpsGana = sonidoBatalla('rps-gana.mp3');
+const soundRpsPierde = sonidoBatalla('rps-pierde.mp3');
+const soundListos = sonidoBatalla('listos.mp3');
+const soundComienza = sonidoBatalla('comienza.mp3');
+const soundCartaElegir = sonidoBatalla('carta-elegir.mp3');
+const soundCartaDescartar = sonidoBatalla('carta-descartar.mp3');
+const soundBombaLanzar = sonidoBatalla('bomba-lanzar.mp3');
+const soundBombaImpacto = sonidoBatalla('bomba-impacto.mp3');
+const soundMisilLanzar = sonidoBatalla('misil-lanzar.mp3');
+const soundMisilImpacto = sonidoBatalla('misil-impacto.mp3');
+const soundBombardeoSirena = sonidoBatalla('bombardeo-sirena.mp3');
+const soundBombardeoImpacto = sonidoBatalla('bombardeo-impacto.mp3');
+const soundEscudoColocar = sonidoBatalla('escudo-colocar.mp3');
+const soundEscudoRomper = sonidoBatalla('escudo-romper.mp3');
+const soundHadaCurar = sonidoBatalla('hada-curar.mp3');
+const soundBatallaGana = sonidoBatalla('batalla-gana.mp3');
+const soundBatallaPierde = sonidoBatalla('batalla-pierde.mp3');
+const soundBatallaEmpate = sonidoBatalla('batalla-empate.mp3');
+const soundRevanchaPedida = sonidoBatalla('revancha-pedida.mp3');
 
 function reproducirSonido(audio) {
-  if (sonidoSilenciado) return;
+  const canal = audio._canal || 'efectos';
+  const vol = canalVolumen[canal];
+  if (!vol || vol <= 0) return;
+  audio.volume = vol;
   audio.currentTime = 0;
   audio.play().catch(() => {});
 }
@@ -3444,16 +3568,16 @@ function desbloquearTodosLosSonidos() {
 // cachea, así que el 404 (si no tiene sonido propio) solo se paga una vez.
 const cacheNoqueoPorAvatar = {};
 function reproducirNoqueoDeAvatar(archivoAvatar) {
-  if (sonidoSilenciado) return;
+  if (canalVolumen.batalla <= 0) return;
   const clave = archivoAvatar || '__default__';
   if (cacheNoqueoPorAvatar[clave]) {
     reproducirSonido(cacheNoqueoPorAvatar[clave]);
     return;
   }
   const nombreBase = archivoAvatar ? archivoAvatar.replace(/\.[^.]+$/, '') : null;
-  const propio = nombreBase ? new Audio(`noqueo/${nombreBase}.mp3`) : null;
+  const propio = nombreBase ? sonidoBatalla(`noqueo/${nombreBase}.mp3`) : null;
   const usarDefault = () => {
-    const def = cacheNoqueoPorAvatar['__default__'] || new Audio('noqueo/default.mp3');
+    const def = cacheNoqueoPorAvatar['__default__'] || sonidoBatalla('noqueo/default.mp3');
     cacheNoqueoPorAvatar['__default__'] = def;
     cacheNoqueoPorAvatar[clave] = def;
     reproducirSonido(def);
@@ -3481,11 +3605,11 @@ function reproducirMusicaParaAvatar(archivoAvatar) {
   const src = nombreBase ? `musica/${nombreBase}.mp3` : 'musica/default.mp3';
   const arrancar = (audio) => {
     audio.loop = true;
-    audio.volume = 0.35;
+    audio.volume = canalVolumen.musica;
     const anterior = musicaActual;
     musicaActual = audio;
     if (anterior && anterior !== audio) anterior.pause();
-    if (!sonidoSilenciado) audio.play().catch(() => {});
+    if (canalVolumen.musica > 0) audio.play().catch(() => {});
   };
   const nuevo = new Audio(src);
   if (nombreBase) {
@@ -3500,18 +3624,18 @@ function reproducirMusicaParaAvatar(archivoAvatar) {
 // autoplay del navegador (no hubo ningún toque todavía), la reintenta en
 // el primer toque/click que haga la persona en la página.
 document.addEventListener('click', () => {
-  if (musicaActual && musicaActual.paused && !sonidoSilenciado) {
+  if (musicaActual && musicaActual.paused && canalVolumen.musica > 0) {
     musicaActual.play().catch(() => {});
   }
 }, true);
 
 // --- Vibración táctil (feedback háptico) ---
 // No todos los navegadores la soportan (iOS Safari no tiene
-// navigator.vibrate), así que si no existe simplemente no pasa nada. Se
-// apaga junto con el botón de silenciar sonido, para no sumar un segundo
-// interruptor solo para esto.
+// navigator.vibrate), así que si no existe simplemente no pasa nada. Va
+// atada al canal de "Efectos de sonido": si ese canal está en 0, tampoco
+// vibra (no hay un 5to control aparte solo para esto).
 function vibrar(patron) {
-  if (sonidoSilenciado) return;
+  if (canalVolumen.efectos <= 0) return;
   if (navigator.vibrate) {
     try { navigator.vibrate(patron); } catch (e) {}
   }
@@ -3583,25 +3707,64 @@ function lanzarConfeti() {
   confettiAnimId = requestAnimationFrame(frame);
 }
 
-function actualizarBotonMute() {
+// El botón de parlante ya no mutea todo con un solo toque: abre el panel
+// de los 4 controles. Su ícono sigue resumiendo el estado general (🔇 si
+// los 4 canales están en 0, 🔊 si hay al menos uno con volumen).
+function actualizarIconoVolumen() {
   const btn = document.getElementById('btn-mute');
   if (!btn) return;
-  btn.textContent = sonidoSilenciado ? '🔇' : '🔊';
-  btn.title = sonidoSilenciado ? 'Activar sonido' : 'Silenciar sonido';
+  const todoMudo = CANALES_VOLUMEN.every((c) => canalVolumen[c] <= 0);
+  btn.textContent = todoMudo ? '🔇' : '🔊';
+  btn.title = 'Volumen';
 }
 
-document.getElementById('btn-mute').onclick = () => {
-  sonidoSilenciado = !sonidoSilenciado;
-  localStorage.setItem('edc_muted', sonidoSilenciado ? '1' : '0');
-  actualizarBotonMute();
-  if (sonidoSilenciado) {
-    pararNarracionTutorial();
-    if (musicaActual) musicaActual.pause();
-  } else if (musicaActual) {
-    musicaActual.play().catch(() => {});
-  }
+function abrirPanelVolumen() {
+  CANALES_VOLUMEN.forEach((canal) => {
+    const slider = document.getElementById('vol-' + canal);
+    const valorEl = document.getElementById('vol-' + canal + '-valor');
+    const pct = Math.round(canalVolumen[canal] * 100);
+    if (slider) slider.value = pct;
+    if (valorEl) valorEl.textContent = pct + '%';
+  });
+  document.getElementById('overlay-volumen').classList.add('activo');
+}
+function cerrarPanelVolumen() {
+  document.getElementById('overlay-volumen').classList.remove('activo');
+}
+
+document.getElementById('btn-mute').onclick = abrirPanelVolumen;
+document.getElementById('volumen-btn-cerrar').onclick = () => {
+  reproducirSonido(soundUiCerrar);
+  cerrarPanelVolumen();
 };
-actualizarBotonMute();
+
+// Sonido de ejemplo para probar en vivo el canal que se está moviendo
+// (música no necesita uno: ya se escucha sonando de fondo).
+const SONIDO_DE_PRUEBA = { batalla: soundBombaImpacto, efectos: soundUiBoton };
+
+CANALES_VOLUMEN.forEach((canal) => {
+  const slider = document.getElementById('vol-' + canal);
+  if (!slider) return;
+  slider.addEventListener('input', () => {
+    const valor = parseInt(slider.value, 10) / 100;
+    const valorEl = document.getElementById('vol-' + canal + '-valor');
+    if (valorEl) valorEl.textContent = slider.value + '%';
+    guardarVolumenCanal(canal, valor);
+    actualizarIconoVolumen();
+    if (canal === 'musica' && musicaActual) {
+      musicaActual.volume = valor;
+      if (valor <= 0) musicaActual.pause();
+      else if (musicaActual.paused) musicaActual.play().catch(() => {});
+    } else if (canal === 'voz' && valor <= 0) {
+      pararNarracionTutorial();
+    }
+  });
+  slider.addEventListener('change', () => {
+    const prueba = SONIDO_DE_PRUEBA[canal];
+    if (prueba) reproducirSonido(prueba);
+  });
+});
+actualizarIconoVolumen();
 
 // --- Narración de audio del tutorial guiado (frontend/tutorial-audio/) ---
 // Un solo <audio> reutilizado para todos los clips: cambiar el .src y
@@ -3620,21 +3783,24 @@ let narracionTutorialCargada = null;
 function reproducirNarracionTutorial(archivo) {
   if (!archivo) return;
   narracionTutorialCargada = archivo;
-  if (sonidoSilenciado) return;
+  if (canalVolumen.voz <= 0) return;
   narracionTutorial.pause();
   narracionTutorial.src = archivo;
   narracionTutorial.currentTime = 0;
+  narracionTutorial.volume = canalVolumen.voz;
   narracionTutorial.play().catch(() => {});
 }
-// Pausa lo que esté sonando sin olvidar cuál era el clip (así, al salir
-// del mute o del tutorial, "repetir" todavía sabe qué volver a poner).
+// Pausa lo que esté sonando sin olvidar cuál era el clip (así, al volver a
+// subir el volumen o al salir del tutorial, "repetir" todavía sabe qué
+// volver a poner).
 function pararNarracionTutorial() {
   narracionTutorial.pause();
   narracionTutorial.currentTime = 0;
 }
 document.getElementById('tutorial-banner-repetir').onclick = () => {
-  if (!narracionTutorialCargada || sonidoSilenciado) return;
+  if (!narracionTutorialCargada || canalVolumen.voz <= 0) return;
   narracionTutorial.currentTime = 0;
+  narracionTutorial.volume = canalVolumen.voz;
   narracionTutorial.play().catch(() => {});
 };
 
