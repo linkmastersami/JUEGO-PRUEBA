@@ -2208,7 +2208,11 @@ async def ws_lobby(websocket: WebSocket, player_name: str):
     try:
         while True:
             raw = await websocket.receive_text()
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except Exception as e:
+                print(f"⚠️  Mensaje ilegible de {clean_name} en el lobby: {e}")
+                continue
             if msg.get("type") == "chat":
                 text = str(msg.get("text", "")).strip()[:300]
                 if text:
@@ -2653,7 +2657,11 @@ async def ws_espectador(websocket: WebSocket, room_code: str, viewer_name: str):
     try:
         while True:
             raw = await websocket.receive_text()
-            msg = json.loads(raw)
+            try:
+                msg = json.loads(raw)
+            except Exception as e:
+                print(f"⚠️  Mensaje ilegible de espectador {clean_name} en sala {room_code}: {e}")
+                continue
             if msg.get("type") == "ping":
                 continue
             if msg.get("type") == "chat":
