@@ -3440,12 +3440,11 @@ const MAX_RECONNECT_ATTEMPTS = 10;
 
 // --- Volumen: 4 canales independientes, cada uno persistido aparte en
 // localStorage. VOLUMEN_POR_DEFECTO es lo que trae de fábrica cualquier
-// cuenta que todavía no tocó ningún control — hoy están los 4 al máximo a
-// pedido del usuario mientras prueba y encuentra la mezcla ideal; una vez
-// que la confirme, estos 4 números son los únicos que hay que cambiar. Si
-// una persona sí mueve algún slider, esa preferencia queda guardada para
-// ella sola (no pisa el valor de fábrica de nadie más). ---
-const VOLUMEN_POR_DEFECTO = { musica: 1, batalla: 1, efectos: 1, voz: 1 };
+// cuenta que todavía no tocó ningún control — mezcla ya calibrada y
+// confirmada por el usuario. Si una persona sí mueve algún slider, esa
+// preferencia queda guardada para ella sola (no pisa el valor de fábrica
+// de nadie más). ---
+const VOLUMEN_POR_DEFECTO = { musica: 0.6, batalla: 0.3, efectos: 0.4, voz: 1 };
 const CANALES_VOLUMEN = ['musica', 'batalla', 'efectos', 'voz'];
 const canalVolumen = {};
 CANALES_VOLUMEN.forEach((canal) => {
