@@ -5488,6 +5488,94 @@ window.addEventListener('DOMContentLoaded', () => {
   restaurarSesion();
 });
 
+// ---------------------------------------------------------------------------
+// Botón "atrás" de Android (o el gesto del sistema): por defecto una SPA de
+// una sola página no tiene a dónde volver, así que cerraba la app de un
+// toque. Se engancha un "guardia" en el historial del navegador para que en
+// vez de eso navegue hacia atrás DENTRO del juego, un nivel a la vez, hasta
+// la pantalla de elegir juego — recién ahí pide confirmar antes de cerrar
+// la app de verdad, como cualquier app nativa.
+// ---------------------------------------------------------------------------
+function armarGuardiaAtras() {
+  history.pushState({ edcGuardia: true }, '');
+}
+
+// Paneles/overlays que "atrás" debería cerrar primero (como cualquier modal
+// nativo) en vez de saltar directo a navegar de pantalla. Se revisan en
+// orden y se actúa sobre el primero que esté abierto.
+const OVERLAYS_CERRABLES_CON_ATRAS = [
+  { abierto: () => chatAbierto, cerrar: () => document.getElementById('chat-cerrar').click() },
+  { abierto: () => lobbyChatAbierto, cerrar: () => document.getElementById('lobby-chat-cerrar').click() },
+  { abierto: () => document.getElementById('overlay-volumen').classList.contains('activo'), cerrar: cerrarPanelVolumen },
+  { abierto: () => document.getElementById('overlay-confirmar-compra').classList.contains('activo'), cerrar: cerrarConfirmarCompra },
+  { abierto: () => document.getElementById('overlay-ranking').classList.contains('activo'), cerrar: cerrarRanking },
+  { abierto: () => document.getElementById('overlay-solicitar').classList.contains('activo'), cerrar: cerrarSolicitarAvatar },
+  // La tienda "forzada" (elegir el primer avatar obligatorio) no se puede
+  // cerrar de ninguna forma — cerrarTienda() ya respeta eso solo, así que
+  // ni hace falta filtrarla acá aparte.
+  { abierto: () => document.getElementById('overlay-tienda').classList.contains('activo'), cerrar: cerrarTienda },
+  { abierto: () => document.getElementById('overlay-instalar').classList.contains('activo'), cerrar: () => document.getElementById('overlay-instalar').classList.remove('activo') },
+];
+
+function manejarBotonAtras() {
+  // 1) Algún panel/overlay abierto: "atrás" lo cierra primero, sin tocar
+  // la pantalla de fondo.
+  for (const o of OVERLAYS_CERRABLES_CON_ATRAS) {
+    if (o.abierto()) {
+      o.cerrar();
+      armarGuardiaAtras();
+      return;
+    }
+  }
+
+  // 2) Mirando una partida como espectador: "atrás" es lo mismo que "⬅
+  // Volver a la selección de modo".
+  if (!document.getElementById('spectator-screen').classList.contains('hidden')) {
+    volverDeEspectador();
+    armarGuardiaAtras();
+    return;
+  }
+
+  // 3) Adentro de una sala o partida (cualquiera de los dos juegos, incluido
+  // tutorial y solitario): "atrás" es lo mismo que tocar "🚪 Salir" — se
+  // toca de verdad para reusar toda su lógica (confirmaciones, aviso al
+  // servidor, etc.) sin duplicar nada.
+  const btnSalir = document.getElementById('btn-salir');
+  if (!btnSalir.classList.contains('hidden')) {
+    btnSalir.click();
+    armarGuardiaAtras();
+    return;
+  }
+
+  // 4) Eligiendo el modo (partida rápida / sala privada) de cualquiera de
+  // los dos juegos: "atrás" vuelve a elegir juego.
+  if (!document.getElementById('join-step-modo').classList.contains('hidden')) {
+    document.getElementById('btn-cambiar-juego').click();
+    armarGuardiaAtras();
+    return;
+  }
+
+  // 5) Pantalla de elegir juego: es el primer paso después de iniciar
+  // sesión, ya no hay a dónde volver adentro del juego — se confirma si de
+  // verdad quiere cerrar la app.
+  if (!document.getElementById('join-step-juego').classList.contains('hidden')) {
+    if (confirm('¿Seguro que quieres salir?')) {
+      // No se vuelve a armar la guardia: el próximo "atrás" (este mismo
+      // toque físico, si el confirm no lo consumió) ya cierra la app.
+      history.back();
+    } else {
+      armarGuardiaAtras();
+    }
+    return;
+  }
+
+  // 6) Pantalla de login: no hay nada que perder, se deja cerrar directo
+  // (no se arma guardia de nuevo).
+}
+
+armarGuardiaAtras();
+window.addEventListener('popstate', manejarBotonAtras);
+
 function queueAnimacionEvento(ev) {
   colaAnimEventos.push(ev);
   procesarColaAnimEventos();
