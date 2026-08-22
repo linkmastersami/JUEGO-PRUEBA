@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.onrender.juego_prueba_kkyv.twa",
+      "sha256_cert_fingerprints": ["DE:31:1C:83:17:04:B7:AA:86:2D:07:00:FE:32:CF:17:04:1E:AA:61:5A:9B:0B:2A:83:B7:6B:4D:A7:BB:4D:DE"]
+    }
+  }
+]
