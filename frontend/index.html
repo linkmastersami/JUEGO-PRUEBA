@@ -1370,6 +1370,26 @@
     cursor: pointer;
   }
   .chat-emoji-btn:active { background: var(--accent2); }
+
+  /* --- Reacciones flotantes de espectador en Batalla de Avatares (ver
+       mostrarReaccionFlotante): un emoji que sube desde abajo y se
+       desvanece, estilo corazones de streaming en vivo. Se agrega
+       directo a <body>, por eso el z-index alto pero por debajo de los
+       overlays de aviso/modal (9997+). --- */
+  .reaccion-flotante {
+    position: fixed;
+    bottom: 100px;
+    font-size: 2.3rem;
+    z-index: 9995;
+    pointer-events: none;
+    animation: reaccion-flotar 2.6s ease-out forwards;
+  }
+  @keyframes reaccion-flotar {
+    0% { transform: translateY(0) scale(0.4); opacity: 0; }
+    12% { transform: translateY(-16px) scale(1); opacity: 1; }
+    100% { transform: translateY(-320px) scale(1); opacity: 0; }
+  }
+
   #chat-input-row {
     display: flex;
     gap: 8px;
@@ -1999,6 +2019,25 @@
           <span class="badge" id="esp-batalla-turno-2"></span>
         </div>
       </div>
+
+      <!-- El espectador de Batalla no tiene chat de texto (ver más abajo,
+           esp-chat-input-row queda oculto para este juego): en su lugar,
+           reacciona con un emoji que flota sobre el tablero de los dos
+           jugadores y del resto de los espectadores, como los corazones
+           de un streaming en vivo (ver mostrarReaccionFlotante). -->
+      <div class="card">
+        <div class="board-title"><span>🎉 Mándale una reacción</span></div>
+        <div class="chat-emojis" id="esp-batalla-emojis" style="padding:0;">
+          <button class="chat-emoji-btn" data-emoji="👍">👍</button>
+          <button class="chat-emoji-btn" data-emoji="😂">😂</button>
+          <button class="chat-emoji-btn" data-emoji="❤️">❤️</button>
+          <button class="chat-emoji-btn" data-emoji="🔥">🔥</button>
+          <button class="chat-emoji-btn" data-emoji="😮">😮</button>
+          <button class="chat-emoji-btn" data-emoji="😢">😢</button>
+          <button class="chat-emoji-btn" data-emoji="🎉">🎉</button>
+          <button class="chat-emoji-btn" data-emoji="👏">👏</button>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -2009,7 +2048,7 @@
     <div class="card">
       <div class="board-title"><span>💬 Chat de la sala</span></div>
       <div id="esp-chat-mensajes" style="max-height:220px; overflow-y:auto;"></div>
-      <div style="display:flex; gap:8px; margin-top:8px;">
+      <div id="esp-chat-input-row" style="display:flex; gap:8px; margin-top:8px;">
         <input id="esp-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" style="flex:1;" autocomplete="off">
         <button id="esp-chat-enviar">Enviar</button>
       </div>
@@ -5282,6 +5321,10 @@ function conectarEspectador(roomCode, viewerName) {
       volverDeEspectador();
       return;
     }
+    if (msg.type === 'reaccion') {
+      mostrarReaccionFlotante(msg.emoji);
+      return;
+    }
     if (msg.type === 'state') renderEspectador(msg);
   };
 }
@@ -5307,6 +5350,11 @@ function renderEspectador(state) {
   const esBatalla = state.game === 'batalla';
   document.getElementById('esp-contenido-codigos').classList.toggle('hidden', esBatalla);
   document.getElementById('esp-contenido-batalla').classList.toggle('hidden', !esBatalla);
+  // En Batalla de Avatares el espectador no manda texto: manda emojis que
+  // flotan sobre el tablero (ver esp-batalla-emojis, más arriba en el
+  // HTML). El campo de escribir del chat queda oculto solo para este
+  // juego — sigue pudiendo LEER lo que se dicen los jugadores.
+  document.getElementById('esp-chat-input-row').classList.toggle('hidden', esBatalla);
 
   // El chat de espectador es genérico entre los dos juegos (mismo shape de
   // mensaje, mismo endpoint de WS) — se pinta acá arriba para los dos.
@@ -5404,6 +5452,33 @@ document.getElementById('esp-chat-enviar').onclick = enviarMensajeEspectador;
 document.getElementById('esp-chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeEspectador();
 });
+
+// --- Reacciones de espectador en Batalla de Avatares (sin chat de texto:
+// ver esp-chat-input-row oculto para este juego) — un emoji que flota
+// sobre el tablero para los dos jugadores y el resto de los espectadores,
+// como los corazones de un streaming en vivo. ---
+document.getElementById('esp-batalla-emojis').querySelectorAll('.chat-emoji-btn').forEach((btn) => {
+  btn.onclick = () => {
+    if (!wsEspectador || wsEspectador.readyState !== WebSocket.OPEN) return;
+    wsEspectador.send(JSON.stringify({type: 'reaccion', emoji: btn.dataset.emoji}));
+    mostrarReaccionFlotante(btn.dataset.emoji); // la propia se ve al toque, sin esperar el viaje de ida y vuelta
+  };
+});
+
+// Se llama tanto del lado del jugador (wsBatalla) como del espectador
+// (wsEspectador) al recibir type:'reaccion' — se agrega directo a <body>
+// con position:fixed para que se vea sin importar qué pantalla esté
+// activa en ese momento (jugando o mirando).
+function mostrarReaccionFlotante(emoji) {
+  if (!emoji) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const el = document.createElement('div');
+  el.className = 'reaccion-flotante';
+  el.textContent = emoji;
+  el.style.left = (12 + Math.random() * 76) + '%';
+  document.body.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
+}
 
 // --- Al cargar la página: si Supabase tiene una sesión guardada en este
 // navegador, salta directo a la selección de modo (sin pedir login de
@@ -6277,6 +6352,10 @@ async function abrirWebSocketBatalla(room, name) {
       thisSocket.close();
       const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
       conectarSala(msg.room, nombre);
+      return;
+    }
+    if (msg.type === 'reaccion') {
+      mostrarReaccionFlotante(msg.emoji);
       return;
     }
     if (msg.type === 'state') {

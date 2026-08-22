@@ -1329,6 +1329,35 @@ async def broadcast(room):
             room.spectators.pop(sid, None)
 
 
+# Emojis que un espectador de Batalla de Avatares puede mandar como
+# reacción (ver ws_espectador) — mismo set de 8 que la fila de emojis del
+# chat, así el frontend puede reusar el mismo estilo de botones.
+REACCIONES_PERMITIDAS = {"👍", "😂", "❤️", "🔥", "😮", "😢", "🎉", "👏"}
+
+
+async def broadcast_extra(room, payload: dict) -> None:
+    """Manda un mensaje suelto —que no es el estado completo de la sala—
+    a todos los conectados: jugadores (con socket propio) y espectadores.
+    Se usa para eventos efímeros que no forman parte del estado
+    persistente de la partida, como las reacciones con emoji de los
+    espectadores de Batalla de Avatares: no hace falta guardarlas ni que
+    viajen en cada broadcast() de ahí en más, solo que se vean un
+    instante apenas se mandan."""
+    text = json.dumps(payload)
+    for p in room.players:
+        if not p.connected or p.ws is None:
+            continue
+        try:
+            await p.ws.send_text(text)
+        except Exception:
+            pass
+    for sock in list(room.spectators.values()):
+        try:
+            await sock.send_text(text)
+        except Exception:
+            pass
+
+
 # =============================================================================
 # BATALLA DE AVATARES — segundo juego. Comparte servidor, cuenta, monedas,
 # avatar elegido y espacio de códigos de sala con Estratega de Códigos (ver
@@ -2654,6 +2683,7 @@ async def ws_espectador(websocket: WebSocket, room_code: str, viewer_name: str):
         room.spectators.pop(sid, None)
         return
 
+    ultima_reaccion_ts = 0.0
     try:
         while True:
             raw = await websocket.receive_text()
@@ -2669,6 +2699,17 @@ async def ws_espectador(websocket: WebSocket, room_code: str, viewer_name: str):
                 if text.strip():
                     room.add_spectator_chat_message(clean_name, text)
                     await broadcast(room)
+            elif msg.get("type") == "reaccion" and isinstance(room, BatallaRoom):
+                # Solo en Batalla de Avatares, y solo para espectadores (ver
+                # jugar_carta/etc. para los mensajes de los jugadores): en vez
+                # de un chat de texto, el espectador manda emojis que flotan
+                # sobre el tablero para los dos jugadores y el resto de los
+                # espectadores — como los corazones de un streaming en vivo.
+                emoji = str(msg.get("emoji", ""))
+                ahora = time.time()
+                if emoji in REACCIONES_PERMITIDAS and ahora - ultima_reaccion_ts >= 0.6:
+                    ultima_reaccion_ts = ahora
+                    await broadcast_extra(room, {"type": "reaccion", "emoji": emoji, "autor": clean_name})
     except WebSocketDisconnect:
         pass
     finally:
