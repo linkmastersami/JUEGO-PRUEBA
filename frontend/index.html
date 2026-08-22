@@ -1343,6 +1343,33 @@
   .chat-msg.propio { align-self: flex-end; background: var(--accent2); color: #fff; }
   .chat-msg.propio .chat-autor { color: rgba(255,255,255,0.85); }
   .chat-msg.ajeno { align-self: flex-start; background: #2a2e3d; color: var(--text); }
+  /* Fila de emojis frecuentes: al abrir el chat NO se enfoca el input (ver
+     JS), así que responder con un solo emoji no obliga a que aparezca el
+     teclado — tocar uno lo manda directo. Compartida por los dos chats
+     (de sala y global), por eso va sin prefijo #chat-/#lobby-chat-. */
+  .chat-emojis {
+    display: flex;
+    gap: 6px;
+    padding: 8px 14px 0;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .chat-emoji-btn {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 10px;
+    background: #2a2e3d;
+    border: 1px solid #3a3f52;
+    font-size: 1.25rem;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .chat-emoji-btn:active { background: var(--accent2); }
   #chat-input-row {
     display: flex;
     gap: 8px;
@@ -1678,6 +1705,16 @@
     <button id="chat-cerrar">✕</button>
   </div>
   <div id="chat-mensajes"></div>
+  <div class="chat-emojis" id="chat-emojis">
+    <button class="chat-emoji-btn" data-emoji="👍">👍</button>
+    <button class="chat-emoji-btn" data-emoji="😂">😂</button>
+    <button class="chat-emoji-btn" data-emoji="❤️">❤️</button>
+    <button class="chat-emoji-btn" data-emoji="🔥">🔥</button>
+    <button class="chat-emoji-btn" data-emoji="😮">😮</button>
+    <button class="chat-emoji-btn" data-emoji="😢">😢</button>
+    <button class="chat-emoji-btn" data-emoji="🎉">🎉</button>
+    <button class="chat-emoji-btn" data-emoji="👏">👏</button>
+  </div>
   <div id="chat-input-row">
     <input id="chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" autocomplete="off">
     <button id="chat-enviar">Enviar</button>
@@ -1702,6 +1739,16 @@
     <button id="lobby-chat-cerrar">✕</button>
   </div>
   <div id="lobby-chat-mensajes"></div>
+  <div class="chat-emojis" id="lobby-chat-emojis">
+    <button class="chat-emoji-btn" data-emoji="👍">👍</button>
+    <button class="chat-emoji-btn" data-emoji="😂">😂</button>
+    <button class="chat-emoji-btn" data-emoji="❤️">❤️</button>
+    <button class="chat-emoji-btn" data-emoji="🔥">🔥</button>
+    <button class="chat-emoji-btn" data-emoji="😮">😮</button>
+    <button class="chat-emoji-btn" data-emoji="😢">😢</button>
+    <button class="chat-emoji-btn" data-emoji="🎉">🎉</button>
+    <button class="chat-emoji-btn" data-emoji="👏">👏</button>
+  </div>
   <div id="lobby-chat-input-row">
     <input id="lobby-chat-input" type="text" placeholder="Escribe un mensaje..." maxlength="300" autocomplete="off">
     <button id="lobby-chat-enviar">Enviar</button>
@@ -5090,6 +5137,12 @@ document.getElementById('lobby-chat-enviar').onclick = enviarMensajeLobbyChat;
 document.getElementById('lobby-chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeLobbyChat();
 });
+document.getElementById('lobby-chat-emojis').querySelectorAll('.chat-emoji-btn').forEach((btn) => {
+  btn.onclick = () => {
+    document.getElementById('lobby-chat-input').value = btn.dataset.emoji;
+    enviarMensajeLobbyChat();
+  };
+});
 
 function actualizarBadgeLobbyChat() {
   const badge = document.getElementById('lobby-chat-badge');
@@ -5107,7 +5160,10 @@ document.getElementById('btn-lobby-chat').onclick = () => {
   if (lobbyChatAbierto) {
     lobbyChatNoLeidos = 0;
     actualizarBadgeLobbyChat();
-    document.getElementById('lobby-chat-input').focus();
+    // A propósito NO se enfoca el input acá: eso disparaba el teclado del
+    // celular apenas se abría el chat, tapando media pantalla aunque la
+    // persona solo quisiera leer o responder con un emoji. El teclado
+    // ahora solo aparece si toca el campo de texto a propósito.
   }
 };
 
@@ -5132,7 +5188,8 @@ document.getElementById('btn-chat').onclick = () => {
   if (chatAbierto) {
     chatNoLeidos = 0;
     actualizarBadgeChat();
-    document.getElementById('chat-input').focus();
+    // Mismo motivo que en el chat global: no forzar el teclado solo por
+    // abrir el panel (ver comentario en btn-lobby-chat).
   }
 };
 
@@ -5151,6 +5208,12 @@ function enviarMensajeChat() {
 document.getElementById('chat-enviar').onclick = enviarMensajeChat;
 document.getElementById('chat-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') enviarMensajeChat();
+});
+document.getElementById('chat-emojis').querySelectorAll('.chat-emoji-btn').forEach((btn) => {
+  btn.onclick = () => {
+    document.getElementById('chat-input').value = btn.dataset.emoji;
+    enviarMensajeChat();
+  };
 });
 
 // --- Modo espectador: ver una partida en curso sin ocupar lugar de
