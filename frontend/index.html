@@ -3628,6 +3628,20 @@ document.addEventListener('click', () => {
   }
 }, true);
 
+// Al mandar la pestaña/app a segundo plano (cambiar de app, apagar la
+// pantalla, minimizar), pausa la música y la narración del tutorial en vez
+// de dejarlas sonando de fondo sin que se vea el juego. Al volver, retoma
+// la música donde iba (si el canal sigue con volumen) — la narración no se
+// retoma sola a propósito, para no interrumpir con voz vieja de golpe.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (musicaActual) musicaActual.pause();
+    pararNarracionTutorial();
+  } else if (musicaActual && canalVolumen.musica > 0) {
+    musicaActual.play().catch(() => {});
+  }
+});
+
 // --- Vibración táctil (feedback háptico) ---
 // No todos los navegadores la soportan (iOS Safari no tiene
 // navigator.vibrate), así que si no existe simplemente no pasa nada. Va
