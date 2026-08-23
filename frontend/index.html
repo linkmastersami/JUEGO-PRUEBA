@@ -3196,6 +3196,7 @@ let itemPendienteCompra = null;
 let categoriaPendienteCompra = 'avatar';
 
 function abrirConfirmarCompra(item, categoria, esGratis) {
+    reproducirSonido(soundTiendaElegir);
     itemPendienteCompra = item;
     categoriaPendienteCompra = categoria;
     const esTablero = categoria === 'tablero';
