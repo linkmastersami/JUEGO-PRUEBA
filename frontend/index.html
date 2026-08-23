@@ -2623,13 +2623,20 @@ function cerrarCuentaRegresivaDesactivar() {
 // --- CAPA: CUENTA REGRESIVA POR DESCONEXIÓN DE UN JUGADOR (20s) ---
 let intervaloDesconexion = null;
 
-function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs) {
+// `subtitulo` es opcional porque lo que pasa si no vuelve a tiempo no es lo
+// mismo en los dos juegos: en Estratega de Códigos pierde automáticamente
+// (el valor por defecto, ver #dc-sub en el HTML); en Batalla de Avatares un
+// bot toma su lugar en vez de terminar la partida — ver los llamados desde
+// handleStateBatalla/renderEspectador, que pasan su propio texto.
+function iniciarCuentaRegresivaDesconexion(nombre, deadlineMs, subtitulo) {
   const overlay = document.getElementById('overlay-desconexion');
   const nombreEl = document.getElementById('dc-nombre');
+  const subEl = document.getElementById('dc-sub');
   const contadorEl = document.getElementById('dc-contador');
   const barra = document.getElementById('dc-barra');
 
   nombreEl.textContent = `${nombre} se desconectó`;
+  subEl.textContent = subtitulo || 'si no vuelve a tiempo, pierde automáticamente';
 
   overlay.classList.remove('activo');
   void overlay.offsetWidth;
@@ -5526,7 +5533,8 @@ function renderEspectador(state) {
   if (state.disconnect_player_id) {
     if (dcMostradoEspectador !== state.disconnect_player_id) {
       dcMostradoEspectador = state.disconnect_player_id;
-      iniciarCuentaRegresivaDesconexion(state.disconnect_player_name, state.disconnect_deadline_ms);
+      const sub = esBatalla ? 'si no vuelve a tiempo, un bot toma su lugar (esa cuenta no gana puntos)' : undefined;
+      iniciarCuentaRegresivaDesconexion(state.disconnect_player_name, state.disconnect_deadline_ms, sub);
     }
   } else if (dcMostradoEspectador !== null) {
     dcMostradoEspectador = null;
@@ -6719,7 +6727,7 @@ function salirDeBatalla() {
   const status = lastStateBatalla ? lastStateBatalla.status : null;
   const nombre = currentPlayerNameBatalla || document.getElementById('name-input').value.trim();
   if (status === 'playing') {
-    if (!confirm('Si sales ahora perderás automáticamente y tu rival gana. ¿Seguro que quieres salir?')) return;
+    if (!confirm('Si sales ahora, un bot toma tu lugar y sigue la partida — no vas a ganar puntos de esta partida pase lo que pase. ¿Seguro que quieres salir?')) return;
   } else if (status === 'waiting') {
     if (!confirm('¿Seguro que quieres salir de la sala?')) return;
   }
@@ -6793,7 +6801,10 @@ function handleStateBatalla(state) {
   if (state.disconnect_player_id) {
     if (dcMostradoBatalla !== state.disconnect_player_id) {
       dcMostradoBatalla = state.disconnect_player_id;
-      iniciarCuentaRegresivaDesconexion(state.disconnect_player_name, state.disconnect_deadline_ms);
+      iniciarCuentaRegresivaDesconexion(
+        state.disconnect_player_name, state.disconnect_deadline_ms,
+        'si no vuelve a tiempo, un bot toma su lugar (esa cuenta no gana puntos)'
+      );
     }
   } else if (dcMostradoBatalla !== null) {
     dcMostradoBatalla = null;

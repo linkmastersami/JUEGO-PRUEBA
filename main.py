@@ -1393,6 +1393,11 @@ BATALLA_CAPAS_TERRESTRES = ("campo_fuerza", "escudo")
 BATALLA_MANO_SIZE = 3
 BATALLA_PERSONAJES_INICIALES = 5
 BATALLA_MATCHMAKE_TIMEOUT = 10  # segundos de espera antes de completar con un bot
+# Tiempo de gracia por desconexión, más largo que el de Estratega de Códigos
+# (DISCONNECT_TIMEOUT, 20s): acá no se pierde la partida al agotarse, un bot
+# toma el lugar del jugador (ver BatallaRoom.leave_game), así que conviene
+# darle más margen real para reconectarse antes de que eso pase.
+BATALLA_DISCONNECT_TIMEOUT = 60
 
 # Nombres para el bot de relleno del matchmaking: tienen que sonar a
 # jugador de verdad (el usuario no debería poder distinguir a simple vista
@@ -1446,6 +1451,13 @@ class BatallaPlayer:
         self.is_bot = is_bot
         self.tablero = tablero
         self.connected = True
+        # Se pone en True cuando esta cuenta abandonó la partida (salida a
+        # propósito o desconexión sin volver a tiempo) y un bot toma su
+        # lugar — ver BatallaRoom.leave_game(). Sirve para negarle los
+        # puntos/monedas de esa partida aunque el bot que la reemplaza
+        # termine ganando (ver _revisar_victoria): no se premia a nadie por
+        # una partida que no terminó de jugar en persona.
+        self.abandono = False
         self.en_pie = BATALLA_PERSONAJES_INICIALES
         self.personajes: List[dict] = [_personaje_nuevo() for _ in range(BATALLA_PERSONAJES_INICIALES)]
         self.mano: List[str] = []
@@ -1589,10 +1601,11 @@ class BatallaRoom:
 
     def _start_disconnect_timer(self, player: "BatallaPlayer") -> None:
         self.disconnect_player_id = player.id
-        self.disconnect_deadline = time.time() + DISCONNECT_TIMEOUT
+        self.disconnect_deadline = time.time() + BATALLA_DISCONNECT_TIMEOUT
         self.disconnect_token += 1
         self.log.append(
-            f"{player.name} está desconectado: tiene {DISCONNECT_TIMEOUT}s para volver o pierde."
+            f"{player.name} está desconectado: tiene {BATALLA_DISCONNECT_TIMEOUT}s para volver "
+            f"antes de que un bot tome su lugar."
         )
         asyncio.create_task(_watch_disconnect_batalla(self.code, player.id, self.disconnect_token))
 
@@ -1855,15 +1868,25 @@ class BatallaRoom:
         return True, ""
 
     def leave_game(self, player: "BatallaPlayer") -> None:
-        """Si se va a mitad de partida pierde automáticamente (gana el
-        rival, igual de espíritu que Room.leave_game en Estratega de
-        Códigos). Si todavía se estaba esperando rival, simplemente se lo
-        saca de la sala."""
+        """Si se va a mitad de partida (a propósito, o por desconexión sin
+        volver a tiempo), un bot toma su lugar y sigue jugando la partida
+        en curso, en vez de darle la derrota instantánea al toque.
+
+        Esto cierra un abuso real: sin esto, alguien podía "regalarle" una
+        victoria gratis a otra cuenta con solo salirse apenas empieza la
+        partida, sin que el que se queda tuviera que ganar nada de verdad.
+        Con el bot de por medio, el que se queda tiene que ganarle a un
+        rival que sigue jugando en serio — y la cuenta que abandonó nunca
+        cobra puntos ni monedas de esta partida (ver _revisar_victoria),
+        ni siquiera si el bot que la reemplaza termina ganando.
+
+        Si todavía se estaba esperando rival (nadie jugó ni una carta
+        todavía), no tiene sentido meter un bot: se lo saca de la sala
+        directamente, igual que antes."""
         if self.status == "playing":
-            for p in player.personajes:
-                p["estado"] = "caido"
-            player.en_pie = 0
-            self._revisar_victoria()
+            player.is_bot = True
+            player.abandono = True
+            self.log.append(f"{player.name} abandonó la partida: un bot toma su lugar.")
         elif self.status in ("waiting", "rps"):
             self.players = [p for p in self.players if p.id != player.id]
             self.status = "waiting"
@@ -1886,7 +1909,24 @@ class BatallaRoom:
         ganador = self._rival(caidos[0])
         self.status = "finished"
         self.winner = ganador.id if ganador else None
-        if ganador:
+        if ganador and ganador.is_bot:
+            # El "ganador" es un bot: o el que puso la sala se completó con
+            # uno por Partida Rápida (nunca hubo una cuenta de verdad del
+            # otro lado, no hay a quién darle puntos), o es el bot que tomó
+            # el lugar de alguien que abandonó (ver leave_game) — en ese
+            # caso puntualmente, esa cuenta NO cobra nada aunque el bot que
+            # la reemplazó haya ganado: no se premia a nadie por una
+            # partida que no terminó de jugar en persona.
+            self.points_gained = 0
+            self.coins_gained = 0
+            if ganador.abandono:
+                self.log.append(
+                    f"El bot que reemplazó a {ganador.name} (abandonó la partida) ganó, "
+                    f"pero esa cuenta no recibe puntos ni monedas por esta partida."
+                )
+            else:
+                self.log.append("Ganó el bot. No hay puntos ni monedas de por medio.")
+        elif ganador:
             self.points_gained = 100 * ganador.en_pie
             update_player_score(ganador.name, self.points_gained, "puntos_batalla", "victorias_batalla")
             self.coins_gained = grant_coin_reward(self.coin_rewards, ganador, COIN_REWARD_OPTIONS_BATALLA)
@@ -2206,10 +2246,10 @@ async def _watch_disconnect(room_code: str, pid: str, token: int):
 
 async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> None:
     """Equivalente a _watch_disconnect, para Batalla de Avatares: espera
-    DISCONNECT_TIMEOUT y, si el jugador sigue desconectado, pierde
-    automáticamente (gana el rival) para que la partida no quede colgada
-    para siempre esperando a alguien que no vuelve."""
-    await asyncio.sleep(DISCONNECT_TIMEOUT)
+    BATALLA_DISCONNECT_TIMEOUT y, si el jugador sigue desconectado, un bot
+    toma su lugar (ver BatallaRoom.leave_game) para que la partida no quede
+    colgada para siempre esperando a alguien que no vuelve."""
+    await asyncio.sleep(BATALLA_DISCONNECT_TIMEOUT)
     room = rooms.get(room_code)
     if not isinstance(room, BatallaRoom):
         return
@@ -2220,8 +2260,10 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
         return
     if room.status != "playing":
         return
-    room.log.append(f"{player.name} no volvió a tiempo tras desconectarse.")
+    room.log.append(f"{player.name} no volvió a tiempo tras desconectarse: un bot toma su lugar.")
     room.leave_game(player)
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_batalla(room.code))
     try:
         await broadcast(room)
     except Exception:
@@ -2584,6 +2626,19 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
 
     player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower()), None)
 
+    if player is not None and player.abandono and room.status == "playing":
+        # Ya abandonó esta partida y un bot tomó su lugar (ver
+        # BatallaRoom.leave_game): no puede retomar el control a mitad de
+        # partida, eso habilitaría el mismo abuso que se quiso cerrar
+        # (irse, dejar que el bot juegue, y "volver" justo para quedarse
+        # con el crédito si conviene). Puede seguir mirando como espectador.
+        await websocket.send_text(json.dumps(
+            {"type": "redirect_spectator", "room": room_code,
+             "message": "Ya abandonaste esta partida: un bot tomó tu lugar. Puedes seguir mirándola como espectador."}
+        ))
+        await websocket.close()
+        return
+
     if player:
         player.ws = websocket
         player.connected = True
@@ -2701,6 +2756,11 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
             elif mtype == "leave":
                 room.leave_game(player)
                 player.connected = False
+                # Si justo quedó en el turno del bot que acaba de tomar su
+                # lugar (leave_game no mata a nadie, la partida sigue), hay
+                # que dispararle la jugada — nadie más lo va a hacer.
+                if room.status == "playing" and room.current_player().is_bot:
+                    asyncio.create_task(_bot_jugar_batalla(room.code))
                 _remove_online(player.name)
                 try:
                     await _broadcast_lobby()
