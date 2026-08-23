@@ -5507,6 +5507,7 @@ function conectarEspectador(roomCode, viewerName) {
   // que se está por mirar ahora.
   espectadorFinMostrado = false;
   lastActionSeqEspectador = 0;
+  lastStateEspectador = null;
   dcMostradoEspectador = null;
   document.getElementById('overlay-espectador-fin').classList.remove('activo');
   cerrarCuentaRegresivaDesconexion();
@@ -5608,6 +5609,10 @@ function mostrarFinEspectador(state) {
 }
 
 function renderEspectador(state) {
+  // Se captura ANTES de pisar lastStateEspectador: sirve más abajo para
+  // no reproducir de nuevo la animación de una jugada que ya había
+  // pasado hace rato, justo al conectarse (ver el chequeo de last_action).
+  const primerEstadoEnEstaConexion = lastStateEspectador === null;
   lastStateEspectador = state;
   const esBatalla = state.game === 'batalla';
 
@@ -5653,7 +5658,12 @@ function renderEspectador(state) {
     // animación se dispara antes, el re-render se la borra al toque.
     if (state.last_action && state.last_action.seq > lastActionSeqEspectador) {
       lastActionSeqEspectador = state.last_action.seq;
-      procesarUltimaAccionEspectadorBatalla(state.last_action);
+      // Igual que del lado del jugador: en el primer estado de esta
+      // conexión no hay que re-animar una jugada que ya pasó hace rato,
+      // solo ponerse al día con el contador.
+      if (!primerEstadoEnEstaConexion) {
+        procesarUltimaAccionEspectadorBatalla(state.last_action);
+      }
     }
     if (state.status === 'finished') mostrarFinEspectador(state);
     return;
@@ -6907,7 +6917,14 @@ function handleStateBatalla(state) {
   // que le acabamos de agregar como hijo del avatar.
   if (state.last_action && state.last_action.seq > lastActionSeqBatalla) {
     lastActionSeqBatalla = state.last_action.seq;
-    procesarUltimaAccionBatalla(state.last_action);
+    // "anterior" es null solo en el PRIMER estado que llega en esta
+    // conexión (recién entrando, o reconectando a una partida que ya
+    // tenía historial): ahí no hay que volver a animar la última jugada
+    // que ya pasó hace rato —solo ponerse al día con el contador—, o se
+    // reproducía de nuevo un impacto viejo apenas se reconectaba.
+    if (anterior) {
+      procesarUltimaAccionBatalla(state.last_action);
+    }
   }
 
   if (anterior && anterior.status !== 'finished' && state.status === 'finished') {
@@ -7665,12 +7682,14 @@ function cartaJugableBatalla(carta, you, rival) {
       return !!rival && rival.personajes.some(p => p.estado === 'pie');
     case 'hada':
       return you.personajes.some(p => p.estado === 'caido');
+    // Escudo y Dron solo valen sobre un personaje En Pie (ver
+    // objetivosValidosBatalla / jugar_carta en main.py).
     case 'escudo':
-      return you.personajes.some(p => !p.escudo);
+      return you.personajes.some(p => !p.escudo && p.estado === 'pie');
     case 'campo_fuerza':
       return you.personajes.some(p => p.escudo && !p.campo_fuerza);
     case 'dron':
-      return you.personajes.some(p => !p.dron);
+      return you.personajes.some(p => !p.dron && p.estado === 'pie');
     case 'campo_dron':
       return you.personajes.some(p => p.dron && !p.campo_dron);
     case 'bombardeo':
@@ -7731,21 +7750,23 @@ function renderAccionBatalla(you, rival, esTuTurno) {
     return;
   }
 
+  // Descartar es una acción libre (ver descartar_y_robar en main.py): se
+  // puede usar en cualquier turno, tengas o no otra jugada disponible —
+  // así que el botón queda siempre a la vista, no solo cuando ninguna
+  // carta tiene objetivo legal.
   const puedeJugar = hayJugadaLegalBatalla(you, rival);
-  cont.innerHTML = puedeJugar
-    ? `<div class="action-hint">Toca una carta de tu mano para jugarla.</div>`
-    : `
-      <div class="action-hint">Ninguna de tus cartas tiene un objetivo legal ahora mismo: descartá y robá de nuevo.</div>
-      <button class="full ghost" id="btn-descartar-batalla">🔁 Descartar cartas</button>
-    `;
-  const btnDescartar = document.getElementById('btn-descartar-batalla');
-  if (btnDescartar) {
-    btnDescartar.onclick = () => {
-      modoDescarteBatalla = true;
-      cartasParaDescartar = [];
-      renderGameBatalla(lastStateBatalla);
-    };
-  }
+  const hint = puedeJugar
+    ? 'Toca una carta de tu mano para jugarla, o descartá para cambiar hasta 3 por nuevas.'
+    : 'Ninguna de tus cartas tiene un objetivo legal ahora mismo: descartá y robá de nuevo.';
+  cont.innerHTML = `
+    <div class="action-hint">${hint}</div>
+    <button class="full ghost" id="btn-descartar-batalla">🔁 Descartar cartas</button>
+  `;
+  document.getElementById('btn-descartar-batalla').onclick = () => {
+    modoDescarteBatalla = true;
+    cartasParaDescartar = [];
+    renderGameBatalla(lastStateBatalla);
+  };
 }
 
 // Tocar afuera de un objetivo válido (o del botón de confirmar Bombardeo)
