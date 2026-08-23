@@ -5463,6 +5463,27 @@ function conectarEspectador(roomCode, viewerName) {
   document.getElementById('esp-room-code').textContent = roomCode;
   document.getElementById('esp-chat-mensajes').innerHTML = '';
 
+  // Limpieza defensiva: mientras no llegue el primer estado de ESTA
+  // conexión nueva, que no quede a la vista ni un resto visual de la
+  // partida anterior (nombres, escuadrones, historial, tableros) — nada
+  // de esto se vuelve a llenar hasta que renderEspectador() reciba el
+  // primer mensaje real de la sala nueva.
+  document.getElementById('esp-status-line').textContent = 'Conectando...';
+  document.getElementById('esp-log').innerHTML = '';
+  document.getElementById('esp-batalla-nombre-1').textContent = '—';
+  document.getElementById('esp-batalla-nombre-2').textContent = '—';
+  document.getElementById('esp-batalla-turno-1').textContent = '';
+  document.getElementById('esp-batalla-turno-2').textContent = '';
+  document.getElementById('esp-batalla-escuadron-1').innerHTML = '';
+  document.getElementById('esp-batalla-escuadron-2').innerHTML = '';
+  document.getElementById('esp-batalla-tablero-1').style.backgroundImage = '';
+  document.getElementById('esp-batalla-tablero-2').style.backgroundImage = '';
+  document.getElementById('esp-faceup-row').innerHTML = '';
+  document.getElementById('esp-player-tabs').innerHTML = '';
+  document.getElementById('esp-selected-stand').innerHTML = '';
+  document.getElementById('esp-selected-name').textContent = '—';
+  document.getElementById('esp-selected-badge').textContent = '';
+
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   wsEspectador = new WebSocket(`${proto}://${location.host}/ws/espectador/${encodeURIComponent(roomCode)}/${encodeURIComponent(viewerName)}`);
   const thisSocket = wsEspectador;
