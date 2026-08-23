@@ -5527,7 +5527,14 @@ function volverDeEspectador() {
   }
 }
 document.getElementById('esp-btn-salir').onclick = volverDeEspectador;
-document.getElementById('ef-btn-salir').onclick = volverDeEspectador;
+// El botón "Salir" del cartel de fin de partida recarga la página entera
+// en vez de volver a la selección de modo dentro de la misma SPA (como sí
+// hace esp-btn-salir arriba): una recarga completa no deja lugar a que
+// quede pegado nada de la partida que se estaba mirando, sea lo que sea
+// -mismo criterio que mostrarAlertaDesconexion(). Como este espectador
+// nunca fue jugador de esa partida, al recargar cae directo en la
+// selección de modo (buscar-partida no le encuentra ninguna propia).
+document.getElementById('ef-btn-salir').onclick = () => location.reload();
 
 // Se llama una sola vez por partida (ver espectadorFinMostrado, reseteado
 // en cada conectarEspectador nueva) apenas el estado pasa a "finished":
