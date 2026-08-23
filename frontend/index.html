@@ -1138,23 +1138,6 @@
     cursor: pointer;
   }
 
-  /* --- Reacciones de impacto simplificadas para el tablero del espectador
-       en Batalla de Avatares (ver procesarUltimaAccionEspectadorBatalla):
-       el espectador no ve el proyectil volar como el jugador, pero sí un
-       golpe de luz + sonido en el personaje afectado, en el momento justo. --- */
-  @keyframes espFlashImpacto {
-    0% { box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.9); transform: scale(1); filter: brightness(1); }
-    30% { box-shadow: 0 0 0 12px rgba(229, 57, 53, 0); transform: scale(1.18); filter: brightness(1.6); }
-    100% { box-shadow: 0 0 0 0 rgba(229, 57, 53, 0); transform: scale(1); filter: brightness(1); }
-  }
-  .esp-flash-impacto { animation: espFlashImpacto 0.6s ease-out; }
-  @keyframes espFlashCura {
-    0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.9); filter: brightness(1); }
-    30% { box-shadow: 0 0 0 12px rgba(76, 175, 80, 0); filter: brightness(1.5); }
-    100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); filter: brightness(1); }
-  }
-  .esp-flash-cura { animation: espFlashCura 0.6s ease-out; }
-
   /* --- CAPA: SE PERDIÓ LA CONEXIÓN PROPIA (ver mostrarAlertaDesconexion) --- */
   #overlay-mi-desconexion {
     position: fixed;
@@ -5519,6 +5502,7 @@ function mostrarFinEspectador(state) {
 }
 
 function renderEspectador(state) {
+  lastStateEspectador = state;
   const esBatalla = state.game === 'batalla';
   document.getElementById('esp-contenido-codigos').classList.toggle('hidden', esBatalla);
   document.getElementById('esp-contenido-batalla').classList.toggle('hidden', !esBatalla);
@@ -5544,11 +5528,11 @@ function renderEspectador(state) {
   if (esBatalla) {
     renderEspectadorBatalla(state);
     // Recién DESPUÉS de renderEspectadorBatalla: esa función reconstruye
-    // el HTML de los dos escuadrones en cada estado nuevo, así que si el
-    // golpe de luz se dispara antes, el re-render se lo borra al toque.
+    // el HTML de los dos escuadrones en cada estado nuevo, así que si la
+    // animación se dispara antes, el re-render se la borra al toque.
     if (state.last_action && state.last_action.seq > lastActionSeqEspectador) {
       lastActionSeqEspectador = state.last_action.seq;
-      procesarUltimaAccionEspectadorBatalla(state.last_action, state);
+      procesarUltimaAccionEspectadorBatalla(state.last_action);
     }
     if (state.status === 'finished') mostrarFinEspectador(state);
     return;
@@ -7655,57 +7639,198 @@ function renderEspectadorBatalla(state) {
   }
 }
 
-// Feedback de combate para el espectador de Batalla, simplificado respecto
-// al del jugador (animarBombaBatalla/animarMisilBatalla/etc. están atados
-// a "propio"/"rival" y a los elementos #batalla-escuadron-* del jugador,
-// que acá ni existen): en vez del proyectil volando por la pantalla, un
-// golpe de luz + el sonido correspondiente en el personaje afectado, en el
-// momento justo (con el mismo delay aproximado que tarda el proyectil del
-// lado del jugador, para que quede parecido).
-function elementoSlotEspectador(state, jugadorId, slot) {
-  const jugadores = state.players || [];
+// --- Espectáculo completo de combate para el espectador de Batalla ---
+// Mismo choreo visual que ve el jugador (proyectil de verdad volando por
+// la pantalla, destello de impacto, anillo de chispas del hada, etc.):
+// crearProyectilBatalla/moverProyectilBatalla/destelloImpactoBatalla ya
+// posicionan todo con coordenadas reales de pantalla (getBoundingClientRect)
+// pegadas a <body>, así que no les importa si el elemento de origen/destino
+// pertenece al jugador o al espectador — lo único que había que resolver de
+// nuevo era ESE elemento: elementoSlotBatalla/origenAtaqueBatalla del
+// jugador están atados a "propio"/"rival" (según myIdBatalla) y a
+// #batalla-mano, que acá no existen. Se arma un espejo de esas funciones
+// para el layout fijo "jugador 1 / jugador 2" del espectador — el resto
+// (marcarImpactoPendienteBatalla, renderEscuadronBatalla) ya es genérico y
+// se reusa tal cual.
+let lastStateEspectador = null;
+
+function elementoSlotEspectador(jugadorId, slot) {
+  const jugadores = (lastStateEspectador && lastStateEspectador.players) || [];
   const idx = jugadores.findIndex(p => p.id === jugadorId);
   if (idx === -1) return null;
   const cont = document.getElementById(`esp-batalla-escuadron-${idx + 1}`);
   return cont ? cont.querySelector(`.batalla-personaje[data-slot="${slot}"]`) : null;
 }
 
-function flashearPersonajeEspectador(el, clase) {
-  if (!el) return;
-  el.classList.remove('esp-flash-impacto', 'esp-flash-cura');
-  void el.offsetWidth; // fuerza el reflow para que la animación se reinicie si se repite
-  el.classList.add(clase);
+function avatarDeJugadorEspectador(jugadorId) {
+  const jugador = ((lastStateEspectador && lastStateEspectador.players) || []).find(p => p.id === jugadorId);
+  return jugador ? jugador.avatar : null;
 }
 
-function procesarUltimaAccionEspectadorBatalla(accion, state) {
+function rerenderEscuadronesEspectador() {
+  const state = lastStateEspectador;
+  if (!state) return;
+  const [p1, p2] = state.players || [];
+  if (p1) renderEscuadronBatalla('esp-batalla-escuadron-1', p1, null, null, [3, 2]);
+  if (p2) renderEscuadronBatalla('esp-batalla-escuadron-2', p2, null, null, [2, 3]);
+}
+
+// De dónde "sale" el ataque: del tablero del jugador que lo jugó (acá
+// nunca se ve la mano de nadie, a diferencia de la pantalla del jugador).
+function origenAtaqueEspectador(actorId) {
+  const jugadores = (lastStateEspectador && lastStateEspectador.players) || [];
+  const idx = jugadores.findIndex(p => p.id === actorId);
+  const cont = document.getElementById(idx === 0 ? 'esp-batalla-tablero-1' : 'esp-batalla-tablero-2');
+  if (!cont) return { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+  return centroDeRect(cont.getBoundingClientRect());
+}
+
+function flashCapaEspectador(jugadorId, slot, capa) {
+  const el = elementoSlotEspectador(jugadorId, slot);
+  const info = BATALLA_CARTAS_INFO[capa];
+  if (!el || !info) return;
+  const flash = document.createElement('div');
+  flash.className = 'batalla-flash-capa';
+  flash.textContent = info.emoji;
+  el.appendChild(flash);
+  setTimeout(() => flash.remove(), 900);
+}
+
+function hadaFxEspectador(jugadorId, slot) {
+  const el = elementoSlotEspectador(jugadorId, slot);
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const wrap = document.createElement('div');
+  wrap.className = 'batalla-hada-wrap';
+  wrap.style.left = `${rect.left - 14}px`;
+  wrap.style.top = `${rect.top - 14}px`;
+  wrap.style.width = `${rect.width + 28}px`;
+  wrap.style.height = `${rect.height + 28}px`;
+  document.body.appendChild(wrap);
+  const glow = document.createElement('div');
+  glow.className = 'batalla-hada-glow';
+  wrap.appendChild(glow);
+  ['🧚', '✨', '✨', '🧚', '✨', '✨'].forEach((c, i) => {
+    const chispa = document.createElement('div');
+    chispa.className = 'batalla-hada-chispa';
+    chispa.textContent = c;
+    chispa.style.setProperty('--ang', `${i * 60}deg`);
+    chispa.style.animationDelay = `${i * 0.03}s`;
+    wrap.appendChild(chispa);
+  });
+  setTimeout(() => wrap.remove(), 1200);
+}
+
+function animarBombaEspectador(actorId, objetivoId, slot, capa, derribado) {
+  marcarImpactoPendienteBatalla(objetivoId, slot, derribado, capa);
+  rerenderEscuadronesEspectador();
+  const el = elementoSlotEspectador(objetivoId, slot);
+  if (!el) { limpiarImpactoPendienteBatalla(objetivoId, slot); return; }
+  const destino = centroDeRect(el.getBoundingClientRect());
+  const origen = origenAtaqueEspectador(actorId);
+  const proy = crearProyectilBatalla('💣', origen.x, origen.y);
+  reproducirSonido(soundBombaLanzar);
+  requestAnimationFrame(() => {
+    moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(900deg)', 1000, 'ease-in');
+  });
+  setTimeout(() => {
+    proy.remove();
+    limpiarImpactoPendienteBatalla(objetivoId, slot);
+    rerenderEscuadronesEspectador();
+    destelloImpactoBatalla(destino.x, destino.y);
+    reproducirSonido(soundBombaImpacto);
+    if (capa) { flashCapaEspectador(objetivoId, slot, capa); reproducirSonido(soundEscudoRomper); }
+    if (derribado) reproducirNoqueoDeAvatar(avatarDeJugadorEspectador(objetivoId));
+  }, 1020);
+}
+
+function animarMisilEspectador(actorId, objetivoId, slot, capa, derribado) {
+  marcarImpactoPendienteBatalla(objetivoId, slot, derribado, capa);
+  rerenderEscuadronesEspectador();
+  const el = elementoSlotEspectador(objetivoId, slot);
+  if (!el) { limpiarImpactoPendienteBatalla(objetivoId, slot); return; }
+  const destino = centroDeRect(el.getBoundingClientRect());
+  const origen = origenAtaqueEspectador(actorId);
+  const proy = crearProyectilBatalla('🚀', origen.x, origen.y);
+  proy.style.transform += ' rotate(-90deg)';
+  void proy.offsetWidth;
+  reproducirSonido(soundMisilLanzar);
+  const alto = { x: destino.x, y: Math.min(origen.y, destino.y) - 90 };
+  requestAnimationFrame(() => {
+    moverProyectilBatalla(proy, alto.x, alto.y, 'rotate(-90deg)', 550, 'ease-out');
+  });
+  setTimeout(() => {
+    moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(90deg)', 550, 'ease-in');
+  }, 550);
+  setTimeout(() => {
+    proy.remove();
+    limpiarImpactoPendienteBatalla(objetivoId, slot);
+    rerenderEscuadronesEspectador();
+    destelloImpactoBatalla(destino.x, destino.y);
+    reproducirSonido(soundMisilImpacto);
+    if (capa) { flashCapaEspectador(objetivoId, slot, capa); reproducirSonido(soundEscudoRomper); }
+    if (derribado) reproducirNoqueoDeAvatar(avatarDeJugadorEspectador(objetivoId));
+  }, 1120);
+}
+
+function animarBombardeoEspectador(accion) {
+  const icono = document.createElement('div');
+  icono.className = 'batalla-bombardeo-icono';
+  icono.textContent = '☢️';
+  document.body.appendChild(icono);
+  reproducirSonido(soundBombardeoSirena);
+  setTimeout(() => icono.remove(), 1300);
+
+  (accion.efectos || []).forEach(efecto => {
+    marcarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot, efecto.derribado, efecto.capa);
+  });
+  rerenderEscuadronesEspectador();
+
+  (accion.efectos || []).forEach((efecto, i) => {
+    setTimeout(() => {
+      const el = elementoSlotEspectador(efecto.jugador_id, efecto.slot);
+      if (!el) { limpiarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot); return; }
+      const destino = centroDeRect(el.getBoundingClientRect());
+      const proy = crearProyectilBatalla('🚀', destino.x, destino.y - 180);
+      proy.style.transform += ' rotate(90deg)';
+      void proy.offsetWidth;
+      requestAnimationFrame(() => {
+        moverProyectilBatalla(proy, destino.x, destino.y, 'rotate(90deg)', 480, 'ease-in');
+      });
+      setTimeout(() => {
+        proy.remove();
+        limpiarImpactoPendienteBatalla(efecto.jugador_id, efecto.slot);
+        rerenderEscuadronesEspectador();
+        destelloImpactoBatalla(destino.x, destino.y);
+        reproducirSonido(soundBombardeoImpacto);
+        if (efecto.capa) { flashCapaEspectador(efecto.jugador_id, efecto.slot, efecto.capa); reproducirSonido(soundEscudoRomper); }
+        if (efecto.derribado) reproducirNoqueoDeAvatar(avatarDeJugadorEspectador(efecto.jugador_id));
+      }, 480);
+    }, 700 + i * 160);
+  });
+}
+
+function procesarUltimaAccionEspectadorBatalla(accion) {
   if (!accion || !accion.carta) return;
   switch (accion.carta) {
     case 'bomba':
+      animarBombaEspectador(accion.jugador_id, accion.objetivo_id, accion.slot, accion.capa, accion.derribado);
+      break;
     case 'misil':
-      reproducirSonido(accion.carta === 'bomba' ? soundBombaLanzar : soundMisilLanzar);
-      setTimeout(() => {
-        flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-impacto');
-        reproducirSonido(accion.capa ? soundEscudoRomper : (accion.carta === 'bomba' ? soundBombaImpacto : soundMisilImpacto));
-      }, 550);
+      animarMisilEspectador(accion.jugador_id, accion.objetivo_id, accion.slot, accion.capa, accion.derribado);
       break;
     case 'bombardeo':
-      reproducirSonido(soundBombardeoSirena);
-      setTimeout(() => {
-        (accion.efectos || []).forEach((efecto) => {
-          flashearPersonajeEspectador(elementoSlotEspectador(state, efecto.jugador_id, efecto.slot), 'esp-flash-impacto');
-        });
-        reproducirSonido(soundBombardeoImpacto);
-      }, 900);
+      animarBombardeoEspectador(accion);
       break;
     case 'hada':
-      flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-cura');
+      hadaFxEspectador(accion.objetivo_id, accion.slot);
       reproducirSonido(soundHadaCurar);
       break;
     case 'escudo':
     case 'campo_fuerza':
     case 'dron':
     case 'campo_dron':
-      flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-cura');
+      flashCapaEspectador(accion.objetivo_id, accion.slot, accion.carta);
       reproducirSonido(soundEscudoColocar);
       break;
     default:
