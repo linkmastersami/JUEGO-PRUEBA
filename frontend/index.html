@@ -1098,6 +1098,45 @@
     transition: opacity 0.35s ease;
   }
   #overlay-desconexion.activo { opacity: 1; }
+
+  /* --- CAPA: SE PERDIÓ LA CONEXIÓN PROPIA (ver mostrarAlertaDesconexion) --- */
+  #overlay-mi-desconexion {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 8, 20, 0.94);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10600; /* por encima de cualquier otro overlay: es el aviso más importante de todos */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+    padding: 20px 16px;
+  }
+  #overlay-mi-desconexion.activo { opacity: 1; pointer-events: auto; }
+  #md-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--card);
+    border-radius: 16px;
+    padding: 28px 22px;
+    text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #md-icono { font-size: 2.6rem; margin-bottom: 10px; }
+  #md-titulo { font-size: 1.15rem; font-weight: 800; margin-bottom: 8px; }
+  #md-mensaje { font-size: 0.88rem; color: var(--muted); line-height: 1.4; margin-bottom: 20px; }
+  #md-btn-aceptar {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent2);
+    color: #fff;
+    font-weight: 800;
+    font-size: 1rem;
+    cursor: pointer;
+  }
   #dc-nombre {
     font-size: 1.2rem;
     font-weight: 800;
@@ -1706,6 +1745,22 @@
     <div id="dc-sub">se desconectó en su turno · si no vuelve, pierde automáticamente</div>
     <div id="dc-contador">20</div>
     <div id="dc-barra-wrap"><div id="dc-barra"></div></div>
+</div>
+
+<!-- Se muestra cuando SE PIERDE la conexión propia y no se pudo reconectar
+     después de varios intentos (ver mostrarAlertaDesconexion) — a
+     diferencia de overlay-desconexion de arriba, que es para avisar que el
+     RIVAL se desconectó. Tocar "Aceptar" recarga la página: si todavía
+     había una partida activa para este usuario, la retoma sola (ver
+     continuarConSesion/buscar-partida); si no, deja en una pantalla
+     funcionando en vez de la app trabada. -->
+<div id="overlay-mi-desconexion">
+  <div id="md-card">
+    <div id="md-icono">📡</div>
+    <div id="md-titulo">Se perdió la conexión</div>
+    <div id="md-mensaje">No se pudo reconectar. Si tenías una partida en curso, al aceptar vamos a intentar retomarla.</div>
+    <button id="md-btn-aceptar">Aceptar</button>
+  </div>
 </div>
 
 <!-- Confeti de victoria (ver lanzarConfeti): canvas a pantalla completa,
@@ -4073,12 +4128,12 @@ async function abrirWebSocket(room, name, solo) {
     // Si la partida ya no existe para nosotros (nunca llegamos a jugar),
     // no insistimos en reconectar.
     if (!currentRoomCode || !currentPlayerName) {
-      mostrarDesconexionFinal();
+      mostrarAlertaDesconexion();
       return;
     }
 
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      mostrarDesconexionFinal();
+      mostrarAlertaDesconexion();
       return;
     }
 
@@ -4098,14 +4153,26 @@ function errEl_join() {
   return document.getElementById('join-error');
 }
 
-function mostrarDesconexionFinal() {
-  const statusLine = document.getElementById('status-line');
-  if (statusLine) statusLine.textContent = 'Conexión perdida.';
-  setTimeout(() => {
-    volverAlInicio();
-    document.getElementById('join-error').textContent = 'La conexión se interrumpió y no se pudo reconectar. Intenta entrar de nuevo.';
-  }, 1000);
+// Se llama cuando se agotaron los intentos de reconexión automática (o ni
+// siquiera había una sala propia para reintentar): en vez de dejar la
+// pantalla vieja congelada sin ningún aviso —que es lo que hacía pensar
+// que el juego se "trabó"—, un aviso bien visible con un solo botón.
+// "Aceptar" recarga la página entera: al volver a cargar, si Supabase
+// todavía tiene la sesión (normalmente sí) y si esta persona seguía
+// teniendo una partida activa en el servidor, continuarConSesion() la
+// encuentra sola vía /buscar-partida y reingresa directo — si no,
+// simplemente deja en una pantalla que funciona, en vez de la app muda.
+let alertaDesconexionMostrada = false;
+function mostrarAlertaDesconexion() {
+  if (alertaDesconexionMostrada) return;
+  alertaDesconexionMostrada = true;
+  reproducirSonido(soundDesconexionAlerta);
+  vibrar([80, 60, 80]);
+  document.getElementById('overlay-mi-desconexion').classList.add('activo');
 }
+document.getElementById('md-btn-aceptar').onclick = () => {
+  location.reload();
+};
 
 // --- Limpieza compartida al salir de una partida (o de la sala de espera),
 // sin recargar la página: cierra el socket y cualquier overlay/cuenta
@@ -6457,8 +6524,14 @@ async function abrirWebSocketBatalla(room, name) {
     if (wsBatalla !== thisSocket) return;
     if (heartbeatIntervalBatalla) { clearInterval(heartbeatIntervalBatalla); heartbeatIntervalBatalla = null; }
     if (esSalidaIntencionalBatalla) return;
-    if (!currentRoomCodeBatalla || !currentPlayerNameBatalla) return;
-    if (reconnectAttemptsBatalla >= MAX_RECONNECT_ATTEMPTS) return;
+    if (!currentRoomCodeBatalla || !currentPlayerNameBatalla) {
+      mostrarAlertaDesconexion();
+      return;
+    }
+    if (reconnectAttemptsBatalla >= MAX_RECONNECT_ATTEMPTS) {
+      mostrarAlertaDesconexion();
+      return;
+    }
     reconnectAttemptsBatalla++;
     const statusLine = document.getElementById('status-line-batalla');
     if (statusLine) statusLine.textContent = `Conexión perdida. Reconectando... (${reconnectAttemptsBatalla}/${MAX_RECONNECT_ATTEMPTS})`;
