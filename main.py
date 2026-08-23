@@ -1882,11 +1882,25 @@ class BatallaRoom:
 
         Si todavía se estaba esperando rival (nadie jugó ni una carta
         todavía), no tiene sentido meter un bot: se lo saca de la sala
-        directamente, igual que antes."""
+        directamente, igual que antes.
+
+        Excepción: si el RIVAL ya era un bot (relleno de Partida Rápida,
+        nunca hubo una segunda persona de verdad), convertir también al que
+        se va en bot dejaría la partida jugándose sola —bot contra bot,
+        para siempre, sin nadie mirando—. En ese caso se termina la
+        partida directamente, sin declarar ganador ni repartir nada
+        (el llamador se encarga de cerrar la sala, ver
+        _watch_disconnect_batalla / el mensaje "leave")."""
         if self.status == "playing":
-            player.is_bot = True
-            player.abandono = True
-            self.log.append(f"{player.name} abandonó la partida: un bot toma su lugar.")
+            rival = self._rival(player)
+            if rival is not None and rival.is_bot:
+                self.status = "finished"
+                self.winner = None
+                self.log.append(f"{player.name} abandonó contra un bot: se cierra la sala.")
+            else:
+                player.is_bot = True
+                player.abandono = True
+                self.log.append(f"{player.name} abandonó la partida: un bot toma su lugar.")
         elif self.status in ("waiting", "rps"):
             self.players = [p for p in self.players if p.id != player.id]
             self.status = "waiting"
@@ -2248,7 +2262,9 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
     """Equivalente a _watch_disconnect, para Batalla de Avatares: espera
     BATALLA_DISCONNECT_TIMEOUT y, si el jugador sigue desconectado, un bot
     toma su lugar (ver BatallaRoom.leave_game) para que la partida no quede
-    colgada para siempre esperando a alguien que no vuelve."""
+    colgada para siempre esperando a alguien que no vuelve — salvo que el
+    rival ya fuera un bot, en cuyo caso no tiene sentido seguir: se cierra
+    la sala directamente."""
     await asyncio.sleep(BATALLA_DISCONNECT_TIMEOUT)
     room = rooms.get(room_code)
     if not isinstance(room, BatallaRoom):
@@ -2260,7 +2276,7 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
         return
     if room.status != "playing":
         return
-    room.log.append(f"{player.name} no volvió a tiempo tras desconectarse: un bot toma su lugar.")
+    room.log.append(f"{player.name} no volvió a tiempo tras desconectarse.")
     room.leave_game(player)
     if room.status == "playing" and room.current_player().is_bot:
         asyncio.create_task(_bot_jugar_batalla(room.code))
@@ -2268,6 +2284,11 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
         await broadcast(room)
     except Exception:
         pass
+    # Si ya no queda ninguna persona de verdad conectada de este lado (el
+    # que se fue, y el rival ya era un bot desde antes), no hay razón para
+    # mantener la sala viva en memoria.
+    if not any(p.connected for p in room.players if not p.is_bot):
+        rooms.pop(room_code, None)
 
 
 # ---------------------------------------------------------------------------
@@ -2699,7 +2720,15 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
             await _broadcast_lobby()
         except Exception:
             pass
-        if not any(p.connected for p in room.players if not p.is_bot):
+        # Si justo se acaba de armar el plazo de gracia por desconexión
+        # (partida en curso, sin otro humano conectado del otro lado), no
+        # se borra la sala todavía: hay que darle los BATALLA_DISCONNECT_
+        # TIMEOUT segundos completos para volver antes de decidir nada —
+        # eso lo resuelve _watch_disconnect_batalla cuando se cumpla el
+        # plazo. Fuera de esa situación (nunca llegó a jugar, ya terminó,
+        # etc.) se limpia al toque como siempre.
+        esperando_reconexion = room.status == "playing" and room.disconnect_player_id is not None
+        if not esperando_reconexion and not any(p.connected for p in room.players if not p.is_bot):
             rooms.pop(room.code, None)
 
     try:

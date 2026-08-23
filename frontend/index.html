@@ -3866,15 +3866,33 @@ document.addEventListener('click', () => {
 // de dejarlas sonando de fondo sin que se vea el juego. Al volver, retoma
 // la música donde iba (si el canal sigue con volumen) — la narración no se
 // retoma sola a propósito, para no interrumpir con voz vieja de golpe.
+//
+// Si estuvo en segundo plano más de SEGUNDO_PLANO_RECARGA_MS, en vez de
+// confiar en que la conexión vieja siga sirviendo de algo (nada lo
+// garantiza: el sistema puede haberla cortado en silencio mientras tanto,
+// ver CONEXION_ZOMBI_MS) se recarga la app entera de una. Al volver a
+// cargar, si todavía había una partida activa la retoma sola (ver
+// continuarConSesion/buscar-partida); si no, arranca limpio desde el
+// menú — más simple y confiable que intentar reconectar in situ.
+let momentoOculto = null;
+const SEGUNDO_PLANO_RECARGA_MS = 10000;
+
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    momentoOculto = Date.now();
     if (musicaActual) musicaActual.pause();
     pararNarracionTutorial();
   } else {
+    const estuvoOcultoMs = momentoOculto ? Date.now() - momentoOculto : 0;
+    momentoOculto = null;
+    if (estuvoOcultoMs > SEGUNDO_PLANO_RECARGA_MS) {
+      location.reload();
+      return;
+    }
     if (musicaActual && canalVolumen.musica > 0) musicaActual.play().catch(() => {});
-    // Al volver a primer plano, no esperar al próximo ping cada 20s para
-    // enterarse de que la conexión murió mientras estaba en segundo plano
-    // (ver CONEXION_ZOMBI_MS más arriba) — se revisa ya mismo.
+    // Por si estuvo oculto un rato corto y aun así la conexión se cortó,
+    // revisa de una en vez de esperar al próximo ping cada 20s (ver
+    // CONEXION_ZOMBI_MS más arriba).
     revisarConexionZombi(ws, ultimoMensajeWs);
     revisarConexionZombi(wsBatalla, ultimoMensajeWsBatalla);
   }
