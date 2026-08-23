@@ -1398,6 +1398,12 @@ BATALLA_MATCHMAKE_TIMEOUT = 10  # segundos de espera antes de completar con un b
 # toma el lugar del jugador (ver BatallaRoom.leave_game), así que conviene
 # darle más margen real para reconectarse antes de que eso pase.
 BATALLA_DISCONNECT_TIMEOUT = 60
+# Con descartar libre (sin obligación de atacar si tenés otra jugada
+# posible), dos jugadores podrían en teoría descartar sin parar y no
+# terminar la partida nunca. Si el mazo se agota (se reparte todo y hay
+# que rebarajar el descarte) esta cantidad de veces en una misma partida,
+# se corta directo en empate — ver BatallaRoom._reponer_mano.
+BATALLA_MAZO_AGOTADO_LIMITE = 2
 
 # Nombres para el bot de relleno del matchmaking: tienen que sonar a
 # jugador de verdad (el usuario no debería poder distinguir a simple vista
@@ -1495,6 +1501,7 @@ class BatallaRoom:
         self.status = "waiting"
         self.mazo: List[str] = []
         self.descarte: List[str] = []
+        self.veces_mazo_agotado = 0
         self.turn_index = 0
         self.winner: Optional[str] = None
         self.log: List[str] = []
@@ -1571,6 +1578,7 @@ class BatallaRoom:
     def start(self, primero: Optional[str] = None) -> None:
         self.mazo = _crear_mazo_batalla()
         self.descarte = []
+        self.veces_mazo_agotado = 0
         for jugador in self.players:
             jugador.en_pie = BATALLA_PERSONAJES_INICIALES
             jugador.personajes = [_personaje_nuevo() for _ in range(BATALLA_PERSONAJES_INICIALES)]
@@ -1684,15 +1692,34 @@ class BatallaRoom:
             self.iniciar_rps()
         return True, ""
 
-    def _reponer_mano(self, jugador: BatallaPlayer) -> None:
+    def _reponer_mano(self, jugador: BatallaPlayer) -> bool:
+        """Devuelve False si la partida terminó en empate porque el mazo
+        se agotó demasiadas veces (ver BATALLA_MAZO_AGOTADO_LIMITE) — en
+        ese caso, quien llamó a esto (jugar_carta/descartar_y_robar) tiene
+        que cortar ahí mismo, sin avanzar turno ni revisar victoria."""
         while len(jugador.mano) < BATALLA_MANO_SIZE:
             if not self.mazo:
                 if not self.descarte:
                     break
+                self.veces_mazo_agotado += 1
+                if self.veces_mazo_agotado >= BATALLA_MAZO_AGOTADO_LIMITE:
+                    # Ahora que descartar es libre (sin obligación de
+                    # atacar), en teoría dos jugadores podrían descartar
+                    # sin parar y no terminar nunca — esto pone un techo
+                    # real: si el mazo se agota esta cantidad de veces en
+                    # una misma partida, termina en empate.
+                    self.status = "finished"
+                    self.winner = None
+                    self.log.append(
+                        f"El mazo se agotó {self.veces_mazo_agotado} veces sin que nadie ganara: "
+                        f"la partida termina en empate."
+                    )
+                    return False
                 self.mazo = self.descarte
                 self.descarte = []
                 random.shuffle(self.mazo)
             jugador.mano.append(self.mazo.pop())
+        return True
 
     def _slot_valido(self, jugador: BatallaPlayer, slot) -> bool:
         return isinstance(slot, int) and 0 <= slot < len(jugador.personajes)
@@ -1758,8 +1785,9 @@ class BatallaRoom:
             self.log.append(f"{cur.name} soltó un Bombardeo General sobre toda la mesa.")
 
         elif carta == "escudo":
-            if not self._slot_valido(cur, slot) or cur.personajes[slot]["escudo"]:
-                return False, "Elige un personaje tuyo que todavía no tenga Escudo."
+            if not self._slot_valido(cur, slot) or cur.personajes[slot]["escudo"] \
+                    or cur.personajes[slot]["estado"] != "pie":
+                return False, "Elige un personaje tuyo En Pie que todavía no tenga Escudo (a uno Fuera de Combate solo se lo puede curar con el Hada)."
             cur.personajes[slot]["escudo"] = True
             efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} protegió a un personaje con un Escudo.")
@@ -1775,8 +1803,9 @@ class BatallaRoom:
             self.log.append(f"{cur.name} reforzó un Escudo con un Campo de Fuerza.")
 
         elif carta == "dron":
-            if not self._slot_valido(cur, slot) or cur.personajes[slot]["dron"]:
-                return False, "Elige un personaje tuyo que todavía no tenga Dron Antiaéreo."
+            if not self._slot_valido(cur, slot) or cur.personajes[slot]["dron"] \
+                    or cur.personajes[slot]["estado"] != "pie":
+                return False, "Elige un personaje tuyo En Pie que todavía no tenga Dron Antiaéreo (a uno Fuera de Combate solo se lo puede curar con el Hada)."
             cur.personajes[slot]["dron"] = True
             efecto = {"objetivo_id": cur.id, "slot": slot}
             self.log.append(f"{cur.name} desplegó un Dron Antiaéreo.")
@@ -1817,43 +1846,24 @@ class BatallaRoom:
 
         cur.mano.remove(carta)
         self.descarte.append(carta)
-        self._reponer_mano(cur)
+        if not self._reponer_mano(cur):
+            return True, ""  # partida terminada en empate por agotar el mazo
         if not self._revisar_victoria():
             self.turn_index = 1 - self.turn_index
         return True, ""
 
-    def _carta_jugable(self, jugador: BatallaPlayer, rival: Optional[BatallaPlayer], carta: str) -> bool:
-        """¿Tiene esta carta algún objetivo legal ahora mismo? Se usa para
-        no dejar descartar mientras haya al menos una jugada real posible
-        (evita el "no ataco nunca y descarto para siempre")."""
-        if carta in ("bomba", "misil"):
-            return rival is not None and any(p["estado"] == "pie" for p in rival.personajes)
-        if carta == "hada":
-            return any(p["estado"] == "caido" for p in jugador.personajes)
-        if carta == "escudo":
-            return any(not p["escudo"] for p in jugador.personajes)
-        if carta == "campo_fuerza":
-            return any(p["escudo"] and not p["campo_fuerza"] for p in jugador.personajes)
-        if carta == "dron":
-            return any(not p["dron"] for p in jugador.personajes)
-        if carta == "campo_dron":
-            return any(p["dron"] and not p["campo_dron"] for p in jugador.personajes)
-        if carta == "bombardeo":
-            return True
-        return False
-
-    def tiene_jugada_legal(self, jugador: BatallaPlayer) -> bool:
-        rival = self._rival(jugador)
-        return any(self._carta_jugable(jugador, rival, c) for c in jugador.mano)
-
     def descartar_y_robar(self, pid: str, cartas: List[str]) -> Tuple[bool, str]:
+        """Descartar es una acción libre: se puede usar en cualquier
+        turno, tengas o no otra jugada disponible (el reglamento no
+        obliga a atacar/proteger si preferís cambiar hasta 3 cartas de tu
+        mano por nuevas del mazo)."""
         cur = self.get_player(pid)
         if cur is None or self.status != "playing" or self.current_player().id != pid:
             return False, "No es tu turno."
         if not cartas:
             return False, "Elige al menos una carta para descartar."
-        if self.tiene_jugada_legal(cur):
-            return False, "Tenés al menos una carta jugable: no podés descartar sin jugarla."
+        if len(cartas) > BATALLA_MANO_SIZE:
+            return False, "No podés descartar más cartas de las que tenés en la mano."
         restante = list(cur.mano)
         for c in cartas:
             if c not in restante:
@@ -1862,7 +1872,8 @@ class BatallaRoom:
         for c in cartas:
             cur.mano.remove(c)
             self.descarte.append(c)
-        self._reponer_mano(cur)
+        if not self._reponer_mano(cur):
+            return True, ""  # partida terminada en empate por agotar el mazo
         self.log.append(f"{cur.name} descartó {len(cartas)} carta(s) y robó de nuevo.")
         self.turn_index = 1 - self.turn_index
         return True, ""
@@ -2091,11 +2102,14 @@ def decidir_jugada_bot(room: BatallaRoom, bot: BatallaPlayer):
             return "misil", {"slot": random.choice(mejores)}
 
     # 5) Protegerse a mí mismo: Escudo -> Campo de Fuerza -> Dron -> Campo del Dron.
+    # Solo se le puede poner una capa de defensa a un personaje En Pie —
+    # a uno Fuera de Combate no (ver jugar_carta), así que hay que
+    # filtrar por estado acá también, o el bot terminaría intentando una
+    # jugada inválida y descartando de más sin necesidad.
     if "escudo" in mano:
-        desprotegidos = [i for i, p in enumerate(bot.personajes) if not p["escudo"]]
-        if desprotegidos:
-            en_pie = [i for i in desprotegidos if bot.personajes[i]["estado"] == "pie"]
-            return "escudo", {"slot": random.choice(en_pie or desprotegidos)}
+        candidatos = [i for i, p in enumerate(bot.personajes) if not p["escudo"] and p["estado"] == "pie"]
+        if candidatos:
+            return "escudo", {"slot": random.choice(candidatos)}
 
     if "campo_fuerza" in mano:
         candidatos = [i for i, p in enumerate(bot.personajes) if p["escudo"] and not p["campo_fuerza"]]
@@ -2103,10 +2117,9 @@ def decidir_jugada_bot(room: BatallaRoom, bot: BatallaPlayer):
             return "campo_fuerza", {"slot": random.choice(candidatos)}
 
     if "dron" in mano:
-        desprotegidos = [i for i, p in enumerate(bot.personajes) if not p["dron"]]
-        if desprotegidos:
-            en_pie = [i for i in desprotegidos if bot.personajes[i]["estado"] == "pie"]
-            return "dron", {"slot": random.choice(en_pie or desprotegidos)}
+        candidatos = [i for i, p in enumerate(bot.personajes) if not p["dron"] and p["estado"] == "pie"]
+        if candidatos:
+            return "dron", {"slot": random.choice(candidatos)}
 
     if "campo_dron" in mano:
         candidatos = [i for i, p in enumerate(bot.personajes) if p["dron"] and not p["campo_dron"]]

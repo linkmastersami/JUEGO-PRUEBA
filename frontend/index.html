@@ -6936,7 +6936,10 @@ function mostrarResultadoBatalla(state) {
   mostrarResultadoRonda({
     icono: empate ? '🤝' : (gane ? '🏆' : '💥'),
     titulo: empate
-      ? 'Empate: un Bombardeo General dejó a los dos escuadrones Fuera de Combate a la vez.'
+      // El motivo exacto (Bombardeo General simultáneo, o el mazo agotado
+      // dos veces) ya queda en el historial de la partida — acá va
+      // genérico para no repetir un motivo que podría no ser el correcto.
+      ? 'Empate: la partida terminó sin que nadie ganara.'
       : (gane
         ? '¡Ganaste la batalla!'
         : `Perdiste contra ${rival ? escaparHtml(rival.name) : 'tu rival'}.`),
@@ -6986,12 +6989,14 @@ function objetivosValidosBatalla(carta, you, rival) {
       return { equipo: 'rival', slots: indicesDonde(rival.personajes, p => p.estado === 'pie') };
     case 'hada':
       return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.estado === 'caido') };
+    // Escudo y Dron solo se le pueden poner a un personaje En Pie — a uno
+    // Fuera de Combate solo lo revive el Hada (ver jugar_carta en main.py).
     case 'escudo':
-      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.escudo) };
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.escudo && p.estado === 'pie') };
     case 'campo_fuerza':
       return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.escudo && !p.campo_fuerza) };
     case 'dron':
-      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.dron) };
+      return { equipo: 'propio', slots: indicesDonde(you.personajes, p => !p.dron && p.estado === 'pie') };
     case 'campo_dron':
       return { equipo: 'propio', slots: indicesDonde(you.personajes, p => p.dron && !p.campo_dron) };
     default:
