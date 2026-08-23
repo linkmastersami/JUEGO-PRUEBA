@@ -5476,6 +5476,11 @@ function cerrarWsEspectador() {
 function volverDeEspectador() {
   cerrarWsEspectador();
   document.getElementById('spectator-screen').classList.add('hidden');
+  // El overlay de "la partida terminó" es una capa fija que cubre toda la
+  // pantalla (para que se vea aunque el espectador esté mirando otra
+  // parte) — sin sacarle la clase acá se quedaba pegado arriba de lo que
+  // sea que viniera después, aunque spectator-screen ya estuviera oculta.
+  document.getElementById('overlay-espectador-fin').classList.remove('activo');
   const nombre = currentPlayerName || localStorage.getItem('edc_name') || document.getElementById('name-input').value.trim();
   if (espectadorJuego === 'batalla') {
     irASeleccionModoBatalla(nombre);
