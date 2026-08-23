@@ -1493,6 +1493,16 @@ class BatallaRoom:
         self.chat_messages: List[dict] = []
         self.chat_seq = 0
         self.spectators: Dict[str, WebSocket] = {}
+        # --- Manejo de desconexiones ---
+        # A diferencia de Estratega de Códigos (donde la cuenta regresiva
+        # solo corre si le toca el turno al jugador desconectado, porque
+        # los demás pueden seguir jugando entre ellos), acá es 1v1: apenas
+        # uno de los dos se desconecta la partida queda frenada para los
+        # dos igual, le toque a quien le toque — así que arranca la cuenta
+        # regresiva ni bien se detecta la desconexión, sin esperar el turno.
+        self.disconnect_player_id: Optional[str] = None
+        self.disconnect_deadline: Optional[float] = None
+        self.disconnect_token: int = 0
         # Piedra/Papel/Tijera para decidir quién arranca (status == "rps").
         self.rps_choices: Dict[str, str] = {}
         self.rps_resultado: Optional[dict] = None
@@ -1568,7 +1578,39 @@ class BatallaRoom:
         self.rematch_requested = {}
         self.action_seq = 0
         self.last_action = None
+        self._clear_disconnect_timer()
         self.log.append("¡La batalla ha comenzado! Que gane el mejor escuadrón.")
+
+    # --- Manejo de desconexiones (ver comentario en __init__) ---
+    def _clear_disconnect_timer(self) -> None:
+        self.disconnect_player_id = None
+        self.disconnect_deadline = None
+        self.disconnect_token += 1
+
+    def _start_disconnect_timer(self, player: "BatallaPlayer") -> None:
+        self.disconnect_player_id = player.id
+        self.disconnect_deadline = time.time() + DISCONNECT_TIMEOUT
+        self.disconnect_token += 1
+        self.log.append(
+            f"{player.name} está desconectado: tiene {DISCONNECT_TIMEOUT}s para volver o pierde."
+        )
+        asyncio.create_task(_watch_disconnect_batalla(self.code, player.id, self.disconnect_token))
+
+    def _sync_disconnect_timer(self) -> None:
+        """Revisa si alguno de los dos jugadores está desconectado y hay que
+        arrancarle (o pararle) la cuenta regresiva. Se llama tanto al
+        cambiar el estado de conexión de un jugador como al pasar el
+        turno, para no perderse ningún cambio."""
+        if self.status != "playing" or len(self.players) < 2:
+            if self.disconnect_player_id is not None:
+                self._clear_disconnect_timer()
+            return
+        desconectado = next((p for p in self.players if not p.connected and not p.is_bot), None)
+        if desconectado is None:
+            if self.disconnect_player_id is not None:
+                self._clear_disconnect_timer()
+        elif self.disconnect_player_id != desconectado.id:
+            self._start_disconnect_timer(desconectado)
 
     def iniciar_rps(self) -> None:
         """Antes de empezar (o de una revancha) se juega piedra/papel/
@@ -1884,6 +1926,8 @@ class BatallaRoom:
                 "rival": bool(rival and self.rematch_requested.get(rival.id, False)),
             }
 
+        disc_player = self.get_player(self.disconnect_player_id) if self.disconnect_player_id else None
+
         return {
             "type": "state",
             "game": "batalla",
@@ -1911,6 +1955,9 @@ class BatallaRoom:
             "rps_resultado": rps_resultado,
             "rematch": rematch,
             "last_action": self.last_action,
+            "disconnect_player_id": self.disconnect_player_id,
+            "disconnect_player_name": disc_player.name if disc_player else None,
+            "disconnect_deadline_ms": int(self.disconnect_deadline * 1000) if self.disconnect_deadline else None,
         }
 
     def spectator_state_for(self) -> dict:
@@ -2151,6 +2198,30 @@ async def _watch_disconnect(room_code: str, pid: str, token: int):
     if room.status != "playing":
         return
     room.eliminate_disconnected(player)
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+
+
+async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> None:
+    """Equivalente a _watch_disconnect, para Batalla de Avatares: espera
+    DISCONNECT_TIMEOUT y, si el jugador sigue desconectado, pierde
+    automáticamente (gana el rival) para que la partida no quede colgada
+    para siempre esperando a alguien que no vuelve."""
+    await asyncio.sleep(DISCONNECT_TIMEOUT)
+    room = rooms.get(room_code)
+    if not isinstance(room, BatallaRoom):
+        return
+    if room.disconnect_token != token or room.disconnect_player_id != pid:
+        return
+    player = room.get_player(pid)
+    if player is None or player.connected:
+        return
+    if room.status != "playing":
+        return
+    room.log.append(f"{player.name} no volvió a tiempo tras desconectarse.")
+    room.leave_game(player)
     try:
         await broadcast(room)
     except Exception:
@@ -2516,6 +2587,7 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
     if player:
         player.ws = websocket
         player.connected = True
+        room._sync_disconnect_timer()
         room.log.append(f"{player.name} se reconectó a la partida.")
         await broadcast(room)
     else:
@@ -2555,6 +2627,7 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
 
     async def _cleanup_batalla():
         player.connected = False
+        room._sync_disconnect_timer()
         try:
             await broadcast(room)
         except Exception:
