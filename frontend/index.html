@@ -3643,6 +3643,35 @@ let reconnectTimeout = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 
+// --- Detección de conexión "zombi" ---
+// Cuando el celular manda la pestaña a segundo plano un rato largo (se
+// bloquea la pantalla, se cambia de app), el sistema operativo puede
+// cortar la conexión de red sin que el navegador se entere al toque: el
+// WebSocket se queda con readyState "abierto" para siempre aunque del otro
+// lado ya no haya nadie, y ws.send() no tira ningún error visible. Sin
+// esto, al volver a la app "parece" que sigue todo bien (nada avisa que
+// se cortó) hasta que se intenta hacer algo de verdad y la respuesta nunca
+// llega — quedando trabado, sin ningún mensaje de qué pasó.
+//
+// La solución: guardar cuándo llegó el último mensaje del servidor
+// (cualquiera, el "pong" del heartbeat cuenta) y, cada vez que se manda un
+// ping o que la app vuelve a primer plano, revisar cuánto hace que no
+// llega nada — si pasó demasiado, se da la conexión por muerta de una y se
+// cierra el socket a propósito. Eso dispara la reconexión automática que
+// ya existe (ver abrirWebSocket/abrirWebSocketBatalla), y si esos
+// reintentos tampoco funcionan, recién ahí sale el aviso de "se perdió la
+// conexión" — en vez de quedarse trabado sin decir nada.
+const CONEXION_ZOMBI_MS = 30000;
+let ultimoMensajeWs = 0;
+let ultimoMensajeWsBatalla = 0;
+
+function revisarConexionZombi(socket, ultimoMensajeTs) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
+  if (ultimoMensajeTs && Date.now() - ultimoMensajeTs > CONEXION_ZOMBI_MS) {
+    try { socket.close(); } catch (e) {}
+  }
+}
+
 // --- Volumen: 4 canales independientes, cada uno persistido aparte en
 // localStorage. VOLUMEN_POR_DEFECTO es lo que trae de fábrica cualquier
 // cuenta que todavía no tocó ningún control — mezcla ya calibrada y
@@ -3841,8 +3870,13 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (musicaActual) musicaActual.pause();
     pararNarracionTutorial();
-  } else if (musicaActual && canalVolumen.musica > 0) {
-    musicaActual.play().catch(() => {});
+  } else {
+    if (musicaActual && canalVolumen.musica > 0) musicaActual.play().catch(() => {});
+    // Al volver a primer plano, no esperar al próximo ping cada 20s para
+    // enterarse de que la conexión murió mientras estaba en segundo plano
+    // (ver CONEXION_ZOMBI_MS más arriba) — se revisa ya mismo.
+    revisarConexionZombi(ws, ultimoMensajeWs);
+    revisarConexionZombi(wsBatalla, ultimoMensajeWsBatalla);
   }
 });
 
@@ -4112,10 +4146,12 @@ function conectarSala(room, name, solo = false) {
 
 function iniciarHeartbeat() {
   detenerHeartbeat();
+  ultimoMensajeWs = Date.now();
   heartbeatInterval = setInterval(() => {
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({type: 'ping'})); } catch (e) {}
     }
+    revisarConexionZombi(ws, ultimoMensajeWs);
   }, 20000);
 }
 
@@ -4153,7 +4189,9 @@ async function abrirWebSocket(room, name, solo) {
 
   ws.onmessage = (event) => {
     if (ws !== thisSocket) return; // mensaje de una conexión vieja ya descartada
+    ultimoMensajeWs = Date.now(); // cualquier mensaje (hasta el "pong") prueba que sigue viva
     const msg = JSON.parse(event.data);
+    if (msg.type === 'pong') return;
     if (msg.type === 'error') {
       errEl_join().textContent = msg.message;
       esSalidaIntencional = true;
@@ -6647,16 +6685,20 @@ async function abrirWebSocketBatalla(room, name) {
   wsBatalla.onopen = () => {
     if (wsBatalla !== thisSocket) return;
     reconnectAttemptsBatalla = 0;
+    ultimoMensajeWsBatalla = Date.now();
     heartbeatIntervalBatalla = setInterval(() => {
       if (wsBatalla && wsBatalla.readyState === WebSocket.OPEN) {
         try { wsBatalla.send(JSON.stringify({type: 'ping'})); } catch (e) {}
       }
+      revisarConexionZombi(wsBatalla, ultimoMensajeWsBatalla);
     }, 20000);
   };
 
   wsBatalla.onmessage = (event) => {
     if (wsBatalla !== thisSocket) return;
+    ultimoMensajeWsBatalla = Date.now(); // cualquier mensaje (hasta el "pong") prueba que sigue viva
     const msg = JSON.parse(event.data);
+    if (msg.type === 'pong') return;
     if (msg.type === 'error') {
       document.getElementById('join-error').textContent = msg.message;
       esSalidaIntencionalBatalla = true;

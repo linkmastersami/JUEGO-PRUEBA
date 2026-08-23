@@ -2490,8 +2490,15 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
                 continue
 
             if mtype == "ping":
-                # Solo mantiene viva la conexión (heartbeat desde el celular);
-                # no requiere ninguna acción de juego.
+                # Mantiene viva la conexión (heartbeat desde el celular) y le
+                # confirma al cliente que el servidor sigue del otro lado —
+                # sin esto, el cliente no tiene forma de distinguir "está
+                # todo tranquilo, nadie hizo nada" de "la conexión murió en
+                # silencio" (ver CONEXION_ZOMBI_MS en el frontend).
+                try:
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                except Exception:
+                    pass
                 continue
 
             elif mtype == "start" and room.status == "waiting":
@@ -2706,6 +2713,13 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
                 continue
 
             if mtype == "ping":
+                # Ver el comentario equivalente en ws_endpoint: sin la
+                # respuesta, el cliente no puede distinguir una partida
+                # tranquila de una conexión muerta en silencio.
+                try:
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                except Exception:
+                    pass
                 continue
 
             elif mtype == "elegir_rps" and room.status == "rps":
