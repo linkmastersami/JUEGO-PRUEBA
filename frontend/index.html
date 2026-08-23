@@ -1099,6 +1099,62 @@
   }
   #overlay-desconexion.activo { opacity: 1; }
 
+  /* --- CAPA: FIN DE PARTIDA PARA EL ESPECTADOR --- */
+  #overlay-espectador-fin {
+    position: fixed;
+    inset: 0;
+    background: rgba(10, 8, 20, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9993;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    padding: 20px 16px;
+  }
+  #overlay-espectador-fin.activo { opacity: 1; pointer-events: auto; }
+  #ef-card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--card);
+    border-radius: 16px;
+    padding: 28px 22px;
+    text-align: center;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #ef-icono { font-size: 2.6rem; margin-bottom: 10px; }
+  #ef-titulo { font-size: 1.15rem; font-weight: 800; margin-bottom: 6px; }
+  #ef-detalle { font-size: 0.95rem; color: var(--muted); margin-bottom: 20px; }
+  #ef-btn-salir {
+    width: 100%;
+    padding: 12px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent2);
+    color: #fff;
+    font-weight: 800;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+
+  /* --- Reacciones de impacto simplificadas para el tablero del espectador
+       en Batalla de Avatares (ver procesarUltimaAccionEspectadorBatalla):
+       el espectador no ve el proyectil volar como el jugador, pero sí un
+       golpe de luz + sonido en el personaje afectado, en el momento justo. --- */
+  @keyframes espFlashImpacto {
+    0% { box-shadow: 0 0 0 0 rgba(229, 57, 53, 0.9); transform: scale(1); filter: brightness(1); }
+    30% { box-shadow: 0 0 0 12px rgba(229, 57, 53, 0); transform: scale(1.18); filter: brightness(1.6); }
+    100% { box-shadow: 0 0 0 0 rgba(229, 57, 53, 0); transform: scale(1); filter: brightness(1); }
+  }
+  .esp-flash-impacto { animation: espFlashImpacto 0.6s ease-out; }
+  @keyframes espFlashCura {
+    0% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.9); filter: brightness(1); }
+    30% { box-shadow: 0 0 0 12px rgba(76, 175, 80, 0); filter: brightness(1.5); }
+    100% { box-shadow: 0 0 0 0 rgba(76, 175, 80, 0); filter: brightness(1); }
+  }
+  .esp-flash-cura { animation: espFlashCura 0.6s ease-out; }
+
   /* --- CAPA: SE PERDIÓ LA CONEXIÓN PROPIA (ver mostrarAlertaDesconexion) --- */
   #overlay-mi-desconexion {
     position: fixed;
@@ -1745,6 +1801,18 @@
     <div id="dc-sub">se desconectó en su turno · si no vuelve, pierde automáticamente</div>
     <div id="dc-contador">20</div>
     <div id="dc-barra-wrap"><div id="dc-barra"></div></div>
+</div>
+
+<!-- Se muestra al espectador cuando la partida que está mirando termina —
+     antes no había ningún aviso claro de que se acabó ni cómo salir, solo
+     un texto chico en el status-line que era fácil pasar por alto. -->
+<div id="overlay-espectador-fin">
+  <div id="ef-card">
+    <div id="ef-icono">🏁</div>
+    <div id="ef-titulo">La partida terminó</div>
+    <div id="ef-detalle"></div>
+    <button id="ef-btn-salir">🚪 Salir</button>
+  </div>
 </div>
 
 <!-- Se muestra cuando SE PIERDE la conexión propia y no se pudo reconectar
@@ -5327,6 +5395,8 @@ document.getElementById('chat-emojis').querySelectorAll('.chat-emoji-btn').forEa
 // jugador ni ver ningún código. ---
 let wsEspectador = null;
 let espectadorPlayerId = null;
+let espectadorFinMostrado = false;
+let lastActionSeqEspectador = 0;
 
 async function cargarSalasEnCurso() {
   const cont = document.getElementById('salas-en-curso-lista');
@@ -5357,6 +5427,16 @@ async function cargarSalasEnCurso() {
 }
 document.getElementById('btn-refrescar-salas').onclick = cargarSalasEnCurso;
 
+// La lista solo se pedía al llegar a la pantalla de elegir modo (o al
+// tocar "Actualizar" a mano): si alguien arrancaba una partida mientras
+// ya estabas parado ahí mirando la lista, no aparecía hasta que la
+// refrescaras vos mismo. Ahora se revisa sola cada 8s mientras esa
+// pantalla esté a la vista (el resto del tiempo no hace nada).
+setInterval(() => {
+  const pantallaModo = document.getElementById('join-step-modo');
+  if (pantallaModo && !pantallaModo.classList.contains('hidden')) cargarSalasEnCurso();
+}, 8000);
+
 let espectadorJuego = 'codigos';
 function verComoEspectador(code, juego) {
   const nombre = (currentPlayerName || document.getElementById('name-input').value.trim() || localStorage.getItem('edc_name') || 'Espectador');
@@ -5368,6 +5448,14 @@ function conectarEspectador(roomCode, viewerName) {
   cerrarWsEspectador();
   cerrarLobby();
   espectadorPlayerId = null;
+  // Cada conexión nueva arranca de cero: sin esto, si la partida anterior
+  // había terminado, el aviso de "la partida terminó" (o el conteo de
+  // jugadas ya animadas de Batalla) seguía marcado como "ya mostrado" y
+  // se quedaba pegado del lado de la partida vieja en vez de reflejar la
+  // que se está por mirar ahora.
+  espectadorFinMostrado = false;
+  lastActionSeqEspectador = 0;
+  document.getElementById('overlay-espectador-fin').classList.remove('activo');
   document.getElementById('join-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
   document.getElementById('game-screen').classList.add('hidden');
@@ -5413,6 +5501,22 @@ function volverDeEspectador() {
   }
 }
 document.getElementById('esp-btn-salir').onclick = volverDeEspectador;
+document.getElementById('ef-btn-salir').onclick = volverDeEspectador;
+
+// Se llama una sola vez por partida (ver espectadorFinMostrado, reseteado
+// en cada conectarEspectador nueva) apenas el estado pasa a "finished":
+// antes el único aviso era un texto chico en el status-line, muy fácil de
+// no notar, y no había ningún botón para salir de ahí.
+function mostrarFinEspectador(state) {
+  if (espectadorFinMostrado) return;
+  espectadorFinMostrado = true;
+  const jugadores = state.players || [];
+  const ganador = jugadores.find(p => p.id === state.winner);
+  document.getElementById('ef-detalle').textContent = ganador
+    ? `🏆 Ganó ${ganador.name}`
+    : '🤝 Terminó sin ganador (empate).';
+  document.getElementById('overlay-espectador-fin').classList.add('activo');
+}
 
 function renderEspectador(state) {
   const esBatalla = state.game === 'batalla';
@@ -5439,8 +5543,18 @@ function renderEspectador(state) {
 
   if (esBatalla) {
     renderEspectadorBatalla(state);
+    // Recién DESPUÉS de renderEspectadorBatalla: esa función reconstruye
+    // el HTML de los dos escuadrones en cada estado nuevo, así que si el
+    // golpe de luz se dispara antes, el re-render se lo borra al toque.
+    if (state.last_action && state.last_action.seq > lastActionSeqEspectador) {
+      lastActionSeqEspectador = state.last_action.seq;
+      procesarUltimaAccionEspectadorBatalla(state.last_action, state);
+    }
+    if (state.status === 'finished') mostrarFinEspectador(state);
     return;
   }
+
+  if (state.status === 'finished') mostrarFinEspectador(state);
 
   document.getElementById('esp-deck-badge').textContent = `Mazo: ${state.deck_remaining ?? '--'}`;
 
@@ -7538,6 +7652,64 @@ function renderEspectadorBatalla(state) {
     document.getElementById('esp-batalla-turno-2').textContent = state.current_turn === p2.id ? 'SU TURNO' : '';
     renderEscuadronBatalla('esp-batalla-escuadron-2', p2, null, null, [2, 3]);
     aplicarFondoTableroBatalla('esp-batalla-tablero-2', p2);
+  }
+}
+
+// Feedback de combate para el espectador de Batalla, simplificado respecto
+// al del jugador (animarBombaBatalla/animarMisilBatalla/etc. están atados
+// a "propio"/"rival" y a los elementos #batalla-escuadron-* del jugador,
+// que acá ni existen): en vez del proyectil volando por la pantalla, un
+// golpe de luz + el sonido correspondiente en el personaje afectado, en el
+// momento justo (con el mismo delay aproximado que tarda el proyectil del
+// lado del jugador, para que quede parecido).
+function elementoSlotEspectador(state, jugadorId, slot) {
+  const jugadores = state.players || [];
+  const idx = jugadores.findIndex(p => p.id === jugadorId);
+  if (idx === -1) return null;
+  const cont = document.getElementById(`esp-batalla-escuadron-${idx + 1}`);
+  return cont ? cont.querySelector(`.batalla-personaje[data-slot="${slot}"]`) : null;
+}
+
+function flashearPersonajeEspectador(el, clase) {
+  if (!el) return;
+  el.classList.remove('esp-flash-impacto', 'esp-flash-cura');
+  void el.offsetWidth; // fuerza el reflow para que la animación se reinicie si se repite
+  el.classList.add(clase);
+}
+
+function procesarUltimaAccionEspectadorBatalla(accion, state) {
+  if (!accion || !accion.carta) return;
+  switch (accion.carta) {
+    case 'bomba':
+    case 'misil':
+      reproducirSonido(accion.carta === 'bomba' ? soundBombaLanzar : soundMisilLanzar);
+      setTimeout(() => {
+        flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-impacto');
+        reproducirSonido(accion.capa ? soundEscudoRomper : (accion.carta === 'bomba' ? soundBombaImpacto : soundMisilImpacto));
+      }, 550);
+      break;
+    case 'bombardeo':
+      reproducirSonido(soundBombardeoSirena);
+      setTimeout(() => {
+        (accion.efectos || []).forEach((efecto) => {
+          flashearPersonajeEspectador(elementoSlotEspectador(state, efecto.jugador_id, efecto.slot), 'esp-flash-impacto');
+        });
+        reproducirSonido(soundBombardeoImpacto);
+      }, 900);
+      break;
+    case 'hada':
+      flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-cura');
+      reproducirSonido(soundHadaCurar);
+      break;
+    case 'escudo':
+    case 'campo_fuerza':
+    case 'dron':
+    case 'campo_dron':
+      flashearPersonajeEspectador(elementoSlotEspectador(state, accion.objetivo_id, accion.slot), 'esp-flash-cura');
+      reproducirSonido(soundEscudoColocar);
+      break;
+    default:
+      break;
   }
 }
 
