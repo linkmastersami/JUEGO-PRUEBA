@@ -90,6 +90,15 @@
   button:disabled { background: #444; color: #999; cursor: not-allowed; opacity: 0.6; }
   button.secondary { background: var(--accent2); color: #fff; }
   button.ghost { background: #2a2e3d; color: var(--text); border: 1px solid #3a3f52; }
+  /* Recuadro parpadeante del botón de Tutorial: solo mientras la cuenta
+     todavía no reclamó el bono de 150 monedas por completarlo la primera
+     vez (ver actualizarParpadeoTutorial) — deja de aplicarse para siempre
+     apenas se reclama. */
+  @keyframes parpadeoTutorialBorde {
+    0%, 100% { border-color: var(--accent2); box-shadow: 0 0 0 0 rgba(255,183,3,0); }
+    50% { border-color: var(--accent); box-shadow: 0 0 12px 2px rgba(255,183,3,0.65); }
+  }
+  #btn-tutorial.tutorial-parpadeo { animation: parpadeoTutorialBorde 1.2s ease-in-out infinite; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; }
   .hidden { display: none !important; }
   .board-title { font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;}
@@ -2178,12 +2187,12 @@
           — o practica sin rivales —
         </div>
 
-        <button class="full ghost" id="btn-solo" style="border-color: var(--accent);">
+        <button class="full" id="btn-solo" style="background: var(--good);">
           🎯 Juego en Solitario <span style="opacity:0.7;">(puntos a la mitad)</span>
         </button>
 
         <button class="full ghost" id="btn-tutorial" style="border-color: var(--accent2); margin-top: 10px;">
-          🎓 Tutorial guiado <span style="opacity:0.7;">(sin puntos ni monedas)</span>
+          🎓 Tutorial guiado <span style="opacity:0.7;">(150 monedas de regalo la primera vez)</span>
         </button>
       </div>
 
@@ -2982,6 +2991,12 @@ let monedasActuales = 0;
 let puntosActualesBatalla = 0;
 let rangoActualCodigos = 'Novato en Desactivación';
 let rangoActualBatalla = 'Novato en Desactivación';
+// Bono único de 150 monedas por completar el tutorial guiado (ver
+// reclamarBonoTutorial/actualizarParpadeoTutorial). Se conoce recién con
+// la respuesta de /perfil — hasta entonces el botón simplemente no tiene
+// la clase de parpadeo puesta (ver HTML), así que no hace falta un valor
+// "no sé todavía" acá aparte.
+let tutorialBonoReclamado = false;
 
 // ---------------------------------------------------------------------------
 // LOGIN / REGISTRO CON SUPABASE
@@ -3207,6 +3222,8 @@ async function actualizarPerfilHUD(name) {
         rangoActualBatalla = data.rango_batalla || 'Novato en Desactivación';
         let monedasAnteriores = monedasActuales;
         monedasActuales = data.monedas || 0;
+        tutorialBonoReclamado = !!data.tutorial_bono_reclamado;
+        actualizarParpadeoTutorial();
         document.getElementById("uiRango").innerText = juegoElegido === 'batalla' ? rangoActualBatalla : rangoActualCodigos;
         const avatarImg = document.getElementById("uiAvatarImg");
         if (data.avatar_actual) {
@@ -3230,6 +3247,35 @@ async function actualizarPerfilHUD(name) {
     } catch (e) {
         document.getElementById("uiRango").innerText = "Novato en Desactivación";
     }
+}
+
+// Prende/apaga el recuadro parpadeante del botón de Tutorial según
+// tutorialBonoReclamado — se llama cada vez que ese valor puede haber
+// cambiado (al cargar el perfil, y al reclamar el bono recién completado).
+function actualizarParpadeoTutorial() {
+    const btn = document.getElementById('btn-tutorial');
+    if (btn) btn.classList.toggle('tutorial-parpadeo', !tutorialBonoReclamado);
+}
+
+// Avisa al backend que se completó el tutorial guiado (ver doTutorialFinish).
+// Si es la primera vez, /tutorial/completar da 150 monedas y las acredita
+// ya mismo en Supabase; si ya se había reclamado antes, no hace nada (no es
+// un error: esto se llama siempre que se termina el tutorial, no solo la
+// primera vez). El aviso al jugador ya salió en el propio cartel de "tutorial
+// completado" (ver doTutorialFinish) — acá solo se refleja en el HUD
+// (monedas) y se apaga el parpadeo del botón para siempre.
+async function reclamarBonoTutorial() {
+    if (tutorialBonoReclamado) return; // ya se sabe reclamado: ni llama al backend
+    try {
+        const headers = await authHeader();
+        const resp = await fetch('/tutorial/completar', { method: 'POST', headers });
+        const data = await resp.json();
+        if (!data.ok || data.ya_reclamado) return;
+        tutorialBonoReclamado = true;
+        actualizarParpadeoTutorial();
+        const nombre = tutorialPlayerName || document.getElementById('name-input').value;
+        if (nombre) actualizarPerfilHUD(nombre);
+    } catch (e) { /* si falla, el botón sigue parpadeando y se reintenta la próxima vez que se complete */ }
 }
 
 // ---------------------------------------------------------------------------
@@ -5518,7 +5564,7 @@ function iniciarTutorial() {
   tutorialFaceup = [];
   tutorialClues = [];
   tutorialCrossRequired = [];
-  tutorialLogLines = [`Comienza el tutorial guiado para ${name}. Esta partida es de práctica: no otorga puntos ni monedas.`];
+  tutorialLogLines = [`Comienza el tutorial guiado para ${name}. Esta partida es de práctica: no otorga puntos.`];
 
   cerrarLobby();
   currentRoomCode = null;
@@ -5742,9 +5788,16 @@ function prepararTablaSolucionTutorial() {
 
 function doTutorialFinish() {
   tutorialPhaseWaiting = 'done';
-  tutorialLogLines.push(`${tutorialPlayerName} gritó DESACTIVAR y acertó su código. Tutorial completado: no se otorgan puntos ni monedas.`);
+  // El bono de 150 monedas se pide/confirma de verdad contra el backend
+  // recién en el "finished" de handleState (ver reclamarBonoTutorial), pero
+  // acá ya se sabe si corresponde o no (tutorialBonoReclamado viene del
+  // último /perfil), así que el cartel lo anuncia sin esperar esa respuesta.
+  const mensajeBono = tutorialBonoReclamado
+    ? 'Recuerda: este modo es solo para practicar, así que no otorga puntos.'
+    : '¡Como es tu primera vez, te regalamos 150 monedas 🪙! Recuerda: este modo es solo para practicar, así que no otorga puntos.';
+  tutorialLogLines.push(`${tutorialPlayerName} gritó DESACTIVAR y acertó su código. Tutorial completado.`);
   const state = buildTutorialState(
-    '🎉 ¡Desactivaste tu código! Completaste el tutorial guiado. Recuerda: este modo es solo para practicar, así que no otorga puntos ni monedas.',
+    `🎉 ¡Desactivaste tu código! Completaste el tutorial guiado. ${mensajeBono}`,
     { status: 'finished', winner: TUTORIAL_PID, deckRemaining: 45, audio: TUTORIAL_AUDIO_DONE }
   );
   handleState(state);
@@ -6482,6 +6535,7 @@ function handleState(state) {
       }
       if (state.mode === 'tutorial') {
         reproducirSonido(soundTutorialCompletado);
+        reclamarBonoTutorial();
       } else if (state.winner === myId) {
         reproducirSonido(soundVictoriaPartida);
       } else {
@@ -6649,7 +6703,7 @@ function handleState(state) {
   const subtitleEl = document.getElementById('game-subtitle');
   if (subtitleEl) {
     subtitleEl.textContent = state.mode === 'tutorial'
-      ? '🎓 Tutorial guiado · guion fijo · sin puntos ni monedas'
+      ? '🎓 Tutorial guiado · guion fijo · sin puntos (150 monedas de regalo la primera vez)'
       : state.mode === 'solo'
         ? '🎯 Modo Solitario · puntos a la mitad'
         : '2-4 jugadores en línea · fiel al reglamento';
@@ -6889,13 +6943,19 @@ function renderGame(state) {
 
     if (state.mode === 'tutorial') {
       // El tutorial siempre termina en victoria (guion fijo) y nunca
-      // otorga puntos ni monedas: no hay animación de puntaje ni cajas
+      // otorga puntos de rango: no hay animación de puntaje ni cajas
       // fuertes (ver buildTutorialState: events siempre queda vacío), y
       // este botón solo vuelve a la selección de modo, sin tocar Supabase.
+      // El único premio es el bono único de 150 monedas (ver
+      // reclamarBonoTutorial/tutorialBonoReclamado), que sí se acredita de
+      // verdad contra el backend aparte de este cartel.
+      const notaBono = tutorialBonoReclamado
+        ? 'Este modo es solo para practicar: no otorga puntos.'
+        : 'Este modo es solo para practicar (no otorga puntos), pero por completarlo la primera vez te regalamos 150 monedas 🪙.';
       resultCard.innerHTML = `
         <div>🎓 ¡Tutorial completado! Desactivaste tu código correctamente.</div>
         <div style="font-size:0.85rem; opacity:0.85; margin-top:6px;">
-          Este modo es solo para practicar: no otorga puntos ni monedas.
+          ${notaBono}
         </div>
         <button class="full" id="btn-salir-tutorial" style="margin-top: 15px; background: #fff; color: #1a1a1a;">
           🏠 Volver al menú

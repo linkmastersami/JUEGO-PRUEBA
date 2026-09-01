@@ -354,12 +354,13 @@ async def obtener_perfil(username: str):
         rango_cero = obtener_rango(0, 0)
         return {"username": username, "puntos": 0, "victorias": 0, "monedas": 0, "avatar_actual": None,
                 "tablero_actual": None, "rango": rango_cero, "puntos_batalla": 0, "victorias_batalla": 0,
-                "rango_batalla": rango_cero, "monster_record_facil": 0, "monster_record_dificil": 0}
+                "rango_batalla": rango_cero, "monster_record_facil": 0, "monster_record_dificil": 0,
+                "tutorial_bono_reclamado": False}
 
     try:
         resp = supabase.table("profiles").select(
             "puntos, victorias, monedas, avatar_actual, puntos_batalla, victorias_batalla, "
-            "monster_record_facil, monster_record_dificil"
+            "monster_record_facil, monster_record_dificil, tutorial_bono_reclamado"
         ).eq("username", username).execute()
         fila = resp.data[0] if resp.data else {}
     except Exception as e:
@@ -386,6 +387,7 @@ async def obtener_perfil(username: str):
     victorias_batalla = fila.get("victorias_batalla") or 0
     monster_record_facil = fila.get("monster_record_facil") or 0
     monster_record_dificil = fila.get("monster_record_dificil") or 0
+    tutorial_bono_reclamado = bool(fila.get("tutorial_bono_reclamado"))
 
     # Consulta aparte y con su propio try/except (no metida en el select de
     # arriba): si todavía no se corrió el ALTER TABLE de tablero_actual, que
@@ -402,7 +404,53 @@ async def obtener_perfil(username: str):
             "avatar_actual": avatar_actual, "tablero_actual": tablero_actual, "rango": obtener_rango(puntos, victorias),
             "puntos_batalla": puntos_batalla, "victorias_batalla": victorias_batalla,
             "rango_batalla": obtener_rango(puntos_batalla, victorias_batalla),
-            "monster_record_facil": monster_record_facil, "monster_record_dificil": monster_record_dificil}
+            "monster_record_facil": monster_record_facil, "monster_record_dificil": monster_record_dificil,
+            "tutorial_bono_reclamado": tutorial_bono_reclamado}
+
+
+# ---------------------------------------------------------------------------
+# Bono único por completar el tutorial guiado (150 monedas, solo la primera
+# vez). El tutorial en sí corre entero en el cliente (ver iniciarTutorial()
+# en el frontend, sin sala ni WebSocket real) — este endpoint es lo único
+# que toca el servidor, y solo para el premio.
+# ---------------------------------------------------------------------------
+BONO_TUTORIAL_MONEDAS = 150
+
+
+@app.post("/tutorial/completar")
+async def completar_tutorial(authorization: Optional[str] = Header(None)):
+    """Da el bono de 150 monedas por completar el tutorial guiado, una sola
+    vez por cuenta. Si ya se había reclamado antes, no pasa nada (no es un
+    error: el frontend llama esto cada vez que se termina el tutorial, haya
+    o no premio pendiente)."""
+    if supabase is None:
+        return {"ok": False, "error": "Supabase no configurado."}
+
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
+    try:
+        resp = supabase.table("profiles").select("tutorial_bono_reclamado, monedas").eq("username", username).execute()
+        fila = resp.data[0] if resp.data else {}
+    except Exception as e:
+        print(f"❌ ERROR consultando bono de tutorial de {username}: {e}")
+        return {"ok": False, "error": "Error consultando el bono."}
+
+    if fila.get("tutorial_bono_reclamado"):
+        return {"ok": True, "ya_reclamado": True, "monedas_ganadas": 0, "monedas_totales": fila.get("monedas") or 0}
+
+    try:
+        supabase.table("profiles").update({"tutorial_bono_reclamado": True}).eq("username", username).execute()
+    except Exception as e:
+        print(f"❌ ERROR marcando bono de tutorial de {username}: {e}")
+        return {"ok": False, "error": "Error guardando el bono."}
+
+    monedas_totales = add_coins(username, BONO_TUTORIAL_MONEDAS)
+    print(f"🎓 {username} completó el tutorial por primera vez: +{BONO_TUTORIAL_MONEDAS} monedas.")
+    return {"ok": True, "ya_reclamado": False, "monedas_ganadas": BONO_TUTORIAL_MONEDAS, "monedas_totales": monedas_totales}
 
 
 def obtener_avatar_y_rango(username: str, puntos_col: str = "puntos", victorias_col: str = "victorias") -> tuple:
