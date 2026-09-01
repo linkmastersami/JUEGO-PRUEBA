@@ -7038,20 +7038,21 @@ window.addEventListener('message', async (ev) => {
     // mismo, sin esperar a que el jugador cierre o reinicie la partida.
     actualizarPerfilHUD(nombre);
 
-    // Top 5 del ranking de ESE nivel (fácil o difícil, el que se jugó),
-    // reusando el mismo endpoint que la pantalla de Ranking general.
-    let top5 = [];
+    // Ranking completo de ESE nivel (fácil o difícil, el que se jugó),
+    // reusando el mismo endpoint que la pantalla de Ranking general. Se manda
+    // completo (sin recortar a 5); el juego lo muestra con scroll propio.
+    let ranking = [];
     try {
       const juegoRanking = dificultad === 'dificil' ? 'monster_dificil' : 'monster_facil';
       const respRanking = await fetch('/ranking?juego=' + encodeURIComponent(juegoRanking));
       const dataRanking = await respRanking.json();
-      top5 = (dataRanking.ranking || []).slice(0, 5);
+      ranking = dataRanking.ranking || [];
     } catch (e) { /* si falla, se manda la lista vacía y el juego simplemente no la muestra */ }
 
     responderAlJuego({
       type: 'monsterResult', ok: true,
       record: res.record, esRecord: res.es_record, monedasGanadas: res.monedas_ganadas,
-      top5, usuario: nombre,
+      top5: ranking, usuario: nombre,
     });
   } catch (e) {
     responderAlJuego({ type: 'monsterResult', ok: false });

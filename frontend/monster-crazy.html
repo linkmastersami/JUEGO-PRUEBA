@@ -105,6 +105,14 @@
     font-size:13px; color:#ddb8ff; font-weight:700; margin-bottom:8px;
     text-transform:uppercase; letter-spacing:0.5px; text-align:center;
   }
+  #top5Lista {
+    max-height:220px; overflow-y:auto; overflow-x:hidden;
+    padding-right:4px; touch-action:pan-y;
+    scrollbar-width:thin; scrollbar-color:#ff5252 rgba(255,255,255,0.08);
+  }
+  #top5Lista::-webkit-scrollbar { width:6px; }
+  #top5Lista::-webkit-scrollbar-track { background:rgba(255,255,255,0.08); border-radius:4px; }
+  #top5Lista::-webkit-scrollbar-thumb { background:#ff5252; border-radius:4px; }
   .top5-fila {
     display:flex; align-items:center; gap:8px;
     background:rgba(255,255,255,0.06); border-radius:10px; padding:6px 10px;
@@ -468,22 +476,25 @@
     mostrarTop5(datos.top5);
   }
 
-  // Lista de los 5 mejores récords del nivel que se acaba de jugar (fácil o
-  // difícil, según corresponda), que la app contenedora manda ya lista
-  // dentro de "monsterResult" (mismo dato que usa su propia pantalla de
-  // Ranking general, pero recortado a 5).
+  // Ranking completo del nivel que se acaba de jugar (fácil o difícil, según
+  // corresponda), que la app contenedora manda ya lista dentro de
+  // "monsterResult" (mismo dato que usa su propia pantalla de Ranking
+  // general, sin recortar). Se muestra dentro de una lista con scroll propio
+  // para que participantes largos no ocupen toda la pantalla, y se
+  // desplaza automáticamente hasta la fila del jugador si no es visible.
   function escaparHtml(s){
     return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
-  function mostrarTop5(top5){
+  function mostrarTop5(ranking){
     const wrap = document.getElementById('top5Wrap');
     const lista = document.getElementById('top5Lista');
-    if(!top5 || !top5.length){ wrap.classList.add('hidden'); return; }
+    if(!ranking || !ranking.length){ wrap.classList.add('hidden'); return; }
     document.getElementById('top5Titulo').textContent =
-      '🏆 Mejores 5 — ' + (difficulty === 'hard' ? 'Difícil' : 'Fácil');
+      '🏆 Ranking — ' + (difficulty === 'hard' ? 'Difícil' : 'Fácil');
     lista.innerHTML = '';
     const miNombre = miUsername || '';
-    top5.forEach(fila => {
+    let filaJugador = null;
+    ranking.forEach(fila => {
       const div = document.createElement('div');
       const esYo = miNombre && fila.username === miNombre;
       div.className = 'top5-fila' + (esYo ? ' tu-fila' : '');
@@ -496,9 +507,14 @@
         <div class="top5-nombre">${escaparHtml(fila.username || '')}</div>
         <div class="top5-puntos">${(fila.puntos || 0).toLocaleString()}</div>
       `;
+      if(esYo) filaJugador = div;
       lista.appendChild(div);
     });
     wrap.classList.remove('hidden');
+    if(filaJugador){
+      // Se espera un tick para que el layout ya tenga altura antes de centrar.
+      setTimeout(()=> filaJugador.scrollIntoView({ block:'center' }), 0);
+    }
   }
 
   // Deja caer una "moneda" a la vez (tope visual de 12, para que no sea
