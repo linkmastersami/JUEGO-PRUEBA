@@ -2101,6 +2101,13 @@
         </span>
       </button>
 
+      <button class="full ghost" id="btn-ranking" style="margin-top: 20px; font-size: 1.05rem;">
+        🏆 Ranking
+      </button>
+      <button class="full" id="btn-abrir-tienda" style="margin-top: 10px; font-size: 1.05rem; background: var(--accent2);">
+        🛍️ Avatares y tableros
+      </button>
+
       <button class="full ghost" id="btn-cambiar-nombre-juego" style="margin-top: 16px; font-size: 0.8rem;">← Cerrar sesión</button>
     </div>
 
@@ -2172,14 +2179,8 @@
         <div id="salas-en-curso-lista" style="font-size:0.85rem; color:var(--muted);">Cargando...</div>
       </div>
 
-      <button class="full ghost" id="btn-ranking" style="margin-top: 20px; font-size: 1.05rem;">
-        🏆 Ranking
-      </button>
-      <button class="full" id="btn-mis-avatares" style="margin-top: 10px; font-size: 1.05rem; background: #2a2e3d; border: 2px solid var(--accent2);">
+      <button class="full" id="btn-mis-avatares" style="margin-top: 20px; font-size: 1.05rem; background: #2a2e3d; border: 2px solid var(--accent2);">
         🎭 Mis avatares
-      </button>
-      <button class="full" id="btn-abrir-tienda" style="margin-top: 10px; font-size: 1.05rem; background: var(--accent2);">
-        🛍️ Tienda de avatares
       </button>
       <button class="full ghost" id="btn-solicitar-avatar" style="margin-top: 10px; font-size: 0.95rem;">
         📝 Pedir un avatar nuevo
@@ -7036,9 +7037,21 @@ window.addEventListener('message', async (ev) => {
     // /monster/puntaje, así que el HUD (tarjeta de perfil) se actualiza acá
     // mismo, sin esperar a que el jugador cierre o reinicie la partida.
     actualizarPerfilHUD(nombre);
+
+    // Top 5 del ranking de ESE nivel (fácil o difícil, el que se jugó),
+    // reusando el mismo endpoint que la pantalla de Ranking general.
+    let top5 = [];
+    try {
+      const juegoRanking = dificultad === 'dificil' ? 'monster_dificil' : 'monster_facil';
+      const respRanking = await fetch('/ranking?juego=' + encodeURIComponent(juegoRanking));
+      const dataRanking = await respRanking.json();
+      top5 = (dataRanking.ranking || []).slice(0, 5);
+    } catch (e) { /* si falla, se manda la lista vacía y el juego simplemente no la muestra */ }
+
     responderAlJuego({
       type: 'monsterResult', ok: true,
       record: res.record, esRecord: res.es_record, monedasGanadas: res.monedas_ganadas,
+      top5, usuario: nombre,
     });
   } catch (e) {
     responderAlJuego({ type: 'monsterResult', ok: false });

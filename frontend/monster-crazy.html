@@ -98,6 +98,24 @@
     100% { transform: translateY(58px) scale(0.5); opacity:0; }
   }
 
+  #top5Wrap {
+    margin-top:22px; width:100%; max-width:320px; text-align:left;
+  }
+  #top5Titulo {
+    font-size:13px; color:#ddb8ff; font-weight:700; margin-bottom:8px;
+    text-transform:uppercase; letter-spacing:0.5px; text-align:center;
+  }
+  .top5-fila {
+    display:flex; align-items:center; gap:8px;
+    background:rgba(255,255,255,0.06); border-radius:10px; padding:6px 10px;
+    margin-bottom:6px; font-size:13px; color:#fff;
+  }
+  .top5-fila.tu-fila { background:rgba(255,82,82,0.22); border:1px solid #ff5252; }
+  .top5-pos { width:18px; text-align:center; font-weight:800; color:#ddb8ff; flex-shrink:0; }
+  .top5-avatar { width:24px; height:24px; border-radius:6px; object-fit:cover; flex-shrink:0; background:rgba(255,255,255,0.1); }
+  .top5-nombre { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .top5-puntos { color:#ffd23f; font-weight:800; flex-shrink:0; }
+
   #closeBtn {
     position:fixed; top: max(10px, env(safe-area-inset-top)); left:12px; z-index:30;
     background:rgba(0,0,0,0.5); color:#fff; border:none; width:34px; height:34px;
@@ -144,7 +162,12 @@
     <div id="coinBag">💰</div>
     <div id="coinCount">+0</div>
   </div>
-  <button class="btn" id="restartBtn">JUGAR DE NUEVO</button>
+  <div id="top5Wrap" class="hidden">
+    <div id="top5Titulo">🏆 Mejores 5 récords</div>
+    <div id="top5Lista"></div>
+  </div>
+
+  <button class="btn" id="restartBtn" style="margin-top:20px;">JUGAR DE NUEVO</button>
   <button class="btn ghost" id="exitBtn" style="margin-top:14px;">SALIR</button>
 </div>
 
@@ -407,6 +430,7 @@
     document.getElementById('finalRecord').textContent = 'calculando…';
     document.getElementById('newRecordBadge').classList.add('hidden');
     document.getElementById('coinRewardWrap').classList.add('hidden');
+    document.getElementById('top5Wrap').classList.add('hidden');
     document.getElementById('gameOverScreen').classList.remove('hidden');
     // Manda el resultado a la app contenedora para que registre el récord
     // personal y entregue las monedas correspondientes (ver /monster/puntaje).
@@ -422,7 +446,9 @@
     mostrarRecompensa(datos);
   });
 
+  let miUsername = ''; // llega junto con el resultado, solo para resaltar tu fila en el top 5
   function mostrarRecompensa(datos){
+    miUsername = datos.usuario || '';
     const badge = document.getElementById('newRecordBadge');
     const rewardWrap = document.getElementById('coinRewardWrap');
     if(!datos.ok){
@@ -439,6 +465,40 @@
     } else {
       rewardWrap.classList.add('hidden');
     }
+    mostrarTop5(datos.top5);
+  }
+
+  // Lista de los 5 mejores récords del nivel que se acaba de jugar (fácil o
+  // difícil, según corresponda), que la app contenedora manda ya lista
+  // dentro de "monsterResult" (mismo dato que usa su propia pantalla de
+  // Ranking general, pero recortado a 5).
+  function escaparHtml(s){
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function mostrarTop5(top5){
+    const wrap = document.getElementById('top5Wrap');
+    const lista = document.getElementById('top5Lista');
+    if(!top5 || !top5.length){ wrap.classList.add('hidden'); return; }
+    document.getElementById('top5Titulo').textContent =
+      '🏆 Mejores 5 — ' + (difficulty === 'hard' ? 'Difícil' : 'Fácil');
+    lista.innerHTML = '';
+    const miNombre = miUsername || '';
+    top5.forEach(fila => {
+      const div = document.createElement('div');
+      const esYo = miNombre && fila.username === miNombre;
+      div.className = 'top5-fila' + (esYo ? ' tu-fila' : '');
+      const avatarHtml = fila.avatar
+        ? `<img class="top5-avatar" src="/gif/${escaparHtml(fila.avatar)}" alt="" loading="lazy">`
+        : `<div class="top5-avatar"></div>`;
+      div.innerHTML = `
+        <div class="top5-pos">${fila.posicion}</div>
+        ${avatarHtml}
+        <div class="top5-nombre">${escaparHtml(fila.username || '')}</div>
+        <div class="top5-puntos">${(fila.puntos || 0).toLocaleString()}</div>
+      `;
+      lista.appendChild(div);
+    });
+    wrap.classList.remove('hidden');
   }
 
   // Deja caer una "moneda" a la vez (tope visual de 12, para que no sea
