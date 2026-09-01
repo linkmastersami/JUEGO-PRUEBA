@@ -514,9 +514,8 @@ async def monster_puntaje(payload: dict, authorization: Optional[str] = Header(N
 
 
 # ---------------------------------------------------------------------------
-# Tienda de avatares + selector + solicitudes (con cooldown de 15 días)
+# Tienda de avatares + selector
 # ---------------------------------------------------------------------------
-SOLICITUD_COOLDOWN_DIAS = 15
 
 
 def _obtener_perfil_avatares(username: str) -> dict:
@@ -772,24 +771,40 @@ async def elegir_tablero(payload: dict, authorization: Optional[str] = Header(No
     return {"ok": True, "tablero_actual": archivo}
 
 
-@app.get("/avatar/solicitar/estado/{username}")
-async def estado_solicitud_avatar(username: str):
-    """Dice si el jugador puede pedir un avatar nuevo o si está en cooldown
-    (15 días desde su última solicitud)."""
+# ---------------------------------------------------------------------------
+# Solicitar avatar / tablero / canción nuevos (texto libre, sin adjuntar
+# archivo — la persona describe lo que quiere y el pedido se guarda en la
+# tabla "solicitudes" para revisarlo a mano desde Supabase). Las 3
+# categorías son independientes entre sí: pedir un avatar no gasta el
+# cooldown de tablero ni de canción, y viceversa — cada una vale una vez
+# por semana.
+# ---------------------------------------------------------------------------
+SOLICITUD_COOLDOWN_DIAS = 7
+CATEGORIAS_SOLICITUD = ("avatar", "tablero", "cancion")
+
+
+@app.get("/solicitar/estado/{username}")
+async def estado_solicitud(username: str, categoria: str = "avatar"):
+    """Dice si el jugador puede pedir algo de esa categoría o si está en
+    cooldown (7 días desde su última solicitud de ESA categoría)."""
+    categoria = categoria.strip().lower()
+    if categoria not in CATEGORIAS_SOLICITUD:
+        return {"puede_solicitar": True, "dias_restantes": 0}
     if supabase is None:
         return {"puede_solicitar": True, "dias_restantes": 0}
 
     try:
         resp = (
-            supabase.table("solicitudes_avatar")
+            supabase.table("solicitudes")
             .select("fecha")
             .eq("username", username)
+            .eq("categoria", categoria)
             .order("fecha", desc=True)
             .limit(1)
             .execute()
         )
     except Exception as e:
-        print(f"❌ ERROR consultando solicitudes de {username}: {e}")
+        print(f"❌ ERROR consultando solicitudes ({categoria}) de {username}: {e}")
         return {"puede_solicitar": True, "dias_restantes": 0}
 
     if not resp.data:
@@ -803,11 +818,12 @@ async def estado_solicitud_avatar(username: str):
     return {"puede_solicitar": False, "dias_restantes": SOLICITUD_COOLDOWN_DIAS - dias_pasados}
 
 
-@app.post("/avatar/solicitar")
-async def solicitar_avatar(payload: dict, authorization: Optional[str] = Header(None)):
-    """Registra el pedido de un avatar nuevo. No se borran filas viejas: al
-    chequear el cooldown simplemente se ignoran las de más de 15 días, así
-    se conserva el historial completo de pedidos."""
+@app.post("/solicitar")
+async def solicitar(payload: dict, authorization: Optional[str] = Header(None)):
+    """Registra el pedido de un avatar, tablero o canción nuevo. No se
+    borran filas viejas: al chequear el cooldown simplemente se ignoran las
+    de más de 7 días de ESA categoría, así se conserva el historial
+    completo de pedidos de todos."""
     if supabase is None:
         return {"ok": False, "error": "Supabase no configurado."}
 
@@ -817,18 +833,22 @@ async def solicitar_avatar(payload: dict, authorization: Optional[str] = Header(
             "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
         })
 
+    categoria = str(payload.get("categoria", "")).strip().lower()
+    if categoria not in CATEGORIAS_SOLICITUD:
+        return {"ok": False, "error": "Categoría inválida."}
+
     texto = str(payload.get("texto", "")).strip()[:500]
     if not texto:
         return {"ok": False, "error": "Falta el texto del pedido."}
 
-    estado = await estado_solicitud_avatar(username)
+    estado = await estado_solicitud(username, categoria)
     if not estado["puede_solicitar"]:
-        return {"ok": False, "error": f"Ya pediste un avatar hace poco. Vuelve a intentar en {estado['dias_restantes']} día(s)."}
+        return {"ok": False, "error": f"Ya pediste eso hace poco. Vuelve a intentar en {estado['dias_restantes']} día(s)."}
 
     try:
-        supabase.table("solicitudes_avatar").insert({"username": username, "texto": texto}).execute()
+        supabase.table("solicitudes").insert({"username": username, "categoria": categoria, "texto": texto}).execute()
     except Exception as e:
-        print(f"❌ ERROR guardando solicitud de {username}: {e}")
+        print(f"❌ ERROR guardando solicitud ({categoria}) de {username}: {e}")
         return {"ok": False, "error": "Error guardando el pedido."}
 
     return {"ok": True}

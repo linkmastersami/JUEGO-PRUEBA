@@ -773,7 +773,9 @@
   #tienda-grid.carrusel .avatar-item .tablero-vacio { width: 110px; height: 110px; font-size: 2rem; }
 
   /* --- Pestañas de la tienda: Avatares / Tableros --- */
-  #tienda-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+  /* #solicitar-tabs (Avatar/Tablero/Canción, ver overlay-solicitar) reusa
+     el mismo estilo de pestaña que la tienda. */
+  #tienda-tabs, #solicitar-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
   .tienda-tab {
     flex: 1; padding: 8px; border-radius: 10px; font-size: 0.82rem; font-weight: 700;
     background: #2a2e3d; color: var(--muted); border: 2px solid transparent;
@@ -1822,8 +1824,13 @@
 
 <div id="overlay-solicitar">
     <div id="solicitar-header">
-      <h2>📝 Pedir un avatar nuevo</h2>
-      <div id="solicitar-sub">Cuéntanos qué avatar te gustaría ver en la tienda</div>
+      <h2>📝 Solicitar nuevo avatar, tablero o canción</h2>
+      <div id="solicitar-sub">Cuéntanos qué te gustaría ver</div>
+    </div>
+    <div id="solicitar-tabs">
+      <button class="tienda-tab activo" id="solicitar-tab-avatar" data-cat="avatar">🎭 Avatar</button>
+      <button class="tienda-tab" id="solicitar-tab-tablero" data-cat="tablero">🖼️ Tablero</button>
+      <button class="tienda-tab" id="solicitar-tab-cancion" data-cat="cancion">🎵 Canción</button>
     </div>
     <div id="solicitar-cooldown" class="hidden"></div>
     <textarea id="solicitar-texto" maxlength="500" rows="4" placeholder="Ej: un gato negro con capa de superhéroe..." autocomplete="off"></textarea>
@@ -2110,6 +2117,9 @@
       <button class="full" id="btn-mis-avatares-juego" style="margin-top: 10px; font-size: 1.05rem; background: var(--good);">
         🎭 Cambiar avatar
       </button>
+      <button class="full ghost" id="btn-solicitar" style="margin-top: 10px; font-size: 0.95rem;">
+        📝 Solicitar nuevo avatar, tablero o canción
+      </button>
 
       <button class="full ghost" id="btn-cambiar-nombre-juego" style="margin-top: 16px; font-size: 0.8rem;">← Cerrar sesión</button>
     </div>
@@ -2181,13 +2191,6 @@
         </div>
         <div id="salas-en-curso-lista" style="font-size:0.85rem; color:var(--muted);">Cargando...</div>
       </div>
-
-      <button class="full" id="btn-mis-avatares" style="margin-top: 20px; font-size: 1.05rem; background: #2a2e3d; border: 2px solid var(--accent2);">
-        🎭 Mis avatares
-      </button>
-      <button class="full ghost" id="btn-solicitar-avatar" style="margin-top: 10px; font-size: 0.95rem;">
-        📝 Pedir un avatar nuevo
-      </button>
     </div>
 
     <div id="join-error" class="error"></div>
@@ -3636,9 +3639,9 @@ document.getElementById('overlay-tienda').onclick = (e) => {
     if (e.target.id === 'overlay-tienda') cerrarTienda();
 };
 document.getElementById('btn-abrir-tienda').onclick = () => abrirTienda(false);
-document.getElementById('btn-mis-avatares').onclick = () => abrirSelectorAvatares();
-// Mismo botón que "Mis avatares" (ver arriba), pero repetido en la pantalla
-// de elegir juego (paso 2) para no tener que entrar a un juego primero
+// El botón "Mis avatares"/"Cambiar avatar" ya no vive dentro de cada juego
+// (join-step-modo): vive una sola vez acá, en la pantalla de elegir juego
+// (join-step-juego, paso 2), para no tener que entrar a un juego primero
 // solo para cambiar de avatar.
 document.getElementById('btn-mis-avatares-juego').onclick = () => abrirSelectorAvatares();
 
@@ -3754,15 +3757,21 @@ document.getElementById('btn-manual-batalla-espera').onclick = () => { reproduci
 document.getElementById('manual-batalla-btn-cerrar').onclick = () => { reproducirSonido(soundUiCerrar); cerrarManualBatalla(); };
 
 // ---------------------------------------------------------------------------
-// Solicitar un avatar nuevo (con cooldown de 15 días, ver /avatar/solicitar)
+// Solicitar avatar / tablero / canción nuevos (texto libre, sin adjuntar
+// archivo — ver /solicitar). Las 3 categorías son independientes: cada una
+// tiene su propio cooldown semanal, pedir una no gasta el de las otras dos.
 // ---------------------------------------------------------------------------
-async function abrirSolicitarAvatar() {
-    const username = document.getElementById('name-input').value;
-    reproducirSonido(soundUiBoton);
-    document.getElementById('overlay-solicitar').classList.add('activo');
-    document.getElementById('solicitar-texto').value = '';
-    document.getElementById('solicitar-error').textContent = '';
+const SOLICITAR_CATEGORIAS = {
+    avatar:  { label: 'avatar',  placeholder: 'Ej: un gato negro con capa de superhéroe...' },
+    tablero: { label: 'tablero', placeholder: 'Ej: un fondo de bosque encantado, de noche...' },
+    cancion: { label: 'canción', placeholder: 'Ej: nombre de la canción y de qué artista o juego...' },
+};
+let solicitarCategoria = 'avatar';
 
+// Consulta el cooldown de LA CATEGORÍA ACTUAL (solicitarCategoria) y deja
+// el formulario listo (habilitado, o avisando cuántos días faltan).
+async function cargarEstadoSolicitud() {
+    const username = document.getElementById('name-input').value;
     const cooldownEl = document.getElementById('solicitar-cooldown');
     const btnEnviar = document.getElementById('solicitar-btn-enviar');
     cooldownEl.classList.add('hidden');
@@ -3770,14 +3779,33 @@ async function abrirSolicitarAvatar() {
     btnEnviar.textContent = 'Enviar pedido';
 
     try {
-        const resp = await fetch('/avatar/solicitar/estado/' + encodeURIComponent(username));
+        const resp = await fetch(`/solicitar/estado/${encodeURIComponent(username)}?categoria=${solicitarCategoria}`);
         const data = await resp.json();
         if (!data.puede_solicitar) {
-            cooldownEl.textContent = `Ya pediste un avatar hace poco. Puedes volver a pedir en ${data.dias_restantes} día(s).`;
+            const cat = SOLICITAR_CATEGORIAS[solicitarCategoria].label;
+            cooldownEl.textContent = `Ya pediste un(a) ${cat} hace poco. Puedes volver a pedir en ${data.dias_restantes} día(s).`;
             cooldownEl.classList.remove('hidden');
             btnEnviar.disabled = true;
         }
     } catch (e) { /* si falla la consulta, dejamos intentar igual: el backend valida de nuevo */ }
+}
+
+function seleccionarCategoriaSolicitar(cat) {
+    solicitarCategoria = cat;
+    document.querySelectorAll('#solicitar-tabs .tienda-tab').forEach(btn => btn.classList.toggle('activo', btn.dataset.cat === cat));
+    document.getElementById('solicitar-texto').placeholder = SOLICITAR_CATEGORIAS[cat].placeholder;
+    document.getElementById('solicitar-texto').value = '';
+    document.getElementById('solicitar-sub').textContent = `Cuéntanos qué ${SOLICITAR_CATEGORIAS[cat].label} te gustaría`;
+    document.getElementById('solicitar-error').textContent = '';
+    cargarEstadoSolicitud();
+}
+
+function abrirSolicitarAvatar() {
+    reproducirSonido(soundUiBoton);
+    document.getElementById('overlay-solicitar').classList.add('activo');
+    document.getElementById('solicitar-error').textContent = '';
+    // Conserva la última pestaña elegida (o Avatar, la primera vez).
+    seleccionarCategoriaSolicitar(solicitarCategoria);
 }
 
 function cerrarSolicitarAvatar() {
@@ -3785,23 +3813,22 @@ function cerrarSolicitarAvatar() {
 }
 
 async function enviarSolicitudAvatar() {
-    const username = document.getElementById('name-input').value;
     const texto = document.getElementById('solicitar-texto').value.trim();
     const errEl = document.getElementById('solicitar-error');
     errEl.textContent = '';
 
     if (!texto) {
-        errEl.textContent = 'Escribe una descripción del avatar que te gustaría.';
+        errEl.textContent = 'Escribe qué te gustaría pedir.';
         return;
     }
 
     const btnEnviar = document.getElementById('solicitar-btn-enviar');
     btnEnviar.disabled = true;
     try {
-        const r = await fetch('/avatar/solicitar', {
+        const r = await fetch('/solicitar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
-            body: JSON.stringify({ username, texto })
+            body: JSON.stringify({ categoria: solicitarCategoria, texto })
         });
         const d = await r.json();
         if (!d.ok) {
@@ -3812,7 +3839,7 @@ async function enviarSolicitudAvatar() {
         document.getElementById('solicitar-texto').value = '';
         btnEnviar.textContent = '¡Pedido enviado!';
         const cooldownEl = document.getElementById('solicitar-cooldown');
-        cooldownEl.textContent = '¡Pedido enviado! Puedes volver a pedir en 15 días.';
+        cooldownEl.textContent = '¡Pedido enviado! Puedes volver a pedir en 7 días.';
         cooldownEl.classList.remove('hidden');
     } catch (e) {
         errEl.textContent = 'Error de conexión con el servidor.';
@@ -3820,9 +3847,12 @@ async function enviarSolicitudAvatar() {
     }
 }
 
-document.getElementById('btn-solicitar-avatar').onclick = abrirSolicitarAvatar;
+document.getElementById('btn-solicitar').onclick = abrirSolicitarAvatar;
 document.getElementById('solicitar-btn-cerrar').onclick = cerrarSolicitarAvatar;
 document.getElementById('solicitar-btn-enviar').onclick = enviarSolicitudAvatar;
+document.querySelectorAll('#solicitar-tabs .tienda-tab').forEach(btn => {
+    btn.onclick = () => { reproducirSonido(soundUiBoton); seleccionarCategoriaSolicitar(btn.dataset.cat); };
+});
 
 // El avatar dentro de la tarjeta de perfil solo abre el selector en las
 // pantallas de selección (elegir juego, o elegir cómo jugar) — no durante

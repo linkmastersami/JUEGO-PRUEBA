@@ -78,8 +78,8 @@ privada en ambas para jugar juntos.
 > asegúrate de tener una tabla `profiles` (columnas: `username`, `puntos`,
 > `victorias`, `monedas`, `avatar_actual`, `avatares_comprados`,
 > `puntos_batalla`, `victorias_batalla`, `monster_record_facil`,
-> `monster_record_dificil`) y `solicitudes_avatar` (columnas: `username`,
-> `fecha`, `texto`).
+> `monster_record_dificil`) y `solicitudes` (columnas: `username`,
+> `categoria` — `"avatar"`/`"tablero"`/`"cancion"` —, `fecha`, `texto`).
 
 ## Para desplegarlo de verdad (que funcione entre celulares en internet)
 Backends con soporte de WebSockets y plan gratuito: **Render**, **Railway** o
