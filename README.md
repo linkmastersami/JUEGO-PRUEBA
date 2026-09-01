@@ -19,11 +19,14 @@ gritar "¡Desactivar!" y adivinarlo antes que se acabe el mazo.
   fichas, o comparar sus puntitos con una de sus posiciones). El primero en
   acertar su código gana puntos según cuánto quede del mazo; si falla,
   queda eliminado. En "Partida Rápida" (matchmaking), si nadie más se suma
-  en 10 segundos se completa con un bot y arranca la partida sola — el bot
-  juega turno por turno igual que una persona (nunca mira su propio código
-  real: deduce sus candidatos solo a partir del color que ve de cada ficha
-  y de las pistas que él mismo va pidiendo, y grita "Desactivar" recién
-  cuando ya está seguro, o si el mazo se está por acabar).
+  se completa con bots (uno cada 10 segundos, hasta llenar la sala de 4) —
+  la persona puede tocar "Iniciar partida" en cualquier momento en vez de
+  esperar, y solo si nunca lo hace y la sala se termina llenando arranca
+  sola. Cada bot juega turno por turno igual que una persona (nunca mira su
+  propio código real: deduce sus candidatos solo a partir del color que ve
+  de cada ficha y de las pistas que él mismo va pidiendo, y grita
+  "Desactivar" recién cuando ya está seguro, o si el mazo se está por
+  acabar).
 - **Solitario**: una sola persona contra el mazo, mismas reglas, puntaje a
   la mitad.
 - **Tutorial guiado**: un guion fijo paso a paso, sin puntos ni monedas, para

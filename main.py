@@ -1134,6 +1134,11 @@ class Room:
         self.chat_seq = 0
         # --- Espectadores: no ocupan lugar de jugador ni ven códigos ---
         self.spectators: Dict[str, WebSocket] = {}
+        # Cuenta regresiva de Partida Rápida (solo salas MM-, ver
+        # _watch_codigos_matchmake) — cuándo se suma el próximo bot si nadie
+        # más se une antes. None si esta sala no es de matchmaking, o si ya
+        # no hay ninguna cuenta corriendo (partida arrancada, o llena).
+        self.matchmaking_deadline: Optional[float] = None
 
     def add_chat_message(self, sender: "Player", text: str) -> None:
         text = text.strip()[:300]
@@ -1199,11 +1204,12 @@ class Room:
             p.eliminated = False
             p.resolved = False
 
-        self.faceup = [] 
+        self.faceup = []
         self.color_piles = by_color
         self.status = "playing"
         self.phase = "reveal"
         self.turn_index = 0
+        self.matchmaking_deadline = None
         self.winner = None
         self.last_score_gained = 0
         self.event_seq = 0
@@ -1513,6 +1519,7 @@ class Room:
             "disconnect_player_id": self.disconnect_player_id,
             "disconnect_player_name": disc_player.name if disc_player else None,
             "disconnect_deadline_ms": int(self.disconnect_deadline * 1000) if self.disconnect_deadline else None,
+            "matchmaking_deadline_ms": int(self.matchmaking_deadline * 1000) if self.matchmaking_deadline else None,
             "chat": self.chat_messages[-50:],
             "your_id": viewer_id,
             "min_players": MIN_PLAYERS,
@@ -2630,23 +2637,43 @@ async def _bot_jugar_codigos(room_code: str) -> None:
 
 
 async def _watch_codigos_matchmake(room_code: str) -> None:
-    """Cuenta regresiva de 10s de Partida Rápida (Estratega de Códigos): si
-    nadie más entró a la sala, se completa con un bot y arranca la partida
-    sola. Igual que _watch_batalla_matchmake, para el otro juego."""
+    """Cuenta regresiva de Partida Rápida (Estratega de Códigos): cada
+    CODIGOS_MATCHMAKE_TIMEOUT segundos que pasan sin que la sala se llene o
+    la persona arranque a mano, se suma un bot más (hasta 3 veces, uno por
+    cada cupo libre). A diferencia de Batalla de Avatares (que arranca
+    apenas hay 2/2), acá NO se arranca sola con el primer bot: la persona
+    ya puede tocar "Iniciar partida" en cualquier momento a partir de ahí
+    (ver can_start, MIN_PLAYERS=2) y elegir jugar antes de que se llene.
+    Recién cuando la sala queda llena (MAX_PLAYERS, nadie más puede
+    sumarse) deja de tener sentido seguir esperando y arranca sola."""
     await asyncio.sleep(CODIGOS_MATCHMAKE_TIMEOUT)
     room = rooms.get(room_code)
     if not isinstance(room, Room):
         return
-    if room.status != "waiting" or len(room.players) != 1:
+    if room.status != "waiting" or len(room.players) >= MAX_PLAYERS:
         return
+
     room.agregar_bot()
-    room.start()
+
+    if len(room.players) >= MAX_PLAYERS:
+        room.start()
+        try:
+            await broadcast(room)
+        except Exception:
+            pass
+        if room.status == "playing" and room.current_player().is_bot:
+            asyncio.create_task(_bot_jugar_codigos(room.code))
+        return
+
+    # Todavía queda lugar: la persona puede arrancar a mano en cualquier
+    # momento, pero si no lo hace, se re-arma otra cuenta para el próximo
+    # bot (room.start() ya limpia este deadline solo si arranca antes).
+    room.matchmaking_deadline = time.time() + CODIGOS_MATCHMAKE_TIMEOUT
     try:
         await broadcast(room)
     except Exception:
         pass
-    if room.status == "playing" and room.current_player().is_bot:
-        asyncio.create_task(_bot_jugar_codigos(room.code))
+    asyncio.create_task(_watch_codigos_matchmake(room_code))
 
 
 async def _watch_batalla_matchmake(room_code: str):
@@ -2898,14 +2925,17 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
         player = Player(pid, clean_name, websocket, avatar=avatar, rango=rango)
         room.players.append(player)
         room.log.append(f"{clean_name} se unió a la sala.")
-        await broadcast(room)
 
         # Solo las salas de Partida Rápida (MM-) arrancan la cuenta
         # regresiva de emparejamiento con bot; una sala privada espera a un
         # humano indefinidamente (igual que en Batalla de Avatares, ver
-        # ws_batalla_endpoint).
+        # ws_batalla_endpoint). El deadline se pone ANTES del broadcast de
+        # abajo para que este primer estado ya traiga la cuenta corriendo.
         if room_code.upper().startswith(MATCHMAKE_PREFIX) and len(room.players) == 1:
+            room.matchmaking_deadline = time.time() + CODIGOS_MATCHMAKE_TIMEOUT
             asyncio.create_task(_watch_codigos_matchmake(room_code))
+
+        await broadcast(room)
 
     _add_online(clean_name)
     await _broadcast_lobby()

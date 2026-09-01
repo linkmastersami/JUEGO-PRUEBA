@@ -2239,6 +2239,14 @@
     <button class="full secondary hidden" id="btn-compartir-sala" style="margin:10px 0;">🔗 Compartir enlace para invitar</button>
     <button class="full" id="start-btn">Iniciar partida</button>
     <div class="action-hint" id="wait-hint"></div>
+    <!-- Solo en salas de Partida Rápida (MM-): cuenta regresiva hasta que
+         se sume el próximo bot de relleno si nadie más entra antes (ver
+         matchmaking_deadline_ms / _watch_codigos_matchmake en el backend).
+         Tocar "Iniciar partida" en cualquier momento la corta. -->
+    <div id="wait-codigos-countdown" class="hidden" style="text-align:center; margin-top:14px;">
+      <div style="font-size:0.85rem; color:var(--muted); margin-bottom:6px;">🤖 Si nadie se une, entra un bot en...</div>
+      <div id="wait-codigos-countdown-num" style="font-size:2.2rem; font-weight:900; color:var(--accent);">10</div>
+    </div>
   </div>
 
   <!-- PANTALLA DE ESPECTADOR -->
@@ -3945,6 +3953,10 @@ let selectedFaceupIndex = null;
 let compareMode = false;
 const crossedOut = new Set();
 let tableGuessReady = false;
+// Cuenta regresiva de "entra un bot en..." en la sala de espera de Partida
+// Rápida (ver wait-codigos-countdown / matchmaking_deadline_ms) — mismo
+// patrón que matchmakingIntervalBatalla, para Estratega de Códigos.
+let matchmakingIntervalCodigos = null;
 
 // --- Reconexión automática (evita que el celular quede "colgado" si el
 // WebSocket se cae por inactividad, cambio de red, o el navegador
@@ -4843,6 +4855,7 @@ function limpiarEstadoDePartida() {
   // se retoma acá — si no, se quedaba en silencio para siempre.
   reanudarMusicaTrasPartida();
   if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
+  if (matchmakingIntervalCodigos) { clearInterval(matchmakingIntervalCodigos); matchmakingIntervalCodigos = null; }
   detenerHeartbeat();
   cerrarCuentaRegresivaDesactivar();
   cerrarCuentaRegresivaDesconexion();
@@ -6693,6 +6706,28 @@ function handleState(state) {
     document.getElementById('wait-hint').textContent = state.can_start
       ? `Cualquier jugador puede iniciar (${state.players.length}/${state.max_players}).`
       : `Esperando al menos ${state.min_players} jugadores (${state.players.length}/${state.min_players}).`;
+
+    // Cuenta regresiva de "entra un bot en..." — solo aplica a salas de
+    // Partida Rápida (MM-) y solo mientras el backend siga mandando un
+    // matchmaking_deadline_ms (deja de mandarlo apenas la sala se llena o
+    // alguien toca "Iniciar partida", ver Room.start()).
+    const countdownCodigosEl = document.getElementById('wait-codigos-countdown');
+    const esMMCodigos = (currentRoomCode || '').toUpperCase().startsWith('MM-');
+    if (esMMCodigos && state.matchmaking_deadline_ms) {
+      countdownCodigosEl.classList.remove('hidden');
+      const numEl = document.getElementById('wait-codigos-countdown-num');
+      clearInterval(matchmakingIntervalCodigos);
+      const actualizar = () => {
+        const restante = Math.max(0, Math.ceil((state.matchmaking_deadline_ms - Date.now()) / 1000));
+        numEl.textContent = String(restante);
+        if (restante <= 0) clearInterval(matchmakingIntervalCodigos);
+      };
+      actualizar();
+      matchmakingIntervalCodigos = setInterval(actualizar, 250);
+    } else {
+      countdownCodigosEl.classList.add('hidden');
+      clearInterval(matchmakingIntervalCodigos);
+    }
     return;
   }
 
