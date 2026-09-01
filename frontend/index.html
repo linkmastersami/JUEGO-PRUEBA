@@ -7002,10 +7002,13 @@ function cerrarMonsterCrazy() {
 
 // El propio juego (dentro del iframe) avisa por postMessage cuándo termina
 // una partida (con la puntuación y la dificultad) o cuándo el jugador quiere
-// salir. Acá se registra el resultado contra el backend y se muestra con el
-// mismo overlay genérico que usan Estratega/Batalla (mostrarResultadoRonda).
+// salir. El resultado (récord actualizado + monedas ganadas) se muestra
+// dentro del propio iframe, en su misma pantalla de fin de partida — acá
+// solo se llama al backend y se le contesta al juego con "monsterResult"
+// para que anime la bolsa de monedas y el récord él mismo.
 window.addEventListener('message', async (ev) => {
   const datos = ev.data || {};
+  const iframe = document.getElementById('monster-iframe');
   if (datos.type === 'monsterExit') {
     cerrarMonsterCrazy();
     return;
@@ -7016,6 +7019,10 @@ window.addEventListener('message', async (ev) => {
   const puntuacion = Math.max(0, parseInt(datos.puntuacion, 10) || 0);
   const nombre = document.getElementById('name-input').value;
 
+  const responderAlJuego = (mensaje) => {
+    if (iframe.contentWindow) iframe.contentWindow.postMessage(mensaje, '*');
+  };
+
   try {
     const headers = Object.assign({ 'Content-Type': 'application/json' }, await authHeader());
     const resp = await fetch('/monster/puntaje', {
@@ -7023,22 +7030,18 @@ window.addEventListener('message', async (ev) => {
       body: JSON.stringify({ puntuacion, dificultad }),
     });
     const res = await resp.json();
-    if (!res.ok) { cerrarMonsterCrazy(); return; }
+    if (!res.ok) { responderAlJuego({ type: 'monsterResult', ok: false }); return; }
 
-    const chips = [];
-    if (res.monedas_ganadas > 0) {
-      chips.push({ tipo: 'gano', texto: `🪙 +${res.monedas_ganadas.toLocaleString()} monedas` });
-    }
-    const etiquetaDificultad = dificultad === 'facil' ? 'Fácil' : 'Difícil';
-    mostrarResultadoRonda({
-      icono: res.es_record ? '🏆' : '🧟',
-      titulo: res.es_record
-        ? `¡Nuevo récord en ${etiquetaDificultad}! ${res.puntuacion.toLocaleString()} puntos.`
-        : `Puntuación: ${res.puntuacion.toLocaleString()} · récord en ${etiquetaDificultad}: ${res.record.toLocaleString()}.`,
-      chips,
-    }, () => { cerrarMonsterCrazy(); actualizarPerfilHUD(nombre); });
+    // Las monedas ya quedaron acreditadas en el servidor apenas responde
+    // /monster/puntaje, así que el HUD (tarjeta de perfil) se actualiza acá
+    // mismo, sin esperar a que el jugador cierre o reinicie la partida.
+    actualizarPerfilHUD(nombre);
+    responderAlJuego({
+      type: 'monsterResult', ok: true,
+      record: res.record, esRecord: res.es_record, monedasGanadas: res.monedas_ganadas,
+    });
   } catch (e) {
-    cerrarMonsterCrazy();
+    responderAlJuego({ type: 'monsterResult', ok: false });
   }
 });
 document.getElementById('btn-cambiar-juego').onclick = () => {

@@ -70,6 +70,34 @@
   .stat b { color:#ffd23f; }
   .instructions { font-size:13px; color:#b89ad1; margin-top:18px; line-height:1.6; max-width:300px; }
 
+  #newRecordBadge {
+    font-size:19px; font-weight:900; color:#ffd23f; margin-top:6px;
+    text-shadow: 0 0 12px #ff8c00, 0 0 2px #fff;
+    animation: parpadeoRecord 0.7s steps(1, end) infinite;
+  }
+  @keyframes parpadeoRecord { 0%, 49% { opacity:1; } 50%, 100% { opacity:0.18; } }
+
+  /* Bolsa de monedas: cae una monedita a la vez desde arriba y se "acumula"
+     en el número de al lado, que va subiendo hasta el total ganado. */
+  #coinRewardWrap {
+    position:relative; margin-top:18px; height:64px; width:100%;
+    display:flex; align-items:flex-end; justify-content:center; gap:6px;
+  }
+  #coinBag { font-size:38px; line-height:1; filter:drop-shadow(0 0 10px rgba(255,210,63,0.6)); }
+  #coinCount {
+    font-size:22px; font-weight:900; color:#ffd23f; text-shadow:0 0 8px #ff8c00;
+    padding-bottom:6px;
+  }
+  .falling-coin {
+    position:absolute; top:-36px; font-size:20px; pointer-events:none;
+    animation: caerMoneda 0.65s cubic-bezier(0.5,0,1,0.5) forwards;
+  }
+  @keyframes caerMoneda {
+    0% { transform: translateY(0) scale(1); opacity:1; }
+    75% { opacity:1; }
+    100% { transform: translateY(58px) scale(0.5); opacity:0; }
+  }
+
   #closeBtn {
     position:fixed; top: max(10px, env(safe-area-inset-top)); left:12px; z-index:30;
     background:rgba(0,0,0,0.5); color:#fff; border:none; width:34px; height:34px;
@@ -110,6 +138,12 @@
   <div class="title" style="font-size:30px;">FIN DEL JUEGO</div>
   <div class="stat">Puntuación final: <b id="finalScore">0</b></div>
   <div class="stat">Oleada alcanzada: <b id="finalWave">1</b></div>
+  <div class="stat">Tu récord: <b id="finalRecord">calculando…</b></div>
+  <div id="newRecordBadge" class="hidden">🏆 ¡NUEVO RÉCORD! 🏆</div>
+  <div id="coinRewardWrap" class="hidden">
+    <div id="coinBag">💰</div>
+    <div id="coinCount">+0</div>
+  </div>
   <button class="btn" id="restartBtn">JUGAR DE NUEVO</button>
   <button class="btn ghost" id="exitBtn" style="margin-top:14px;">SALIR</button>
 </div>
@@ -367,10 +401,76 @@
     state = 'over';
     document.getElementById('finalScore').textContent = score;
     document.getElementById('finalWave').textContent = wave;
+    // Se resetea a "calculando..." cada vez: la app contenedora todavía no
+    // respondió (ver "monsterResult" más abajo), así que ni el récord ni
+    // las monedas se conocen todavía en este momento.
+    document.getElementById('finalRecord').textContent = 'calculando…';
+    document.getElementById('newRecordBadge').classList.add('hidden');
+    document.getElementById('coinRewardWrap').classList.add('hidden');
     document.getElementById('gameOverScreen').classList.remove('hidden');
     // Manda el resultado a la app contenedora para que registre el récord
     // personal y entregue las monedas correspondientes (ver /monster/puntaje).
     notifyParent('monsterGameOver', { puntuacion: score, oleada: wave, dificultad: difficulty });
+  }
+
+  // La app contenedora ya llamó a /monster/puntaje y responde acá mismo con
+  // el récord actualizado y las monedas ganadas — todo se muestra en esta
+  // misma pantalla de fin de partida, sin salir del juego.
+  window.addEventListener('message', (ev) => {
+    const datos = ev.data || {};
+    if (datos.type !== 'monsterResult') return;
+    mostrarRecompensa(datos);
+  });
+
+  function mostrarRecompensa(datos){
+    const badge = document.getElementById('newRecordBadge');
+    const rewardWrap = document.getElementById('coinRewardWrap');
+    if(!datos.ok){
+      document.getElementById('finalRecord').textContent = 'no se pudo guardar';
+      badge.classList.add('hidden');
+      rewardWrap.classList.add('hidden');
+      return;
+    }
+    document.getElementById('finalRecord').textContent = (datos.record || 0).toLocaleString();
+    badge.classList.toggle('hidden', !datos.esRecord);
+    const monedas = Math.max(0, Math.round(datos.monedasGanadas || 0));
+    if(monedas > 0){
+      animarMonedas(monedas);
+    } else {
+      rewardWrap.classList.add('hidden');
+    }
+  }
+
+  // Deja caer una "moneda" a la vez (tope visual de 12, para que no sea
+  // eterno con puntajes altos) mientras el contador de al lado sube parejo
+  // hasta el total real ganado.
+  function animarMonedas(total){
+    const rewardWrap = document.getElementById('coinRewardWrap');
+    const countEl = document.getElementById('coinCount');
+    rewardWrap.classList.remove('hidden');
+    countEl.textContent = '+0';
+
+    const monedasVisuales = Math.min(total, 12);
+    for(let i=0;i<monedasVisuales;i++){
+      setTimeout(()=>{
+        const coin = document.createElement('div');
+        coin.className = 'falling-coin';
+        coin.textContent = '🪙';
+        coin.style.left = `calc(50% + ${Math.round((Math.random()*30)-15)}px)`;
+        rewardWrap.appendChild(coin);
+        coin.addEventListener('animationend', ()=> coin.remove());
+        beep(520 + Math.random()*160, 0.05, 'square', 0.07);
+      }, i*90);
+    }
+
+    const duracion = Math.max(500, monedasVisuales*90 + 450);
+    const inicio = performance.now();
+    (function tick(t){
+      const progreso = Math.min((t - inicio) / duracion, 1);
+      countEl.textContent = '+' + Math.round(total * progreso).toLocaleString();
+      if(progreso < 1) requestAnimationFrame(tick);
+      else countEl.textContent = '+' + total.toLocaleString();
+    })(inicio);
   }
 
   // ---------- Toques ----------
