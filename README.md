@@ -26,6 +26,13 @@ gritar "¡Desactivar!" y adivinarlo antes que se acabe el mazo.
 - **Espectador**: cualquiera puede entrar de solo lectura a ver una partida
   en curso (no ve el código de nadie, solo color/puntitos como cualquier
   rival) y usar el chat de la sala.
+- **Monster Crazy**: minijuego aparte (`frontend/monster-crazy.html`, corre
+  dentro de un `<iframe>`), sin salas ni rivales — deslizar el dedo rápido
+  sobre los puntos débiles del monstruo antes de que se acabe el tiempo, en
+  fácil (cualquier orden) o difícil (solo en orden numérico). No suma a un
+  puntaje acumulado: cada dificultad tiene su propio récord personal, y las
+  monedas se pagan según la puntuación de esa partida (1 moneda cada 2000
+  puntos en fácil, cada 1000 en difícil).
 
 También hay chat de sala, chat de lobby global, contador de "en línea",
 reconexión automática con reintentos si se corta la conexión, y una cuenta
@@ -69,8 +76,10 @@ privada en ambas para jugar juntos.
 > (públicas, es normal exponerlas) apuntando a un proyecto de Supabase real
 > — para usar tu propio proyecto, reemplázalas en `frontend/index.html` y
 > asegúrate de tener una tabla `profiles` (columnas: `username`, `puntos`,
-> `victorias`, `monedas`, `avatar_actual`, `avatares_comprados`) y
-> `solicitudes_avatar` (columnas: `username`, `fecha`, `texto`).
+> `victorias`, `monedas`, `avatar_actual`, `avatares_comprados`,
+> `puntos_batalla`, `victorias_batalla`, `monster_record_facil`,
+> `monster_record_dificil`) y `solicitudes_avatar` (columnas: `username`,
+> `fecha`, `texto`).
 
 ## Para desplegarlo de verdad (que funcione entre celulares en internet)
 Backends con soporte de WebSockets y plan gratuito: **Render**, **Railway** o

@@ -909,6 +909,17 @@
     overflow-y: auto;
   }
   #overlay-ranking.activo { opacity: 1; pointer-events: auto; }
+  #overlay-monster {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 10400;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  #overlay-monster.activo { opacity: 1; pointer-events: auto; }
+  #monster-iframe { position:absolute; inset:0; width:100%; height:100%; border:none; }
   #ranking-header { width: 100%; max-width: 480px; text-align: center; margin-bottom: 10px; }
   #ranking-header h2 { margin: 6px 0 2px; font-size: 1.2rem; }
   #ranking-lista { width: 100%; max-width: 480px; display: flex; flex-direction: column; gap: 8px; }
@@ -1828,6 +1839,14 @@
     <div class="row" style="justify-content:center; margin-bottom:10px;">
       <button class="ghost ranking-tab activo" id="ranking-tab-codigos" style="padding:6px 14px; font-size:0.8rem;">🎯 Estratega</button>
       <button class="ghost ranking-tab" id="ranking-tab-batalla" style="padding:6px 14px; font-size:0.8rem;">⚔️ Batalla</button>
+      <button class="ghost ranking-tab" id="ranking-tab-monster" style="padding:6px 14px; font-size:0.8rem;">🧟 Monster Crazy</button>
+    </div>
+    <!-- Monster Crazy tiene récord por dificultad, así que además de la
+         pestaña de juego necesita esta sub-elección Fácil/Difícil — solo
+         se muestra cuando esa pestaña está activa. -->
+    <div class="row hidden" id="ranking-monster-subtabs" style="justify-content:center; margin-bottom:10px;">
+      <button class="ghost ranking-tab activo" id="ranking-tab-monster-facil" style="padding:4px 12px; font-size:0.72rem;">Fácil</button>
+      <button class="ghost ranking-tab" id="ranking-tab-monster-dificil" style="padding:4px 12px; font-size:0.72rem;">Difícil</button>
     </div>
     <div id="ranking-lista"></div>
     <button id="ranking-btn-cerrar">Cerrar</button>
@@ -1847,6 +1866,14 @@
     </div>
     <div id="manual-batalla-lista"></div>
     <button id="manual-batalla-btn-cerrar">Cerrar</button>
+</div>
+
+<!-- Monster Crazy corre entero dentro de este iframe (frontend/monster-crazy.html);
+     al terminar una partida manda el resultado por postMessage (ver
+     "monsterGameOver"/"monsterExit" más abajo) para que esta pantalla llame
+     a /monster/puntaje con el usuario ya autenticado. -->
+<div id="overlay-monster">
+  <iframe id="monster-iframe" src="about:blank" allow="fullscreen" title="Monster Crazy"></iframe>
 </div>
 
 <div id="overlay-desconexion">
@@ -2046,6 +2073,17 @@
       </div>
 
       <button class="full ghost btn-instalar-app hidden" id="btn-instalar-juego" style="margin-bottom:14px; font-size:0.9rem; border-color: var(--accent2);">📲 Instalar la app en tu teléfono</button>
+
+      <!-- Monster Crazy: minijuego aparte (frontend/monster-crazy.html en un
+           iframe), sin salas ni rivales — por eso no pasa por el paso 3
+           (join-step-modo) como los otros dos, va directo al juego. -->
+      <button class="full juego-card" id="btn-elegir-monster" style="margin-bottom: 12px;">
+        <span class="juego-card-emoji">🧟</span>
+        <span class="juego-card-texto">
+          <b>Monster Crazy</b>
+          <span>Desliza rápido y noquea al monstruo · récord personal</span>
+        </span>
+      </button>
 
       <button class="full juego-card" id="btn-elegir-codigos" style="margin-bottom: 12px;">
         <span class="juego-card-emoji">🎯</span>
@@ -3601,9 +3639,16 @@ document.getElementById('btn-mis-avatares').onclick = () => abrirSelectorAvatare
 // ---------------------------------------------------------------------------
 async function abrirRanking(juego) {
     juego = juego || 'codigos';
+    const esMonster = juego === 'monster_facil' || juego === 'monster_dificil';
     document.getElementById('overlay-ranking').classList.add('activo');
     document.getElementById('ranking-tab-codigos').classList.toggle('activo', juego === 'codigos');
     document.getElementById('ranking-tab-batalla').classList.toggle('activo', juego === 'batalla');
+    document.getElementById('ranking-tab-monster').classList.toggle('activo', esMonster);
+    document.getElementById('ranking-monster-subtabs').classList.toggle('hidden', !esMonster);
+    if (esMonster) {
+        document.getElementById('ranking-tab-monster-facil').classList.toggle('activo', juego === 'monster_facil');
+        document.getElementById('ranking-tab-monster-dificil').classList.toggle('activo', juego === 'monster_dificil');
+    }
     const lista = document.getElementById('ranking-lista');
     lista.innerHTML = '<div style="color:var(--muted); text-align:center;">Cargando...</div>';
     const miUsuario = document.getElementById('name-input').value;
@@ -3643,6 +3688,9 @@ document.getElementById('btn-ranking').onclick = () => { reproducirSonido(soundU
 document.getElementById('ranking-btn-cerrar').onclick = () => { reproducirSonido(soundUiCerrar); cerrarRanking(); };
 document.getElementById('ranking-tab-codigos').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('codigos'); };
 document.getElementById('ranking-tab-batalla').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('batalla'); };
+document.getElementById('ranking-tab-monster').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('monster_facil'); };
+document.getElementById('ranking-tab-monster-facil').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('monster_facil'); };
+document.getElementById('ranking-tab-monster-dificil').onclick = () => { reproducirSonido(soundUiBoton); abrirRanking('monster_dificil'); };
 
 // --- Manual de cartas de Batalla de Avatares: mismo patrón que el Ranking
 // (overlay de pantalla completa con lista armada en JS), pero con
@@ -6929,7 +6977,70 @@ document.getElementById('btn-elegir-codigos').onclick = (e) => {
 document.getElementById('btn-elegir-batalla').onclick = (e) => {
   animarTransicionJuego(e.currentTarget.querySelector('.juego-card-emoji'), '⚔️', () => elegirJuego('batalla'));
 };
+document.getElementById('btn-elegir-monster').onclick = (e) => {
+  animarTransicionJuego(e.currentTarget.querySelector('.juego-card-emoji'), '🧟', () => abrirMonsterCrazy());
+};
 document.getElementById('btn-cambiar-nombre-juego').onclick = () => cerrarSesion();
+
+// ---------------------------------------------------------------------------
+// Monster Crazy: minijuego aparte, en su propio iframe (frontend/monster-crazy.html).
+// Sin salas ni rivales, así que no pasa por join-step-modo como los otros
+// dos juegos: se abre directo encima de la pantalla de selección y, al
+// cerrarse, vuelve a esa misma pantalla tal cual estaba.
+// ---------------------------------------------------------------------------
+function abrirMonsterCrazy() {
+  document.getElementById('overlay-monster').classList.add('activo');
+  // Cache-bust: fuerza a recargar el juego desde cero cada vez (si no, al
+  // reabrir el mismo iframe quedaba con el estado de la partida anterior).
+  document.getElementById('monster-iframe').src = 'monster-crazy.html?t=' + Date.now();
+}
+
+function cerrarMonsterCrazy() {
+  document.getElementById('overlay-monster').classList.remove('activo');
+  document.getElementById('monster-iframe').src = 'about:blank';
+}
+
+// El propio juego (dentro del iframe) avisa por postMessage cuándo termina
+// una partida (con la puntuación y la dificultad) o cuándo el jugador quiere
+// salir. Acá se registra el resultado contra el backend y se muestra con el
+// mismo overlay genérico que usan Estratega/Batalla (mostrarResultadoRonda).
+window.addEventListener('message', async (ev) => {
+  const datos = ev.data || {};
+  if (datos.type === 'monsterExit') {
+    cerrarMonsterCrazy();
+    return;
+  }
+  if (datos.type !== 'monsterGameOver') return;
+
+  const dificultad = datos.dificultad === 'hard' ? 'dificil' : 'facil';
+  const puntuacion = Math.max(0, parseInt(datos.puntuacion, 10) || 0);
+  const nombre = document.getElementById('name-input').value;
+
+  try {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, await authHeader());
+    const resp = await fetch('/monster/puntaje', {
+      method: 'POST', headers,
+      body: JSON.stringify({ puntuacion, dificultad }),
+    });
+    const res = await resp.json();
+    if (!res.ok) { cerrarMonsterCrazy(); return; }
+
+    const chips = [];
+    if (res.monedas_ganadas > 0) {
+      chips.push({ tipo: 'gano', texto: `🪙 +${res.monedas_ganadas.toLocaleString()} monedas` });
+    }
+    const etiquetaDificultad = dificultad === 'facil' ? 'Fácil' : 'Difícil';
+    mostrarResultadoRonda({
+      icono: res.es_record ? '🏆' : '🧟',
+      titulo: res.es_record
+        ? `¡Nuevo récord en ${etiquetaDificultad}! ${res.puntuacion.toLocaleString()} puntos.`
+        : `Puntuación: ${res.puntuacion.toLocaleString()} · récord en ${etiquetaDificultad}: ${res.record.toLocaleString()}.`,
+      chips,
+    }, () => { cerrarMonsterCrazy(); actualizarPerfilHUD(nombre); });
+  } catch (e) {
+    cerrarMonsterCrazy();
+  }
+});
 document.getElementById('btn-cambiar-juego').onclick = () => {
   reproducirSonido(soundUiBoton);
   document.getElementById('join-step-modo').classList.add('hidden');

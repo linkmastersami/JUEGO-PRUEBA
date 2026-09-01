@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0510">
+<title>Monster Crazy</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; user-select:none; -webkit-user-select:none; }
+  html, body {
+    width:100%; height:100%; overflow:hidden; background:#0a0510;
+    touch-action:none; overscroll-behavior:none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  #gameCanvas { position:absolute; top:0; left:0; touch-action:none; display:block; }
+
+  #hud {
+    position:absolute; top:0; left:0; width:100%;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding: max(14px, env(safe-area-inset-top)) 16px 0 16px;
+    pointer-events:none; z-index:5;
+  }
+  #hud .box { color:#fff; font-weight:bold; text-shadow: 0 0 8px rgba(255,80,80,0.8), 0 2px 2px rgba(0,0,0,0.6); font-size:18px; }
+  #lives { font-size:22px; letter-spacing:2px; }
+  #scoreWrap { text-align:right; }
+  #wave { font-size:13px; opacity:0.85; font-weight:normal; }
+  #combo { color:#ffd23f; font-size:14px; text-shadow:0 0 8px #ff8c00; min-height:18px; }
+
+  #timerBarWrap {
+    position:absolute; top:60px; left:16px; right:16px; height:10px;
+    background:rgba(255,255,255,0.15); border-radius:6px; overflow:hidden;
+    box-shadow: inset 0 0 4px rgba(0,0,0,0.6); z-index:5;
+  }
+  #timerBar { height:100%; width:100%; background:#2ecc71; transition:width 0.05s linear, background 0.2s; border-radius:6px; }
+
+  #message {
+    position:absolute; top:38%; left:0; width:100%; text-align:center;
+    color:#fff; font-size:34px; font-weight:900; letter-spacing:1px;
+    text-shadow: 0 0 20px currentColor, 0 3px 6px rgba(0,0,0,0.8);
+    opacity:0; pointer-events:none; z-index:6; transition:opacity 0.15s, transform 0.15s;
+    transform: scale(0.8);
+  }
+  #message.show { opacity:1; transform:scale(1); }
+
+  .overlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: radial-gradient(circle at 50% 30%, #2a0a3a 0%, #0a0510 75%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    z-index:20; text-align:center; padding:24px;
+  }
+  .hidden { display:none !important; }
+  .title {
+    font-size:38px; font-weight:900; color:#ff3b3b;
+    text-shadow: 0 0 20px #ff3b3b, 0 0 40px #ff0000;
+    margin-bottom:6px; letter-spacing:1px;
+  }
+  .subtitle { color:#ddb8ff; font-size:15px; margin-bottom:26px; max-width:320px; line-height:1.5; }
+  .btn {
+    background: linear-gradient(180deg, #ff5252, #c0392b);
+    color:#fff; border:none; padding:16px 42px; font-size:20px; font-weight:bold;
+    border-radius:50px; box-shadow: 0 6px 0 #7a1f16, 0 8px 20px rgba(255,0,0,0.4);
+    letter-spacing:1px; margin-top:10px; touch-action:manipulation;
+  }
+  .btn:active { transform:translateY(4px); box-shadow: 0 2px 0 #7a1f16; }
+  .btn.ghost {
+    background:transparent; box-shadow:none; border:2px solid #ff5252; padding:14px 40px;
+  }
+  .btn.ghost:active { transform:translateY(2px); }
+  .stat { color:#fff; font-size:17px; margin:4px 0; }
+  .stat b { color:#ffd23f; }
+  .instructions { font-size:13px; color:#b89ad1; margin-top:18px; line-height:1.6; max-width:300px; }
+
+  #closeBtn {
+    position:fixed; top: max(10px, env(safe-area-inset-top)); left:12px; z-index:30;
+    background:rgba(0,0,0,0.5); color:#fff; border:none; width:34px; height:34px;
+    border-radius:50%; font-size:16px; font-weight:800; touch-action:manipulation;
+  }
+  #closeBtn:active { background:rgba(0,0,0,0.75); }
+</style>
+</head>
+<body>
+
+<button id="closeBtn">✕</button>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud">
+  <div class="box">
+    <div id="lives">❤️❤️❤️</div>
+    <div id="combo"></div>
+  </div>
+  <div class="box" id="scoreWrap">
+    <div id="score">0</div>
+    <div id="wave">Oleada 1</div>
+  </div>
+</div>
+<div id="timerBarWrap"><div id="timerBar"></div></div>
+<div id="message"></div>
+
+<div class="overlay" id="startScreen">
+  <div class="title">MONSTER<br>CRAZY</div>
+  <div class="subtitle">Un monstruo aparecerá en pantalla completa. Desliza tu dedo lo más rápido posible sobre sus puntos débiles antes de que se acabe el tiempo.</div>
+  <button class="btn" id="easyBtn" style="background:linear-gradient(180deg,#2ecc71,#1e8449); box-shadow:0 6px 0 #145a32, 0 8px 20px rgba(46,204,113,0.4);">FÁCIL</button>
+  <div class="instructions">Golpea los puntos débiles en cualquier orden. 3 vidas.</div>
+  <button class="btn" id="hardBtn" style="margin-top:20px;">DIFÍCIL</button>
+  <div class="instructions">Cada punto tiene un número — solo puedes eliminarlos de menor a mayor. 5 vidas.</div>
+</div>
+
+<div class="overlay hidden" id="gameOverScreen">
+  <div class="title" style="font-size:30px;">FIN DEL JUEGO</div>
+  <div class="stat">Puntuación final: <b id="finalScore">0</b></div>
+  <div class="stat">Oleada alcanzada: <b id="finalWave">1</b></div>
+  <button class="btn" id="restartBtn">JUGAR DE NUEVO</button>
+  <button class="btn ghost" id="exitBtn" style="margin-top:14px;">SALIR</button>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  let W, H, DPR;
+
+  // Comunicación con la app contenedora (frontend/index.html), que abre
+  // este juego dentro de un <iframe>. No hay lógica de servidor acá: el
+  // resultado (puntuación + dificultad) se manda por postMessage y la app
+  // es quien llama a /monster/puntaje con el usuario ya autenticado.
+  function notifyParent(type, extra){
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(Object.assign({ type }, extra || {}), '*');
+      }
+    } catch (e) {}
+  }
+  function bindExit(el){
+    el.addEventListener('touchend', e => { e.preventDefault(); notifyParent('monsterExit'); });
+    el.addEventListener('click', () => notifyParent('monsterExit'));
+  }
+  bindExit(document.getElementById('closeBtn'));
+  bindExit(document.getElementById('exitBtn'));
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---------- Estado del juego ----------
+  let state = 'idle'; // idle | playing | over
+  let difficulty = 'easy'; // easy | hard
+  let maxLives = 3;
+  let currentTarget = 1; // en modo difícil, número que toca eliminar ahora
+  let score = 0, lives = 3, wave = 1, combo = 0, comboFadeT = 0;
+  let zones = [];
+  let trails = {};      // touchId -> {points:[{x,y,t}], alive:true}
+  let particles = [];
+  let waveTimeLimit = 4200;
+  let waveTimeRemaining = waveTimeLimit;
+  let enemyCenter = {x:0,y:0};
+  let enemyMaxR = 200;
+  let enemySeedOffsets = [];
+  let flashAlpha = 0;
+  let shakeT = 0;
+  let lastTime = 0;
+  let waveClearedRecently = false;
+  let waveFailedRecently = false; // evita restar varias vidas de golpe mientras se procesa el fallo
+
+  const zoneColors = ['#ff4757','#ffa502','#ff6b81','#eccc68','#ff7f50','#f368e0'];
+  const zoneLabels = ['CABEZA','PECHO','BRAZO IZQ','BRAZO DER','PIERNA IZQ','PIERNA DER'];
+
+  function vibrate(pattern){ if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
+
+  let audioCtx;
+  function getAudio(){
+    if(!audioCtx){
+      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ return null; }
+    }
+    if(audioCtx.state === 'suspended'){ audioCtx.resume(); }
+    return audioCtx;
+  }
+  function beep(freq, dur, type, vol){
+    const ac = getAudio(); if(!ac) return;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type || 'square';
+    osc.frequency.value = freq;
+    gain.gain.value = vol || 0.12;
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    osc.stop(ac.currentTime + dur);
+  }
+
+  // ---------- Generación de oleada ----------
+  function spawnWave(){
+    const count = Math.min(3 + Math.floor((wave-1)/2), 6);
+    waveTimeLimit = Math.max(1600, 4200 - (wave-1)*180);
+    waveTimeRemaining = waveTimeLimit;
+    zones = [];
+    const marginX = W*0.16, marginTop = H*0.22, marginBottom = H*0.12;
+    const shuffled = [...zoneLabels].sort(()=>Math.random()-0.5);
+    const r = Math.max(34, Math.min(W,H)*0.065);
+    for(let i=0;i<count;i++){
+      let x,y,tries=0,valid=false;
+      do{
+        x = marginX + Math.random()*(W - marginX*2);
+        y = marginTop + Math.random()*(H - marginTop - marginBottom);
+        valid = zones.every(z => Math.hypot(z.x-x, z.y-y) > r*2.6);
+        tries++;
+      } while(!valid && tries < 40);
+      zones.push({
+        x, y, r, destroyed:false,
+        color: zoneColors[i % zoneColors.length],
+        label: shuffled[i % shuffled.length],
+        pulse: Math.random()*Math.PI*2
+      });
+    }
+    if(difficulty === 'hard'){
+      const nums = Array.from({length:count}, (_,i)=>i+1).sort(()=>Math.random()-0.5);
+      zones.forEach((z,i)=>{ z.number = nums[i]; z.missFlashT = 0; });
+      currentTarget = 1;
+    }
+    enemyCenter.x = zones.reduce((s,z)=>s+z.x,0)/zones.length;
+    enemyCenter.y = zones.reduce((s,z)=>s+z.y,0)/zones.length;
+    enemyMaxR = Math.max(...zones.map(z => Math.hypot(z.x-enemyCenter.x, z.y-enemyCenter.y) + z.r)) + 40;
+    enemySeedOffsets = Array.from({length:24}, ()=> 0.75 + Math.random()*0.4);
+    document.getElementById('wave').textContent = 'Oleada ' + wave;
+  }
+
+  function allZonesDestroyed(){ return zones.every(z => z.destroyed); }
+
+  // ---------- Partículas ----------
+  function burst(x, y, color){
+    const n = 16;
+    for(let i=0;i<n;i++){
+      const ang = (Math.PI*2*i)/n + Math.random()*0.4;
+      const speed = 2 + Math.random()*5;
+      particles.push({
+        x, y, vx: Math.cos(ang)*speed, vy: Math.sin(ang)*speed,
+        life: 1, color, size: 3+Math.random()*4
+      });
+    }
+  }
+  function updateParticles(dt){
+    for(let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy; p.vy += 0.18;
+      p.life -= dt/650;
+      if(p.life <= 0) particles.splice(i,1);
+    }
+  }
+  function drawParticles(){
+    particles.forEach(p=>{
+      ctx.globalAlpha = Math.max(p.life,0);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size*Math.max(p.life,0), 0, Math.PI*2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- Distancia punto-segmento ----------
+  function distToSeg(px,py, ax,ay, bx,by){
+    const l2 = (bx-ax)**2 + (by-ay)**2;
+    if(l2 === 0) return Math.hypot(px-ax, py-ay);
+    let t = ((px-ax)*(bx-ax) + (py-ay)*(by-ay)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projX = ax + t*(bx-ax), projY = ay + t*(by-ay);
+    return Math.hypot(px-projX, py-projY);
+  }
+
+  // ---------- Golpear una zona ----------
+  function hitZone(z, speedFactor){
+    if(z.destroyed) return;
+    if(difficulty === 'hard' && z.number !== currentTarget){
+      zoneMiss(z);
+      return;
+    }
+    z.destroyed = true;
+    if(difficulty === 'hard') currentTarget++;
+    combo++; comboFadeT = 1400;
+    const bonus = Math.round(80 + combo*15 + speedFactor*40);
+    score += bonus;
+    updateScoreUI();
+    burst(z.x, z.y, z.color);
+    vibrate(25);
+    beep(420 + combo*30, 0.09, 'square', 0.1);
+    showCombo();
+    if(allZonesDestroyed()){
+      onWaveClear();
+    }
+  }
+
+  function zoneMiss(z){
+    const now = performance.now();
+    if(z._lastMiss && now - z._lastMiss < 400) return;
+    z._lastMiss = now;
+    z.missFlashT = 300;
+    vibrate(15);
+    beep(180, 0.08, 'sine', 0.08);
+  }
+
+  function showCombo(){
+    const el = document.getElementById('combo');
+    el.textContent = combo > 1 ? ('COMBO x' + combo) : '';
+  }
+
+  function updateScoreUI(){
+    document.getElementById('score').textContent = score;
+  }
+  function updateLivesUI(){
+    document.getElementById('lives').textContent = '❤️'.repeat(Math.max(lives,0)) + '🖤'.repeat(Math.max(maxLives-lives,0));
+  }
+
+  function flashMessage(text, color){
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.style.color = color || '#fff';
+    el.classList.add('show');
+    clearTimeout(flashMessage._t);
+    flashMessage._t = setTimeout(()=> el.classList.remove('show'), 700);
+  }
+
+  function onWaveClear(){
+    waveClearedRecently = true;
+    const remainingRatio = waveTimeRemaining / waveTimeLimit;
+    score += Math.round(300 * remainingRatio) + 200;
+    updateScoreUI();
+    flashMessage('¡ELIMINADO!', '#2ecc71');
+    beep(700, 0.18, 'sine', 0.13);
+    vibrate([30,30,60]);
+    setTimeout(()=>{
+      if(state !== 'playing') return;
+      wave++;
+      combo = 0; showCombo();
+      spawnWave();
+      waveClearedRecently = false;
+    }, 550);
+  }
+
+  function onTimeUp(){
+    lives--;
+    updateLivesUI();
+    combo = 0; showCombo();
+    flashAlpha = 1;
+    shakeT = 350;
+    vibrate([100,60,100]);
+    beep(140, 0.35, 'sawtooth', 0.15);
+    if(lives <= 0){
+      flashMessage('DERROTA', '#ff3b3b');
+      setTimeout(gameOver, 500);
+    } else {
+      flashMessage('¡TE ALCANZÓ!', '#ff3b3b');
+      setTimeout(()=>{
+        if(state !== 'playing') return;
+        spawnWave();
+        waveFailedRecently = false;
+      }, 550);
+    }
+  }
+
+  function gameOver(){
+    state = 'over';
+    document.getElementById('finalScore').textContent = score;
+    document.getElementById('finalWave').textContent = wave;
+    document.getElementById('gameOverScreen').classList.remove('hidden');
+    // Manda el resultado a la app contenedora para que registre el récord
+    // personal y entregue las monedas correspondientes (ver /monster/puntaje).
+    notifyParent('monsterGameOver', { puntuacion: score, oleada: wave, dificultad: difficulty });
+  }
+
+  // ---------- Toques ----------
+  function getPos(t){
+    const rect = canvas.getBoundingClientRect();
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  }
+
+  function handleStart(e){
+    e.preventDefault();
+    if(state !== 'playing') return;
+    for(const t of e.changedTouches || [e]){
+      const id = t.identifier !== undefined ? t.identifier : 'mouse';
+      const pos = getPos(t);
+      trails[id] = { points:[{...pos, time: performance.now()}], alive:true };
+    }
+  }
+  function handleMove(e){
+    e.preventDefault();
+    if(state !== 'playing') return;
+    for(const t of e.changedTouches || [e]){
+      const id = t.identifier !== undefined ? t.identifier : 'mouse';
+      const pos = getPos(t);
+      const trail = trails[id];
+      if(!trail) continue;
+      const last = trail.points[trail.points.length-1];
+      const now = performance.now();
+      const dt = Math.max(now - last.time, 1);
+      const dist = Math.hypot(pos.x-last.x, pos.y-last.y);
+      const speed = dist/dt; // px/ms
+      trail.points.push({...pos, time:now});
+      if(trail.points.length > 18) trail.points.shift();
+
+      zones.forEach(z=>{
+        if(z.destroyed) return;
+        const d = distToSeg(z.x, z.y, last.x, last.y, pos.x, pos.y);
+        if(d <= z.r){
+          hitZone(z, Math.min(speed*3, 3));
+        }
+      });
+    }
+  }
+  function handleEnd(e){
+    e.preventDefault();
+    for(const t of e.changedTouches || [e]){
+      const id = t.identifier !== undefined ? t.identifier : 'mouse';
+      if(trails[id]) trails[id].alive = false;
+    }
+  }
+
+  canvas.addEventListener('touchstart', handleStart, {passive:false});
+  canvas.addEventListener('touchmove', handleMove, {passive:false});
+  canvas.addEventListener('touchend', handleEnd, {passive:false});
+  canvas.addEventListener('touchcancel', handleEnd, {passive:false});
+  // Soporte de respaldo con mouse (para probar en escritorio)
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', e=>{ mouseDown=true; handleStart({changedTouches:[e], preventDefault:()=>{}}); });
+  canvas.addEventListener('mousemove', e=>{ if(mouseDown) handleMove({changedTouches:[e], preventDefault:()=>{}}); });
+  window.addEventListener('mouseup', e=>{ if(mouseDown){ mouseDown=false; handleEnd({changedTouches:[e], preventDefault:()=>{}}); }});
+
+  // ---------- Dibujo ----------
+  function drawBackground(t){
+    const g = ctx.createRadialGradient(W/2, H*0.35, 40, W/2, H*0.4, Math.max(W,H)*0.75);
+    g.addColorStop(0, '#241033');
+    g.addColorStop(1, '#07040c');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+    // niebla sutil
+    ctx.globalAlpha = 0.06;
+    for(let i=0;i<3;i++){
+      ctx.beginPath();
+      const r = 200 + i*140 + Math.sin(t/1400+i)*20;
+      ctx.arc(W/2, H*0.55, r, 0, Math.PI*2);
+      ctx.strokeStyle = '#ff3b3b';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawEnemyBody(t){
+    if(zones.length === 0) return;
+    const points = 24;
+    ctx.save();
+    ctx.beginPath();
+    for(let i=0;i<=points;i++){
+      const ang = (Math.PI*2*i)/points;
+      const wobble = enemySeedOffsets[i % enemySeedOffsets.length] + Math.sin(t/500 + i)*0.05;
+      const rad = enemyMaxR * wobble;
+      const px = enemyCenter.x + Math.cos(ang)*rad;
+      const py = enemyCenter.y + Math.sin(ang)*rad*0.92;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    const grad = ctx.createRadialGradient(enemyCenter.x, enemyCenter.y, 10, enemyCenter.x, enemyCenter.y, enemyMaxR);
+    grad.addColorStop(0, '#3a1030');
+    grad.addColorStop(1, '#150618');
+    ctx.fillStyle = grad;
+    ctx.shadowColor = '#ff2020';
+    ctx.shadowBlur = 30;
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(255,60,60,0.5)';
+    ctx.stroke();
+    ctx.restore();
+
+    // ojos
+    const blink = (Math.sin(t/900) > 0.93) ? 0.15 : 1;
+    const eyeY = enemyCenter.y - enemyMaxR*0.35;
+    [-1,1].forEach(dir=>{
+      ctx.save();
+      ctx.translate(enemyCenter.x + dir*enemyMaxR*0.22, eyeY);
+      ctx.scale(1, blink);
+      ctx.beginPath();
+      ctx.ellipse(0,0, 16, 10, 0, 0, Math.PI*2);
+      ctx.fillStyle = '#ffe66d';
+      ctx.shadowColor = '#ff0000';
+      ctx.shadowBlur = 12;
+      ctx.fill();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.arc(enemyCenter.x + dir*enemyMaxR*0.22, eyeY, 4, 0, Math.PI*2);
+      ctx.fillStyle = '#3a0000';
+      ctx.fill();
+    });
+
+    // venas conectando zonas
+    ctx.strokeStyle = 'rgba(255,80,80,0.15)';
+    ctx.lineWidth = 1.5;
+    zones.forEach(z=>{
+      if(z.destroyed) return;
+      ctx.beginPath();
+      ctx.moveTo(enemyCenter.x, enemyCenter.y);
+      ctx.lineTo(z.x, z.y);
+      ctx.stroke();
+    });
+  }
+
+  function drawZones(t, dt){
+    zones.forEach(z=>{
+      if(z.destroyed) return;
+      const isLocked = difficulty === 'hard' && z.number !== currentTarget;
+      const pulse = isLocked ? 1 : 0.85 + 0.15*Math.sin(t/220 + z.pulse);
+      const r = z.r * pulse;
+      ctx.save();
+      ctx.globalAlpha = isLocked ? 0.4 : 1;
+      ctx.shadowColor = isLocked ? '#555' : (difficulty==='hard' ? '#ffd23f' : z.color);
+      ctx.shadowBlur = isLocked ? 8 : 28;
+      ctx.beginPath();
+      ctx.arc(z.x, z.y, r, 0, Math.PI*2);
+      ctx.fillStyle = isLocked ? '#3a3a3a99' : z.color + 'aa';
+      ctx.fill();
+      ctx.lineWidth = (difficulty==='hard' && !isLocked) ? 4 : 3;
+      ctx.strokeStyle = (difficulty==='hard' && !isLocked) ? '#ffd23f' : '#fff';
+      ctx.stroke();
+      ctx.restore();
+
+      if(z.missFlashT > 0){
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, r + 6, 0, Math.PI*2);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = `rgba(255,50,50,${z.missFlashT/300})`;
+        ctx.stroke();
+        ctx.restore();
+        if(dt) z.missFlashT -= dt;
+      }
+
+      ctx.textAlign = 'center';
+      if(difficulty === 'hard'){
+        ctx.font = 'bold 22px Arial';
+        ctx.fillStyle = isLocked ? '#ccc' : '#fff';
+        ctx.globalAlpha = isLocked ? 0.6 : 1;
+        ctx.shadowColor = '#000';
+        ctx.shadowBlur = 5;
+        ctx.fillText(z.number, z.x, z.y + 8);
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.font = 'bold 11px Arial';
+      ctx.fillStyle = '#fff';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 4;
+      ctx.fillText(z.label, z.x, z.y + r + 16);
+      ctx.shadowBlur = 0;
+    });
+  }
+
+  function drawTrails(t){
+    Object.keys(trails).forEach(id=>{
+      const trail = trails[id];
+      const pts = trail.points;
+      if(pts.length < 2){ if(!trail.alive) delete trails[id]; return; }
+      for(let i=1;i<pts.length;i++){
+        const age = (t - pts[i].time)/260;
+        const alpha = Math.max(0, 1 - age);
+        if(alpha <= 0) continue;
+        ctx.beginPath();
+        ctx.moveTo(pts[i-1].x, pts[i-1].y);
+        ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+        ctx.shadowColor = '#7dfcff';
+        ctx.shadowBlur = 14;
+        ctx.lineWidth = 4 * alpha + 1.5;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
+      if(!trail.alive && (t - pts[pts.length-1].time) > 260){
+        delete trails[id];
+      }
+    });
+  }
+
+  // ---------- Bucle principal ----------
+  function loop(t){
+    if(!lastTime) lastTime = t;
+    const dt = t - lastTime;
+    lastTime = t;
+
+    if(state === 'playing'){
+      if(!waveClearedRecently && !waveFailedRecently){
+        waveTimeRemaining -= dt;
+        if(waveTimeRemaining <= 0){
+          waveTimeRemaining = 0;
+          waveFailedRecently = true;
+          onTimeUp();
+        }
+      }
+      const ratio = Math.max(waveTimeRemaining/waveTimeLimit, 0);
+      const bar = document.getElementById('timerBar');
+      bar.style.width = (ratio*100) + '%';
+      bar.style.background = ratio > 0.5 ? '#2ecc71' : ratio > 0.25 ? '#f39c12' : '#e74c3c';
+
+      if(comboFadeT > 0){
+        comboFadeT -= dt;
+        if(comboFadeT <= 0){ combo = 0; showCombo(); }
+      }
+    }
+
+    ctx.clearRect(0,0,W,H);
+    ctx.save();
+    if(shakeT > 0){
+      shakeT -= dt;
+      const mag = Math.min(shakeT/350, 1) * 10;
+      ctx.translate((Math.random()-0.5)*mag, (Math.random()-0.5)*mag);
+    }
+    drawBackground(t);
+    if(state === 'playing' || waveClearedRecently){
+      drawEnemyBody(t);
+      drawZones(t, dt);
+    }
+    updateParticles(dt);
+    drawParticles();
+    drawTrails(t);
+    ctx.restore();
+
+    if(flashAlpha > 0){
+      ctx.fillStyle = `rgba(255,0,0,${flashAlpha*0.35})`;
+      ctx.fillRect(0,0,W,H);
+      flashAlpha -= dt/500;
+    }
+
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---------- Inicio / reinicio ----------
+  function startGame(chosenDifficulty){
+    if(chosenDifficulty) difficulty = chosenDifficulty;
+    maxLives = difficulty === 'hard' ? 5 : 3;
+    getAudio();
+    score = 0; lives = maxLives; wave = 1; combo = 0; currentTarget = 1;
+    updateScoreUI(); updateLivesUI(); showCombo();
+    trails = {}; particles = [];
+    waveClearedRecently = false; waveFailedRecently = false;
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    state = 'playing';
+    spawnWave();
+    if(document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(()=>{});
+    }
+  }
+
+  document.getElementById('easyBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('easy'); });
+  document.getElementById('easyBtn').addEventListener('click', ()=>startGame('easy'));
+  document.getElementById('hardBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('hard'); });
+  document.getElementById('hardBtn').addEventListener('click', ()=>startGame('hard'));
+  document.getElementById('restartBtn').addEventListener('touchend', e=>{ e.preventDefault(); document.getElementById('gameOverScreen').classList.add('hidden'); document.getElementById('startScreen').classList.remove('hidden'); });
+  document.getElementById('restartBtn').addEventListener('click', ()=>{ document.getElementById('gameOverScreen').classList.add('hidden'); document.getElementById('startScreen').classList.remove('hidden'); });
+
+  updateLivesUI();
+})();
+</script>
+</body>
+</html>

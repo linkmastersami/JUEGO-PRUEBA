@@ -257,6 +257,14 @@ COIN_REWARD_OPTIONS_BATALLA = [75, 50, 25]
 # Antes era 1000; se bajó a la mitad a pedido del usuario.
 PUNTOS_POR_FICHA = 500
 
+# Monster Crazy no suma a un puntaje acumulado como los otros dos juegos:
+# cada partida solo puede mejorar el récord personal (por dificultad), y las
+# monedas se pagan según la puntuación de ESA partida nada más (ver
+# /monster/puntaje). Un punto de puntaje vale menos en difícil porque ahí ya
+# es más lento conseguir puntos (solo se puede golpear en orden), así que se
+# paga más denso para compensar.
+MONSTER_PUNTOS_POR_MONEDA = {"facil": 2000, "dificil": 1000}
+
 
 def add_coins(username: str, amount: int) -> int:
     """Suma monedas al perfil del usuario en Supabase. Independiente del
@@ -310,20 +318,21 @@ async def obtener_perfil(username: str):
         rango_cero = obtener_rango(0, 0)
         return {"username": username, "puntos": 0, "victorias": 0, "monedas": 0, "avatar_actual": None,
                 "tablero_actual": None, "rango": rango_cero, "puntos_batalla": 0, "victorias_batalla": 0,
-                "rango_batalla": rango_cero}
+                "rango_batalla": rango_cero, "monster_record_facil": 0, "monster_record_dificil": 0}
 
     try:
         resp = supabase.table("profiles").select(
-            "puntos, victorias, monedas, avatar_actual, puntos_batalla, victorias_batalla"
+            "puntos, victorias, monedas, avatar_actual, puntos_batalla, victorias_batalla, "
+            "monster_record_facil, monster_record_dificil"
         ).eq("username", username).execute()
         fila = resp.data[0] if resp.data else {}
     except Exception as e:
         # Si todavía no se corrió el ALTER TABLE de puntos_batalla/
-        # victorias_batalla en Supabase, esta consulta fallaría entera y
-        # tiraba abajo /perfil (incluido lo de Estratega de Códigos, que no
-        # tiene nada que ver). Se reintenta solo con las columnas viejas
-        # para no perder el resto del perfil por eso.
-        print(f"⚠️  /perfil de {username}: fallo consultando puntos_batalla/victorias_batalla ({e}); ¿falta el ALTER TABLE? Sigo solo con Estratega de Códigos.")
+        # victorias_batalla/monster_record_* en Supabase, esta consulta
+        # fallaría entera y tiraba abajo /perfil (incluido lo de Estratega
+        # de Códigos, que no tiene nada que ver). Se reintenta solo con las
+        # columnas viejas para no perder el resto del perfil por eso.
+        print(f"⚠️  /perfil de {username}: fallo consultando columnas nuevas ({e}); ¿falta el ALTER TABLE? Sigo solo con Estratega de Códigos.")
         try:
             resp = supabase.table("profiles").select(
                 "puntos, victorias, monedas, avatar_actual"
@@ -339,6 +348,8 @@ async def obtener_perfil(username: str):
     avatar_actual = fila.get("avatar_actual")
     puntos_batalla = fila.get("puntos_batalla") or 0
     victorias_batalla = fila.get("victorias_batalla") or 0
+    monster_record_facil = fila.get("monster_record_facil") or 0
+    monster_record_dificil = fila.get("monster_record_dificil") or 0
 
     # Consulta aparte y con su propio try/except (no metida en el select de
     # arriba): si todavía no se corrió el ALTER TABLE de tablero_actual, que
@@ -354,7 +365,8 @@ async def obtener_perfil(username: str):
     return {"username": username, "puntos": puntos, "victorias": victorias, "monedas": monedas,
             "avatar_actual": avatar_actual, "tablero_actual": tablero_actual, "rango": obtener_rango(puntos, victorias),
             "puntos_batalla": puntos_batalla, "victorias_batalla": victorias_batalla,
-            "rango_batalla": obtener_rango(puntos_batalla, victorias_batalla)}
+            "rango_batalla": obtener_rango(puntos_batalla, victorias_batalla),
+            "monster_record_facil": monster_record_facil, "monster_record_dificil": monster_record_dificil}
 
 
 def obtener_avatar_y_rango(username: str, puntos_col: str = "puntos", victorias_col: str = "victorias") -> tuple:
@@ -394,17 +406,26 @@ async def obtener_ranking(limite: int = 50, juego: str = "codigos"):
     jugador registrado, ordenados de mayor a menor puntaje.
     juego="batalla" trae el ranking separado de Batalla de Avatares
     (columnas puntos_batalla/victorias_batalla) en vez del de Estratega de
-    Códigos — mismo endpoint, dos rankings independientes."""
+    Códigos. juego="monster_facil"/"monster_dificil" trae el ranking de
+    récords personales de Monster Crazy (sin "rango": ese juego no tiene
+    sistema de rangos, solo el mejor puntaje de una partida por dificultad)
+    — mismo endpoint, un ranking independiente por juego/dificultad."""
     if supabase is None:
         return {"ranking": []}
 
-    puntos_col = "puntos_batalla" if juego == "batalla" else "puntos"
-    victorias_col = "victorias_batalla" if juego == "batalla" else "victorias"
+    es_monster = juego in ("monster_facil", "monster_dificil")
+    if es_monster:
+        puntos_col = "monster_record_facil" if juego == "monster_facil" else "monster_record_dificil"
+        victorias_col = None
+    else:
+        puntos_col = "puntos_batalla" if juego == "batalla" else "puntos"
+        victorias_col = "victorias_batalla" if juego == "batalla" else "victorias"
 
+    columnas = f"username, {puntos_col}, avatar_actual" if es_monster else f"username, {puntos_col}, {victorias_col}, avatar_actual"
     try:
         resp = (
             supabase.table("profiles")
-            .select(f"username, {puntos_col}, {victorias_col}, avatar_actual")
+            .select(columnas)
             .order(puntos_col, desc=True)
             .limit(max(1, min(limite, 200)))
             .execute()
@@ -414,17 +435,82 @@ async def obtener_ranking(limite: int = 50, juego: str = "codigos"):
         return {"ranking": []}
 
     ranking = []
-    for i, fila in enumerate(resp.data or []):
+    for fila in (resp.data or []):
         puntos = fila.get(puntos_col) or 0
-        victorias = fila.get(victorias_col) or 0
+        if es_monster and puntos <= 0:
+            continue  # nadie jugó todavía esta dificultad: no ensucia el ranking con ceros
+        rango = "" if es_monster else obtener_rango(puntos, fila.get(victorias_col) or 0)
         ranking.append({
-            "posicion": i + 1,
+            "posicion": len(ranking) + 1,
             "username": fila.get("username"),
             "puntos": puntos,
-            "rango": obtener_rango(puntos, victorias),
+            "rango": rango,
             "avatar": fila.get("avatar_actual"),
         })
     return {"ranking": ranking}
+
+
+# ---------------------------------------------------------------------------
+# Monster Crazy: minijuego aparte (ninja vs. monstruo, deslizar rápido sobre
+# puntos débiles), frontend/monster-crazy.html corriendo dentro de un
+# <iframe>. No es por turnos ni tiene sala: cada partida es solo del cliente
+# hasta que termina, y ahí manda el resultado acá. A diferencia de Estratega
+# de Códigos y Batalla de Avatares, NO suma a un puntaje acumulado: cada
+# dificultad (fácil/difícil) tiene su propio récord personal, y las monedas
+# se pagan según la puntuación de ESA partida (ver MONSTER_PUNTOS_POR_MONEDA).
+# ---------------------------------------------------------------------------
+@app.post("/monster/puntaje")
+async def monster_puntaje(payload: dict, authorization: Optional[str] = Header(None)):
+    """Guarda el resultado de una partida de Monster Crazy.
+
+    Nota de prototipo: la puntuación la reporta el propio cliente (el juego
+    corre entero en el navegador dentro del iframe, sin validación de jugada
+    a jugada en el servidor) — mismo nivel de confianza que el resto de este
+    prototipo. La identidad, en cambio, sí sale del token verificado y no de
+    lo que mande el body, igual que en /tienda/comprar."""
+    if supabase is None:
+        return {"ok": False, "error": "Supabase no configurado."}
+
+    username = verify_supabase_token(authorization)
+    if username is None:
+        return JSONResponse(status_code=401, content={
+            "ok": False, "error": "Sesión inválida o expirada: vuelve a iniciar sesión."
+        })
+
+    dificultad = str(payload.get("dificultad", "")).strip().lower()
+    if dificultad not in MONSTER_PUNTOS_POR_MONEDA:
+        return {"ok": False, "error": "Dificultad inválida."}
+
+    try:
+        puntuacion = max(0, int(payload.get("puntuacion", 0)))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "Puntuación inválida."}
+
+    columna_record = "monster_record_facil" if dificultad == "facil" else "monster_record_dificil"
+    monedas_ganadas = puntuacion // MONSTER_PUNTOS_POR_MONEDA[dificultad]
+
+    try:
+        resp = supabase.table("profiles").select(columna_record).eq("username", username).execute()
+        record_actual = (resp.data[0].get(columna_record) or 0) if resp.data else 0
+        es_record = puntuacion > record_actual
+        nuevo_record = puntuacion if es_record else record_actual
+        if resp.data:
+            if es_record:
+                supabase.table("profiles").update({columna_record: nuevo_record}).eq("username", username).execute()
+        else:
+            supabase.table("profiles").insert({"username": username, columna_record: nuevo_record}).execute()
+    except Exception as e:
+        print(f"❌ ERROR guardando récord de Monster Crazy ({dificultad}) de {username} en Supabase: {e}")
+        return {"ok": False, "error": "Error guardando el récord. ¿Falta el ALTER TABLE de monster_record_facil/monster_record_dificil?"}
+
+    monedas_totales = add_coins(username, monedas_ganadas) if monedas_ganadas > 0 else _obtener_perfil_avatares(username)["monedas"]
+
+    print(f"🧟 {username} jugó Monster Crazy ({dificultad}): {puntuacion} pts, +{monedas_ganadas} monedas"
+          f"{' — ¡NUEVO RÉCORD!' if es_record else ''}.")
+    return {
+        "ok": True, "puntuacion": puntuacion, "record": nuevo_record, "es_record": es_record,
+        "monedas_ganadas": monedas_ganadas, "monedas_totales": monedas_totales,
+    }
 
 
 # ---------------------------------------------------------------------------
