@@ -251,6 +251,20 @@
     osc.stop(ac.currentTime + dur);
   }
 
+  // Sonido real de "derribo" — el mismo mp3 que usa Batalla de Avatares
+  // cuando una bomba o un misil noquea a un personaje (frontend/noqueo/
+  // default.mp3, al lado de este archivo). Se usa acá al superar cada
+  // oleada para que se sienta como un golpe de verdad, no solo el beep.
+  const soundGolpe = new Audio('noqueo/default.mp3');
+  soundGolpe.preload = 'auto';
+  function reproducirGolpe(){
+    try {
+      const s = soundGolpe.cloneNode();
+      s.volume = 0.75;
+      s.play().catch(()=>{});
+    } catch(e){}
+  }
+
   // ---------- Generación de oleada ----------
   function spawnWave(){
     const count = Math.min(3 + Math.floor((wave-1)/2), 6);
@@ -388,7 +402,7 @@
     score += Math.round(300 * remainingRatio) + 200;
     updateScoreUI();
     flashMessage('¡ELIMINADO!', '#2ecc71');
-    beep(700, 0.18, 'sine', 0.13);
+    reproducirGolpe();
     vibrate([30,30,60]);
     setTimeout(()=>{
       if(state !== 'playing') return;
