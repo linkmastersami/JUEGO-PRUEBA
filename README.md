@@ -46,6 +46,21 @@ También hay chat de sala, chat de lobby global, contador de "en línea",
 reconexión automática con reintentos si se corta la conexión, y una cuenta
 regresiva de gracia (20s) si a alguien le toca jugar y está desconectado.
 
+### Salas privadas (jugar con amigos)
+Ya no se escribe un código a mano: el botón "Crear sala privada" (en
+Estratega de Códigos y en Batalla de Avatares) genera uno al azar solo,
+así nadie puede "adivinar" el código de la sala de otra persona probando
+palabras cortas. Para entrar a la sala de alguien: por el link que
+comparta ("🔗 Compartir enlace para invitar"), o buscándola en "Partidas en
+curso" y tocando "➕ Unirse" (solo aparece si esa partida todavía no
+arrancó). Sin bots de relleno — eso es solo de "Partida Rápida".
+
+En Estratega de Códigos, además, quien crea la sala privada queda de
+**host**: solo esa persona puede tocar "Iniciar partida" (los demás ven
+"Esperando a que el host inicie..."), y puede expulsar a alguien de la
+sala (✕ Expulsar, junto a su nombre) — quien es expulsado no puede volver
+a entrar a ESA sala en particular (no es un baneo global).
+
 ## Cuentas, tienda y ranking (requiere Supabase)
 El login es usuario+contraseña vía **Supabase Auth** (el frontend fabrica un
 email interno tipo `usuario@gotfive.local` para no pedir email real). El

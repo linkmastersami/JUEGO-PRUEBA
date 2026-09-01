@@ -2177,11 +2177,15 @@
         </button>
 
         <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
-          — o crea/únete a una sala privada —
+          — o crea una sala privada para jugar con amigos —
         </div>
 
-        <input id="room-input" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
-        <button class="full secondary" id="join-btn">Entrar a sala privada</button>
+        <!-- Ya no se escribe un código a mano: sale al azar (ver
+             /sala-privada/crear) y quien la crea queda de host de esa sala
+             (puede expulsar gente y es el único que puede arrancar la
+             partida, ver renderGame). Para entrar a la de otra persona:
+             por el link que comparta, o desde "Partidas en curso" abajo. -->
+        <button class="full secondary" id="btn-crear-sala-privada">🔑 Crear sala privada</button>
 
         <div style="text-align: center; margin: 15px 0; color: var(--muted); font-size: 0.8rem;">
           — o practica sin rivales —
@@ -2204,11 +2208,14 @@
         </button>
 
         <div style="text-align: center; margin-bottom: 15px; color: var(--muted); font-size: 0.8rem;">
-          — o crea/únete a una sala privada —
+          — o crea una sala privada para jugar con amigos —
         </div>
 
-        <input id="room-input-batalla" placeholder="Código de sala (ej: ABCD)" maxlength="10" autocomplete="off">
-        <button class="full secondary" id="join-btn-batalla">Entrar a sala privada</button>
+        <!-- Mismo cambio que en Estratega de Códigos: código al azar en vez
+             de escribirlo a mano (ver /sala-privada/crear). Para entrar a
+             la de otra persona: por el link que comparta, o desde
+             "Partidas en curso" abajo. -->
+        <button class="full secondary" id="btn-crear-sala-privada-batalla">🔑 Crear sala privada</button>
 
         <button class="full ghost" id="btn-manual-batalla" style="margin-top: 15px; border-color: var(--accent2);">
           📖 Manual de cartas
@@ -4768,6 +4775,17 @@ async function abrirWebSocket(room, name, solo) {
       conectarEspectador(msg.room, nombre);
       return;
     }
+    if (msg.type === 'kicked') {
+      // El host de la sala privada nos expulsó (ver el "kick" del
+      // backend) — vuelve a la selección de modo con el aviso, no puede
+      // reconectar a esa sala (queda en la lista de baneados de esa sala).
+      esSalidaIntencional = true;
+      thisSocket.close();
+      const nombre = currentPlayerName || document.getElementById('name-input').value.trim();
+      irASeleccionModo(nombre);
+      document.getElementById('join-error').textContent = msg.message || 'El host te expulsó de la sala.';
+      return;
+    }
     if (msg.type === 'redirect_game') {
       // Este código en realidad es de Batalla de Avatares: reconectar allá.
       esSalidaIntencional = true;
@@ -4927,15 +4945,31 @@ document.getElementById('btn-cambiar-nombre').onclick = () => {
   cerrarSesion();
 };
 
-document.getElementById('join-btn').onclick = () => {
-  const room = document.getElementById('room-input').value.trim().toUpperCase();
+// Crea una sala privada nueva (código al azar, ver /sala-privada/crear) y
+// entra directo — reemplaza el viejo flujo de escribir un código a mano.
+// Quien crea queda de host: ver Room.host_id en el backend, y el manejo de
+// host_id en handleState/renderGame para los botones de "Iniciar"/expulsar.
+document.getElementById('btn-crear-sala-privada').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
   if (!name) {
-    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  errEl.textContent = 'Creando sala privada...';
   reproducirSonido(soundUiBoton);
-  conectarSala(room, name);
+  try {
+    const resp = await fetch('/sala-privada/crear?game=codigos');
+    const data = await resp.json();
+    if (resp.ok && data.room) {
+      errEl.textContent = '';
+      conectarSala(data.room, name);
+    } else {
+      errEl.textContent = 'No se pudo crear la sala. Intenta de nuevo.';
+    }
+  } catch (e) {
+    errEl.textContent = 'Error de conexión con el servidor.';
+  }
 };
 
 document.getElementById('btn-auto-join').onclick = async () => {
@@ -6044,16 +6078,36 @@ async function cargarSalasEnCurso() {
       return;
     }
     cont.innerHTML = salas.map(s => {
-      const juegoTxt = s.game === 'batalla' ? '⚔️ Batalla de Avatares' : (s.mode === 'solo' ? '🎯 Solitario' : '🎯 Estratega');
+      // Ícono grande y aparte (no solo metido en el texto): antes costaba
+      // distinguir de un vistazo si una fila era de Estratega o de Batalla.
+      const esBatalla = s.game === 'batalla';
+      const icono = esBatalla ? '⚔️' : '🎯';
+      const juegoTxt = esBatalla ? 'Batalla de Avatares' : (s.mode === 'solo' ? 'Estratega · Solitario' : 'Estratega de Códigos');
       const estadoTxt = s.status === 'playing' ? 'en juego' : 'esperando';
       const codeAttr = escaparHtml(s.code);
+      const gameAttr = escaparHtml(s.game || 'codigos');
+      // "Unirse" (entrar como jugador de verdad) solo tiene sentido si la
+      // partida todavía no arrancó — una vez en curso, lo único que se
+      // puede hacer desde acá es mirarla como espectador.
+      const botonUnirse = s.status === 'waiting'
+        ? `<button class="secondary btn-unirse-sala" data-code="${codeAttr}" data-game="${gameAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">➕ Unirse</button>`
+        : '';
       return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #2a2e3d;">
-        <span>Sala <b>${codeAttr}</b> · ${juegoTxt} · ${s.players} jugador(es) · ${estadoTxt}</span>
-        <button class="ghost btn-ver-espectador" data-code="${codeAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>
+        <span style="display:flex; align-items:center; gap:8px; min-width:0;">
+          <span style="font-size:1.3rem; flex-shrink:0;" title="${escaparHtml(juegoTxt)}">${icono}</span>
+          <span style="min-width:0;">Sala <b>${codeAttr}</b> · ${juegoTxt} · ${s.players} jugador(es) · ${estadoTxt}</span>
+        </span>
+        <span style="display:flex; gap:6px; flex-shrink:0;">
+          ${botonUnirse}
+          <button class="ghost btn-ver-espectador" data-code="${codeAttr}" data-game="${gameAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>
+        </span>
       </div>`;
     }).join('');
-    cont.querySelectorAll('.btn-ver-espectador').forEach((btn, i) => {
-      btn.onclick = () => verComoEspectador(btn.dataset.code, salas[i].game);
+    cont.querySelectorAll('.btn-ver-espectador').forEach((btn) => {
+      btn.onclick = () => verComoEspectador(btn.dataset.code, btn.dataset.game);
+    });
+    cont.querySelectorAll('.btn-unirse-sala').forEach((btn) => {
+      btn.onclick = () => unirseASala(btn.dataset.code, btn.dataset.game);
     });
   } catch (e) {
     cont.innerHTML = 'No se pudo cargar la lista.';
@@ -6076,6 +6130,25 @@ function verComoEspectador(code, juego) {
   const nombre = (currentPlayerName || document.getElementById('name-input').value.trim() || localStorage.getItem('edc_name') || 'Espectador');
   espectadorJuego = juego || 'codigos';
   conectarEspectador(code, nombre);
+}
+
+// "Unirse" desde la lista de Partidas en curso: entra como jugador de
+// verdad (no espectador) a una sala que todavía está esperando — mismo
+// mecanismo que crear/entrar a una sala privada, solo que el código sale
+// de la lista en vez de un link. El propio backend redirige a espectador
+// solo si justo se llenó o arrancó entre que se cargó la lista y el toque.
+function unirseASala(code, juego) {
+  const nombre = document.getElementById('name-input').value.trim();
+  if (!nombre) {
+    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    return;
+  }
+  reproducirSonido(soundUiBoton);
+  if (juego === 'batalla') {
+    conectarSalaBatalla(code, nombre);
+  } else {
+    conectarSala(code, nombre);
+  }
 }
 
 function conectarEspectador(roomCode, viewerName) {
@@ -6694,18 +6767,47 @@ function handleState(state) {
     if (btnCompartirCodigos) {
       btnCompartirCodigos.classList.remove('hidden');
     }
+    // Sala privada (PV-, ver /sala-privada/crear): quien la creó es el
+    // host (state.host_id) — solo esa persona puede iniciar la partida o
+    // expulsar a alguien. Partida Rápida (MM-) y solitario no tienen esta
+    // restricción, ahí sigue siendo "cualquiera puede iniciar" como antes.
+    const esSalaPrivadaCodigos = (currentRoomCode || '').toUpperCase().startsWith('PV-');
+    const soyHostCodigos = esSalaPrivadaCodigos && state.host_id && state.host_id === myId;
     document.getElementById('wait-players').innerHTML = state.players
       .map(p => {
         const avatarHtml = p.avatar
           ? `<img src="/gif/${p.avatar}" alt="" loading="lazy" style="width:20px;height:20px;object-fit:contain;border-radius:5px;vertical-align:middle;margin-right:5px;">`
           : '';
-        return `<div>${avatarHtml}👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}${p.rango ? ` · <span style="opacity:0.75;">${escaparHtml(p.rango)}</span>` : ''}</div>`;
+        const coronaHost = esSalaPrivadaCodigos && state.host_id === p.id ? ' 👑' : '';
+        const botonExpulsar = (soyHostCodigos && !p.is_you)
+          ? `<button class="ghost btn-expulsar-codigos" data-id="${escaparHtml(p.id)}" style="padding:2px 8px; font-size:0.7rem; flex-shrink:0;">✕ Expulsar</button>`
+          : '';
+        return `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span>${avatarHtml}👤 ${escaparHtml(p.name)}${p.is_you ? ' (tú)' : ''}${coronaHost}${p.rango ? ` · <span style="opacity:0.75;">${escaparHtml(p.rango)}</span>` : ''}</span>
+          ${botonExpulsar}
+        </div>`;
       }).join('');
+    document.querySelectorAll('.btn-expulsar-codigos').forEach(btn => {
+      btn.onclick = () => {
+        reproducirSonido(soundUiBoton);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'kick', player_id: btn.dataset.id }));
+        }
+      };
+    });
+
+    const puedoIniciarCodigos = !esSalaPrivadaCodigos || !state.host_id || state.host_id === myId;
     const startBtn = document.getElementById('start-btn');
-    startBtn.disabled = !state.can_start;
-    document.getElementById('wait-hint').textContent = state.can_start
-      ? `Cualquier jugador puede iniciar (${state.players.length}/${state.max_players}).`
-      : `Esperando al menos ${state.min_players} jugadores (${state.players.length}/${state.min_players}).`;
+    startBtn.disabled = !state.can_start || !puedoIniciarCodigos;
+    if (esSalaPrivadaCodigos && state.host_id && state.host_id !== myId) {
+      document.getElementById('wait-hint').textContent = state.can_start
+        ? 'Esperando a que el host inicie la partida...'
+        : `Esperando al menos ${state.min_players} jugadores (${state.players.length}/${state.min_players}).`;
+    } else {
+      document.getElementById('wait-hint').textContent = state.can_start
+        ? `Cualquier jugador puede iniciar (${state.players.length}/${state.max_players}).`
+        : `Esperando al menos ${state.min_players} jugadores (${state.players.length}/${state.min_players}).`;
+    }
 
     // Cuenta regresiva de "entra un bot en..." — solo aplica a salas de
     // Partida Rápida (MM-) y solo mientras el backend siga mandando un
@@ -7550,15 +7652,27 @@ document.getElementById('btn-auto-join-batalla').onclick = async () => {
   await buscarPartidaRapidaBatalla(name);
 };
 
-document.getElementById('join-btn-batalla').onclick = () => {
-  const room = document.getElementById('room-input-batalla').value.trim().toUpperCase();
+document.getElementById('btn-crear-sala-privada-batalla').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
+  const errEl = document.getElementById('join-error');
   if (!name) {
-    document.getElementById('join-error').textContent = 'Escribe tu nombre para poder entrar.';
+    errEl.textContent = 'Escribe tu nombre para poder entrar.';
     return;
   }
+  errEl.textContent = 'Creando sala privada...';
   reproducirSonido(soundUiBoton);
-  conectarSalaBatalla(room, name);
+  try {
+    const resp = await fetch('/sala-privada/crear?game=batalla');
+    const data = await resp.json();
+    if (resp.ok && data.room) {
+      errEl.textContent = '';
+      conectarSalaBatalla(data.room, name);
+    } else {
+      errEl.textContent = 'No se pudo crear la sala. Intenta de nuevo.';
+    }
+  } catch (e) {
+    errEl.textContent = 'Error de conexión con el servidor.';
+  }
 };
 
 function salirDeBatalla() {

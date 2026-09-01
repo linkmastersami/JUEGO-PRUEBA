@@ -943,6 +943,15 @@ async def solicitar(payload: dict, authorization: Optional[str] = Header(None)):
 # ---------------------------------------------------------------------------
 rooms: Dict[str, "Room"] = {}
 MATCHMAKE_PREFIX = "MM-"  # distingue salas de emparejamiento automático de códigos privados
+# Salas privadas creadas a mano por una persona (antes se creaban tipeando
+# cualquier código; ahora sale al azar, ver /sala-privada/crear), para que
+# la gente ya no pueda "adivinar" el código de la sala de otro con solo
+# probar palabras cortas. Sin bots de relleno (eso es solo de Partida
+# Rápida, ver CODIGOS_MATCHMAKE_TIMEOUT/BATALLA_MATCHMAKE_TIMEOUT) — en
+# Estratega de Códigos, además, quien la crea queda de host (ver
+# Room.host_id): solo esa persona puede arrancar la partida o expulsar a
+# alguien de la sala.
+PRIVATE_PREFIX = "PV-"
 
 MIN_PLAYERS = 2
 MAX_PLAYERS = 4
@@ -1139,6 +1148,16 @@ class Room:
         # más se une antes. None si esta sala no es de matchmaking, o si ya
         # no hay ninguna cuenta corriendo (partida arrancada, o llena).
         self.matchmaking_deadline: Optional[float] = None
+        # --- Host de sala privada (solo salas PV-, ver PRIVATE_PREFIX) ---
+        # Id de quien creó la sala (el primero en entrar). Se guarda siempre
+        # que haya jugadores, aunque solo se hace valer la restricción en
+        # salas privadas: ahí, solo el host puede arrancar la partida o
+        # expulsar a alguien (ver el manejo de "start"/"kick" en
+        # ws_endpoint). banned_names son los nombres (en minúscula) que el
+        # host expulsó de ESTA sala en particular: no pueden volver a
+        # entrar acá, pero no es un baneo global ni afecta otras salas.
+        self.host_id: Optional[str] = None
+        self.banned_names: set = set()
 
     def add_chat_message(self, sender: "Player", text: str) -> None:
         text = text.strip()[:300]
@@ -1520,6 +1539,7 @@ class Room:
             "disconnect_player_name": disc_player.name if disc_player else None,
             "disconnect_deadline_ms": int(self.disconnect_deadline * 1000) if self.disconnect_deadline else None,
             "matchmaking_deadline_ms": int(self.matchmaking_deadline * 1000) if self.matchmaking_deadline else None,
+            "host_id": self.host_id,
             "chat": self.chat_messages[-50:],
             "your_id": viewer_id,
             "min_players": MIN_PLAYERS,
@@ -2780,6 +2800,22 @@ async def matchmake(game: str = "codigos"):
     return {"room": new_room_id, "game": game}
 
 
+@app.get("/sala-privada/crear")
+async def crear_sala_privada(game: str = "codigos"):
+    """Crea una sala privada nueva (código al azar, ver PRIVATE_PREFIX) para
+    jugar con quien uno invite — reemplaza el viejo flujo de escribir un
+    código a mano. A diferencia de /matchmake, siempre crea una sala nueva
+    (nunca busca una existente para unirse: eso es justo lo que la hacía
+    "adivinable"). Sin bots de relleno, y en Estratega de Códigos quien la
+    crea queda de host de esa sala (ver Room.host_id)."""
+    new_room_id = PRIVATE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    while new_room_id in rooms:
+        new_room_id = PRIVATE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+    rooms[new_room_id] = BatallaRoom(new_room_id) if game == "batalla" else Room(new_room_id)
+    return {"room": new_room_id, "game": game}
+
+
 @app.get("/buscar-partida/{player_name}")
 async def buscar_partida(player_name: str):
     """Busca si ya existe una partida activa (esperando o en curso) donde
@@ -2919,12 +2955,27 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
             ))
             await websocket.close()
             return
+        if clean_name.lower() in room.banned_names:
+            # El host la expulsó de ESTA sala en particular (ver el manejo
+            # de "kick" más abajo) — no es un baneo global, en cualquier
+            # otra sala puede jugar sin problema.
+            await websocket.send_text(json.dumps(
+                {"type": "error", "message": "El host te expulsó de esta sala: no puedes volver a entrar."}
+            ))
+            await websocket.close()
+            return
 
+        es_primero = len(room.players) == 0
         pid = f"{clean_name}-{random.randint(1000, 9999)}"
         avatar, rango, _tablero = obtener_avatar_y_rango(clean_name)
         player = Player(pid, clean_name, websocket, avatar=avatar, rango=rango)
         room.players.append(player)
         room.log.append(f"{clean_name} se unió a la sala.")
+        if es_primero:
+            # Quien crea la sala queda de host — solo se hace valer en
+            # salas privadas (ver el manejo de "start"/"kick" más abajo),
+            # pero se guarda siempre (no hace daño en Partida Rápida/solo).
+            room.host_id = player.id
 
         # Solo las salas de Partida Rápida (MM-) arrancan la cuenta
         # regresiva de emparejamiento con bot; una sala privada espera a un
@@ -3011,9 +3062,53 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
                 continue
 
             elif mtype == "start" and room.status == "waiting":
-                if room.mode == "solo" or len(room.players) >= MIN_PLAYERS:
+                # En sala privada (PV-), solo el host puede arrancar — en
+                # Partida Rápida o solo no hay restricción (siempre hubo
+                # esa libertad ahí, y acá no cambia).
+                es_host_o_no_aplica = (
+                    not room_code.upper().startswith(PRIVATE_PREFIX)
+                    or room.host_id is None
+                    or player.id == room.host_id
+                )
+                if es_host_o_no_aplica and (room.mode == "solo" or len(room.players) >= MIN_PLAYERS):
                     room.start()
                     await broadcast(room)
+
+            elif mtype == "kick" and room.status == "waiting":
+                # Solo el host de una sala PRIVADA puede expulsar, y solo
+                # mientras se sigue esperando (no tiene sentido una vez que
+                # la partida ya arrancó: ahí ya existe "Salir"/abandono).
+                if (
+                    room_code.upper().startswith(PRIVATE_PREFIX)
+                    and room.host_id is not None
+                    and player.id == room.host_id
+                ):
+                    target = room.get_player(str(msg.get("player_id", "")))
+                    if target is not None and target.id != room.host_id:
+                        room.players = [p for p in room.players if p.id != target.id]
+                        room.banned_names.add(target.name.strip().lower())
+                        room.log.append(f"{target.name} fue expulsado de la sala por el host.")
+                        if target.ws is not None:
+                            try:
+                                await target.ws.send_text(json.dumps({
+                                    "type": "kicked",
+                                    "message": "El host te expulsó de la sala.",
+                                }))
+                            except Exception:
+                                pass
+                            # Cerrar su socket dispara su propio
+                            # WebSocketDisconnect del lado de esa conexión,
+                            # que ya se encarga solo de la limpieza normal
+                            # (online_names, chat del lobby, etc.) — no hace
+                            # falta duplicarla acá.
+                            try:
+                                await target.ws.close()
+                            except Exception:
+                                pass
+                        try:
+                            await broadcast(room)
+                        except Exception:
+                            pass
 
             elif mtype == "reveal" and room.status == "playing" and room.phase == "reveal" and room.pending_guess is None:
                 if room.current_player().id == player.id:
