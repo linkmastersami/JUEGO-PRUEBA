@@ -1091,6 +1091,19 @@
     width: 20px; height: 20px; border-radius: 50%;
     background: var(--accent2); border: 2px solid var(--text); cursor: pointer;
   }
+  /* Selector manual de canción de fondo (◀ Pista N ▶), fila propia debajo
+     del slider de "Música" — ver cambiarPistaManual(). */
+  .pista-selector { display: flex; align-items: center; gap: 10px; }
+  .pista-flecha {
+    background: #3a3f52; color: var(--text); border: none; border-radius: 8px;
+    width: 32px; height: 32px; font-size: 0.9rem; cursor: pointer; flex-shrink: 0;
+  }
+  .pista-flecha:active { background: var(--accent2); }
+  .pista-flecha:disabled { opacity: 0.4; cursor: not-allowed; }
+  #pista-nombre-actual {
+    flex: 1; text-align: center; font-size: 0.85rem; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   #volumen-btn-cerrar {
     margin-top: 18px;
     padding: 10px 34px;
@@ -1753,6 +1766,20 @@
         <input type="range" min="0" max="100" step="1" class="volumen-slider" id="vol-musica">
       </div>
       <span class="volumen-valor" id="vol-musica-valor">100%</span>
+    </div>
+    <!-- Elegir a mano QUÉ canción de fondo suena (además de la que sale
+         sola según el avatar puesto) — recorre frontend/musica/ con ◀ ▶.
+         Ver cargarCatalogoMusica/cambiarPistaManual. -->
+    <div class="volumen-fila">
+      <span class="volumen-icono">🎶</span>
+      <div class="volumen-info">
+        <div class="volumen-nombre">Canción de fondo</div>
+        <div class="pista-selector">
+          <button class="pista-flecha" id="pista-btn-atras" aria-label="Canción anterior">◀</button>
+          <span id="pista-nombre-actual">—</span>
+          <button class="pista-flecha" id="pista-btn-adelante" aria-label="Canción siguiente">▶</button>
+        </div>
+      </div>
     </div>
     <div class="volumen-fila">
       <span class="volumen-icono">⚔️</span>
@@ -4128,9 +4155,23 @@ function reproducirNoqueoDeAvatar(archivoAvatar) {
 // frontend/musica/<archivo-del-avatar>.mp3 si existe, si no
 // frontend/musica/default.mp3 — suena en loop todo el tiempo (menú,
 // tienda, las dos partidas), y cambia sola cuando cambia el avatar.
+//
+// EXCEPCIÓN: si la persona eligió una canción a mano con ◀/▶ en el panel
+// de Volumen (ver más abajo), esa elección queda guardada y manda sobre
+// ésta hasta que ella misma la vuelva a cambiar — el cambio de avatar deja
+// de pisarla.
 let musicaActual = null;
 let musicaAvatarActual = undefined; // undefined = todavía no se resolvió ninguna
+const MUSICA_MANUAL_KEY = 'edc_musica_manual';
 function reproducirMusicaParaAvatar(archivoAvatar) {
+  const manual = localStorage.getItem(MUSICA_MANUAL_KEY);
+  if (manual) {
+    // Solo arranca la reproducción la primera vez que se llega hasta acá
+    // tras el login: si ya está sonando la manual, las siguientes llamadas
+    // (cada refresh de perfil) no la reinician de nuevo desde el principio.
+    if (musicaAvatarActual !== '__manual__') reproducirPistaManual(manual);
+    return;
+  }
   const clave = archivoAvatar || null;
   if (clave === musicaAvatarActual) return; // ya está sonando la que corresponde
   musicaAvatarActual = clave;
@@ -4153,6 +4194,76 @@ function reproducirMusicaParaAvatar(archivoAvatar) {
     arrancar(nuevo);
   }
 }
+
+// --- Selector manual de canción de fondo (panel de Volumen, ◀ Pista N ▶) ---
+// Lista de frontend/musica/ traída de /musica (una sola vez, al abrir el
+// panel por primera vez). Elegir una acá la guarda en localStorage y desde
+// ese momento manda sobre la automática por avatar (ver excepción arriba).
+let catalogoMusica = [];
+async function cargarCatalogoMusica() {
+  try {
+    const resp = await fetch('/musica');
+    const data = await resp.json();
+    catalogoMusica = data.archivos || [];
+  } catch (e) {
+    catalogoMusica = [];
+  }
+}
+
+// El nombre de archivo (ej. "15001.mp3") no dice nada por sí solo, así que
+// se muestra como "Pista N" (1, 2, 3... en el orden del catálogo, sin
+// contar "default.mp3", que se muestra aparte con su propio nombre).
+function nombrePista(archivo) {
+  if (archivo === 'default.mp3') return 'Música por defecto';
+  const soloPistas = catalogoMusica.filter(a => a !== 'default.mp3');
+  const numero = soloPistas.indexOf(archivo) + 1;
+  return numero > 0 ? `Pista ${numero}` : archivo;
+}
+
+// El nombre del archivo que está sonando ahora mismo, sacado de la URL del
+// <audio> actual (funciona tanto si está sonando por elección manual como
+// por avatar) — así no hace falta mantener un índice aparte que se
+// desincronice.
+function archivoMusicaActual() {
+  if (!musicaActual || !musicaActual.src) return null;
+  try { return decodeURIComponent(musicaActual.src.split('/').pop()); }
+  catch (e) { return musicaActual.src.split('/').pop(); }
+}
+
+function actualizarNombrePistaUI() {
+  const el = document.getElementById('pista-nombre-actual');
+  if (!el) return;
+  const archivo = archivoMusicaActual();
+  el.textContent = archivo ? nombrePista(archivo) : '—';
+}
+
+// Reproduce un archivo puntual de frontend/musica/ (no necesariamente el
+// que corresponde al avatar puesto) y lo recuerda como elección manual.
+function reproducirPistaManual(archivo) {
+  musicaAvatarActual = '__manual__'; // ningún avatar real coincide con esta clave: bloquea el auto-cambio
+  localStorage.setItem(MUSICA_MANUAL_KEY, archivo);
+  const nuevo = new Audio('musica/' + archivo);
+  nuevo.loop = true;
+  nuevo.volume = canalVolumen.musica;
+  const anterior = musicaActual;
+  musicaActual = nuevo;
+  if (anterior) anterior.pause();
+  if (canalVolumen.musica > 0 && !musicaPausadaPorPartida) nuevo.play().catch(() => {});
+}
+
+// direccion: -1 (◀, anterior) o 1 (▶, siguiente) — recorre el catálogo en
+// círculo (después de la última vuelve a la primera, y viceversa).
+function cambiarPistaManual(direccion) {
+  if (catalogoMusica.length === 0) return;
+  const actual = catalogoMusica.indexOf(archivoMusicaActual());
+  const base = actual === -1 ? 0 : actual; // si sonaba algo fuera del catálogo, arranca desde el principio
+  const siguiente = actual === -1 ? base : (base + direccion + catalogoMusica.length) % catalogoMusica.length;
+  reproducirSonido(soundUiBoton);
+  reproducirPistaManual(catalogoMusica[siguiente]);
+  actualizarNombrePistaUI();
+}
+document.getElementById('pista-btn-atras').onclick = () => cambiarPistaManual(-1);
+document.getElementById('pista-btn-adelante').onclick = () => cambiarPistaManual(1);
 // Si el primer intento de reproducir música se bloqueó por la política de
 // autoplay del navegador (no hubo ningún toque todavía), la reintenta en
 // el primer toque/click que haga la persona en la página.
@@ -4355,7 +4466,7 @@ function actualizarIconoVolumen() {
   btn.title = 'Volumen';
 }
 
-function abrirPanelVolumen() {
+async function abrirPanelVolumen() {
   CANALES_VOLUMEN.forEach((canal) => {
     const slider = document.getElementById('vol-' + canal);
     const valorEl = document.getElementById('vol-' + canal + '-valor');
@@ -4364,6 +4475,8 @@ function abrirPanelVolumen() {
     if (valorEl) valorEl.textContent = pct + '%';
   });
   document.getElementById('overlay-volumen').classList.add('activo');
+  if (catalogoMusica.length === 0) await cargarCatalogoMusica();
+  actualizarNombrePistaUI();
 }
 function cerrarPanelVolumen() {
   document.getElementById('overlay-volumen').classList.remove('activo');

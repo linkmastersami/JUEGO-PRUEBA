@@ -185,6 +185,42 @@ def cargar_catalogo_tableros() -> List[dict]:
 
 CATALOGO_TABLEROS: List[dict] = cargar_catalogo_tableros()
 
+# ---------------------------------------------------------------------------
+# Catálogo de música de fondo (carpeta frontend/musica/) — a diferencia de
+# avatares/tableros no tiene precio ni se compra: es solo la lista de
+# archivos disponibles para el selector manual ◀/▶ del panel de Volumen
+# (ver /musica). "default.mp3" (la música de respaldo cuando el avatar
+# puesto no tiene canción propia) queda al final de la lista.
+MUSICA_DIR = os.path.join("frontend", "musica")
+MUSICA_EXTENSIONS = (".mp3",)
+
+
+def cargar_catalogo_musica() -> List[str]:
+    archivos = []
+    if not os.path.isdir(MUSICA_DIR):
+        print(f"⚠️  Carpeta de música no encontrada: {MUSICA_DIR}")
+        return archivos
+
+    for archivo in os.listdir(MUSICA_DIR):
+        if os.path.splitext(archivo)[1].lower() in MUSICA_EXTENSIONS:
+            archivos.append(archivo)
+
+    archivos.sort(key=lambda a: (a == "default.mp3", a))
+    return archivos
+
+
+CATALOGO_MUSICA: List[str] = cargar_catalogo_musica()
+
+
+@app.get("/musica")
+async def listar_musica():
+    """Lista de archivos de frontend/musica/ para el selector manual de
+    canción de fondo — subir un mp3 nuevo a esa carpeta lo agrega solo acá,
+    sin tocar nada más que reiniciar el proceso (mismo mecanismo que el
+    catálogo de avatares/tableros)."""
+    return {"archivos": CATALOGO_MUSICA}
+
+
 def obtener_rango(puntos: int, victorias: int):
     if victorias == 0:
         return "Novato en Desactivación"
