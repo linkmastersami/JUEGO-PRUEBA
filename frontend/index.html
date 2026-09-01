@@ -3824,11 +3824,13 @@ document.getElementById('btn-solicitar-avatar').onclick = abrirSolicitarAvatar;
 document.getElementById('solicitar-btn-cerrar').onclick = cerrarSolicitarAvatar;
 document.getElementById('solicitar-btn-enviar').onclick = enviarSolicitudAvatar;
 
-// El avatar dentro de la tarjeta de perfil solo abre el selector cuando
-// está en la pantalla de selección de modo (no durante una partida en
-// curso, donde esa misma tarjeta se reutiliza como HUD).
+// El avatar dentro de la tarjeta de perfil solo abre el selector en las
+// pantallas de selección (elegir juego, o elegir cómo jugar) — no durante
+// una partida en curso, donde esa misma tarjeta se reutiliza como HUD.
 document.getElementById('uiAvatarImg').onclick = () => {
-    if (!document.getElementById('join-step-modo').classList.contains('hidden')) {
+    const enSeleccionJuego = !document.getElementById('join-step-juego').classList.contains('hidden');
+    const enSeleccionModo = !document.getElementById('join-step-modo').classList.contains('hidden');
+    if (enSeleccionJuego || enSeleccionModo) {
         abrirSelectorAvatares();
     }
 };
