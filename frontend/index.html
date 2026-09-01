@@ -1986,8 +1986,8 @@
 <div class="wrap" id="pantallaJuego" style="position:relative;">
   <button id="btn-mute" title="Volumen" aria-label="Volumen"
     style="position:absolute; top:14px; left:14px; z-index:5; background:transparent; border:1px solid var(--muted); color:var(--muted); border-radius:8px; width:36px; height:36px; font-size:1.1rem; cursor:pointer;">🔊</button>
-  <h1 id="titulo-app"><span id="titulo-app-principal">LINK MASTER</span><span id="titulo-app-firma">SAMI</span></h1>
-  <div class="subtitle" id="game-subtitle">2-4 jugadores en línea · fiel al reglamento</div>
+  <h1 id="titulo-app"><span id="titulo-app-principal">LINK MASTER</span><span id="titulo-app-firma">SAMI GAMES</span></h1>
+  <div class="subtitle" id="game-subtitle">🚧 Fan game · versión beta — se sigue armando mientras juegas</div>
 
   <!-- HUD DEL JUGADOR -->
   <div id="perfilJugador" class="card hidden" style="text-align: center; border: 2px solid var(--accent2);">
@@ -4419,6 +4419,12 @@ const joinScreen = document.getElementById('join-screen');
 const waitScreen = document.getElementById('wait-screen');
 const gameScreen = document.getElementById('game-screen');
 
+// Texto del subtítulo bajo el logo cuando NO se está jugando una partida de
+// Estratega de Códigos (durante una partida, renderGame lo pisa con "2-4
+// jugadores...", modo solitario o tutorial — ver limpiarEstadoDePartida,
+// que lo restaura a este apenas se sale).
+const SUBTITULO_MENU_DEFAULT = document.getElementById('game-subtitle').textContent;
+
 // --- CONEXIÓN Y EMPAREJAMIENTO AUTOMÁTICO ---
 
 let esModoSolo = false;
@@ -4663,6 +4669,12 @@ function limpiarEstadoDePartida() {
   document.getElementById('game-screen').classList.add('hidden');
   document.getElementById('wait-screen').classList.add('hidden');
   document.getElementById('btn-salir').classList.add('hidden');
+
+  // El subtítulo bajo el logo se pisa mientras se juega una partida (ver
+  // renderGame: "2-4 jugadores...", modo solitario, tutorial...) — al salir
+  // vuelve a mostrar el de menú, si no se quedaba con el de la última
+  // partida jugada para siempre.
+  document.getElementById('game-subtitle').textContent = SUBTITULO_MENU_DEFAULT;
 
   // Reset del chat flotante
   document.getElementById('chat-mensajes').innerHTML = '';
