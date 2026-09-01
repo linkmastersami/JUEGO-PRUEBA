@@ -4118,10 +4118,28 @@ function reproducirMusicaParaAvatar(archivoAvatar) {
 // autoplay del navegador (no hubo ningún toque todavía), la reintenta en
 // el primer toque/click que haga la persona en la página.
 document.addEventListener('click', () => {
-  if (musicaActual && musicaActual.paused && canalVolumen.musica > 0) {
+  if (musicaActual && musicaActual.paused && canalVolumen.musica > 0 && !musicaPausadaPorPartida) {
     musicaActual.play().catch(() => {});
   }
 }, true);
+
+// --- Música en silencio durante la partida (los 3 juegos) ---
+// Estratega de Códigos, Batalla de Avatares y Monster Crazy pausan la
+// música de fondo apenas arranca la partida, y la retoman donde iba al
+// terminar (no vuelve a empezar desde cero). El banderín evita: (a) pausar
+// de nuevo en cada re-render mientras ya se está jugando, y (b) que el
+// reintento de autoplay de arriba la reanude antes de tiempo.
+let musicaPausadaPorPartida = false;
+function pausarMusicaPorPartida() {
+  if (musicaPausadaPorPartida) return;
+  musicaPausadaPorPartida = true;
+  if (musicaActual) musicaActual.pause();
+}
+function reanudarMusicaTrasPartida() {
+  if (!musicaPausadaPorPartida) return;
+  musicaPausadaPorPartida = false;
+  if (musicaActual && canalVolumen.musica > 0) musicaActual.play().catch(() => {});
+}
 
 // Al mandar la pestaña/app a segundo plano (cambiar de app, apagar la
 // pantalla, minimizar), pausa la música y la narración del tutorial en vez
@@ -4170,7 +4188,10 @@ function manejarVueltaAlFrente() {
     location.reload();
     return;
   }
-  if (musicaActual && canalVolumen.musica > 0) musicaActual.play().catch(() => {});
+  // Si la partida sigue en curso (musicaPausadaPorPartida), que siga en
+  // silencio al volver del segundo plano — no la despierta hasta que
+  // termine, igual que si nunca se hubiera ido.
+  if (musicaActual && canalVolumen.musica > 0 && !musicaPausadaPorPartida) musicaActual.play().catch(() => {});
   // Por si estuvo oculto un rato corto y aun así la conexión se cortó,
   // revisa de una en vez de esperar al próximo ping cada 20s (ver
   // CONEXION_ZOMBI_MS más arriba).
@@ -4613,6 +4634,10 @@ document.getElementById('md-btn-aceptar').onclick = () => {
 // flotando sobre lo que sea que se muestre después). No decide a qué
 // pantalla ir después: eso lo arma quien la llama.
 function limpiarEstadoDePartida() {
+  // Red de seguridad: si se sale de la partida sin pasar por el "termina la
+  // partida" normal (abandono, desconexión, sala cerrada), la música igual
+  // se retoma acá — si no, se quedaba en silencio para siempre.
+  reanudarMusicaTrasPartida();
   if (reconnectTimeout) { clearTimeout(reconnectTimeout); reconnectTimeout = null; }
   detenerHeartbeat();
   cerrarCuentaRegresivaDesactivar();
@@ -6286,6 +6311,7 @@ function handleState(state) {
     // final). Cubre multijugador, solitario y el tutorial por igual, los
     // 3 marcan status:'finished' + winner con el mismo criterio.
     if (lastState.status !== 'finished' && state.status === 'finished') {
+      reanudarMusicaTrasPartida();
       if (state.winner === myId) {
         lanzarConfeti();
         vibrar([100, 60, 100, 60, 220]);
@@ -6454,6 +6480,7 @@ function handleState(state) {
 
   waitScreen.classList.add('hidden');
   gameScreen.classList.remove('hidden');
+  pausarMusicaPorPartida();
 
   const subtitleEl = document.getElementById('game-subtitle');
   if (subtitleEl) {
@@ -6999,6 +7026,9 @@ function abrirMonsterCrazy() {
 function cerrarMonsterCrazy() {
   document.getElementById('overlay-monster').classList.remove('activo');
   document.getElementById('monster-iframe').src = 'about:blank';
+  // Red de seguridad: si se sale con la ✕ en medio de una partida (sin
+  // llegar a "monsterGameOver"), la música se retoma igual acá.
+  reanudarMusicaTrasPartida();
 }
 
 // El propio juego (dentro del iframe) avisa por postMessage cuándo termina
@@ -7014,7 +7044,15 @@ window.addEventListener('message', async (ev) => {
     cerrarMonsterCrazy();
     return;
   }
+  if (datos.type === 'monsterStart') {
+    pausarMusicaPorPartida();
+    return;
+  }
   if (datos.type !== 'monsterGameOver') return;
+
+  // La partida ya terminó apenas llega este mensaje (aunque falte guardar
+  // el resultado contra el backend), así que la música se retoma acá mismo.
+  reanudarMusicaTrasPartida();
 
   const dificultad = datos.dificultad === 'hard' ? 'dificil' : 'facil';
   const puntuacion = Math.max(0, parseInt(datos.puntuacion, 10) || 0);
@@ -7087,6 +7125,10 @@ function irASeleccionModoBatalla(nombre) {
 }
 
 function limpiarEstadoDePartidaBatalla() {
+  // Red de seguridad: mismo motivo que en limpiarEstadoDePartida (Estratega
+  // de Códigos) — si se sale sin pasar por "termina la partida" normal, la
+  // música se retoma igual acá.
+  reanudarMusicaTrasPartida();
   if (reconnectTimeoutBatalla) { clearTimeout(reconnectTimeoutBatalla); reconnectTimeoutBatalla = null; }
   if (heartbeatIntervalBatalla) { clearInterval(heartbeatIntervalBatalla); heartbeatIntervalBatalla = null; }
   if (matchmakingIntervalBatalla) { clearInterval(matchmakingIntervalBatalla); matchmakingIntervalBatalla = null; }
@@ -7396,6 +7438,7 @@ function handleStateBatalla(state) {
   }
 
   if (anterior && anterior.status !== 'finished' && state.status === 'finished') {
+    reanudarMusicaTrasPartida();
     // Le da tiempo a la animación de la última jugada (la que terminó la
     // partida) a llegar a su impacto antes de tapar todo con el aviso de
     // victoria/derrota/empate — si no, quedaban una encima de la otra.
@@ -7880,6 +7923,7 @@ function renderGameBatalla(state) {
   clearInterval(matchmakingIntervalBatalla);
   document.getElementById('wait-screen-batalla').classList.add('hidden');
   document.getElementById('game-screen-batalla').classList.remove('hidden');
+  pausarMusicaPorPartida();
   // En la pantalla final ya hay botones grandes de Revancha/Salir propios
   // (ver mostrarPantallaFinalBatalla) — el botoncito de salir de siempre
   // sobra ahí y queda escondido.

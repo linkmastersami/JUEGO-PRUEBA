@@ -842,6 +842,9 @@
     if(document.documentElement.requestFullscreen){
       document.documentElement.requestFullscreen().catch(()=>{});
     }
+    // Avisa a la app contenedora para que pause la música de fondo mientras
+    // dura esta partida (ver "monsterStart"/"monsterGameOver" en index.html).
+    notifyParent('monsterStart');
   }
 
   document.getElementById('easyBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('easy'); });
