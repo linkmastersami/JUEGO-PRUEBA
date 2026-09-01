@@ -948,6 +948,21 @@ MIN_PLAYERS = 2
 MAX_PLAYERS = 4
 DISCONNECT_TIMEOUT = 20  # segundos de gracia antes de que un jugador desconectado pierda automáticamente
 
+# Segundos de espera de "Partida Rápida" (Estratega de Códigos) antes de
+# completar la sala con un bot y arrancar solo — igual que
+# BATALLA_MATCHMAKE_TIMEOUT, para el otro juego (ver _watch_codigos_matchmake).
+CODIGOS_MATCHMAKE_TIMEOUT = 10
+
+# Nombres para el bot de relleno del matchmaking de Estratega de Códigos —
+# mismo espíritu que BATALLA_NOMBRES_BOT (tienen que sonar a jugador de
+# verdad), pool aparte nada más para no repetir siempre los mismos nombres
+# entre los dos juegos.
+ESTRATEGA_NOMBRES_BOT = [
+    "Caro_98", "Bruno.dev", "PixelNina", "Marco_Uy", "Sole_Vortex", "Ktrin22",
+    "ElMago_Fer", "Nati.exe", "Rulo_Beta", "AguzGamer", "TomiPlay", "Vicky_Neon",
+    "Dieguito_X", "Flor_Cripta", "ElTuerto99", "Mili_Rayo",
+]
+
 # ---------------------------------------------------------------------------
 # Chat grupal (lobby) y contador de jugadores en línea
 # ---------------------------------------------------------------------------
@@ -1007,6 +1022,13 @@ def tile_info(n: int) -> dict:
     return {"number": n, "color": color, "dots": dots}
 
 
+# Los 12 números posibles de cada color (uno por columna) — lo usa el bot de
+# Estratega de Códigos (ver _bot_candidatos) para arrancar sus candidatos:
+# apenas conoce el color de una de sus fichas secretas (que sí ve, a
+# diferencia del número), ya sabe que es uno de estos 12.
+NUMEROS_POR_COLOR: Dict[str, List[int]] = {c: [n for n in range(1, 61) if tile_info(n)["color"] == c] for c in COLORS}
+
+
 class ClueTile:
     def __init__(self, kind: str, tile: dict, notch: Optional[int] = None,
                  slot: Optional[int] = None, same: Optional[bool] = None):
@@ -1027,17 +1049,26 @@ class ClueTile:
 
 
 class Player:
-    def __init__(self, pid: str, name: str, ws: WebSocket, avatar: Optional[str] = None, rango: Optional[str] = None):
+    def __init__(self, pid: str, name: str, ws: Optional[WebSocket], avatar: Optional[str] = None,
+                 rango: Optional[str] = None, is_bot: bool = False):
         self.id = pid
         self.name = name
         self.ws = ws
-        self.secret: List[dict] = []  
+        self.secret: List[dict] = []
         self.clues: List[ClueTile] = []
-        self.eliminated = False  
-        self.resolved = False  
+        self.eliminated = False
+        self.resolved = False
         self.connected = True
         self.avatar = avatar  # nombre de archivo en frontend/gif/, o None
         self.rango = rango or obtener_rango(0, 0)
+        # Bot de relleno de Partida Rápida (ver Room.agregar_bot): sin
+        # socket propio (ws=None, broadcast() ya lo salta solo), "connected"
+        # se queda en True para siempre porque nunca se desconecta de
+        # verdad. El frontend no distingue nada especial con esto —el bot
+        # se ve exactamente como cualquier otro jugador— es solo para que
+        # el propio servidor sepa a quién le toca jugar solo (ver
+        # _bot_jugar_codigos).
+        self.is_bot = is_bot
 
     def notch_for(self, number: int) -> int:
         return sum(1 for t in self.secret if t["number"] < number)
@@ -1064,6 +1095,7 @@ class Player:
             "connected": self.connected,
             "avatar": self.avatar,
             "rango": self.rango,
+            "is_bot": self.is_bot,
         }
 
 
@@ -1133,6 +1165,17 @@ class Room:
 
     def get_player(self, pid: str) -> Optional[Player]:
         return next((p for p in self.players if p.id == pid), None)
+
+    def agregar_bot(self) -> None:
+        """Completa la sala con un bot de relleno cuando nadie más se sumó
+        a tiempo a una Partida Rápida (ver _watch_codigos_matchmake). Mismo
+        mecanismo que BatallaRoom.agregar_bot."""
+        nombre = random.choice(ESTRATEGA_NOMBRES_BOT)
+        avatar = random.choice(CATALOGO_AVATARES)["archivo"] if CATALOGO_AVATARES else None
+        pid = f"bot-{random.randint(100000, 999999)}"
+        bot = Player(pid, nombre, None, avatar=avatar, rango=obtener_rango(0, 0), is_bot=True)
+        self.players.append(bot)
+        self.log.append(f"{nombre} se unió a la sala.")
 
     def start(self):
         by_color: Dict[str, List[int]] = {c: [] for c in COLORS}
@@ -2420,6 +2463,192 @@ async def _bot_jugar_batalla(room_code: str):
         asyncio.create_task(_bot_jugar_batalla(room.code))
 
 
+# ---------------------------------------------------------------------------
+# Bot de relleno de Estratega de Códigos (Partida Rápida sin rival a los
+# 10s, ver _watch_codigos_matchmake) — a diferencia del bot de Batalla de
+# Avatares (que elige entre unas pocas cartas con una heurística de
+# prioridades), acá el bot razona igual que tendría que hacerlo un jugador
+# real: nunca mira su propio número/puntitos reales (self.secret[i]["number"]
+# / ["dots"]), solo lo que ya sabría un jugador de verdad —el COLOR de cada
+# una de sus 5 fichas (eso sí se ve, ver Player.to_dict) y las pistas que él
+# mismo fue pidiendo (categorizar/comparar)— y con eso arma, por cada ficha,
+# la lista de números todavía posibles. Cuando le queda exactamente 1
+# posible para las 5, grita "Desactivar" con esos números; si el mazo se
+# está por acabar y no llegó a estar seguro del todo, tira su mejor
+# estimación en vez de trabar la partida esperando una pista que ya no va a
+# llegar.
+# ---------------------------------------------------------------------------
+def _bot_candidatos(bot: "Player") -> List[List[int]]:
+    """Para cada una de las 5 fichas secretas del bot (en el mismo orden que
+    Room usa como "slot": de menor a mayor número), la lista de números que
+    todavía son compatibles con todo lo que el bot sabe: el color de esa
+    ficha (arranca en los 12 números de ese color) más lo que fue afinando
+    con sus propias pistas categorizar/comparar."""
+    candidatos = [list(NUMEROS_POR_COLOR[t["color"]]) for t in bot.secret]
+    for clue in bot.clues:
+        if clue.kind == "categorize":
+            revelado = clue.tile["number"]
+            notch = clue.notch
+            for i in range(len(candidatos)):
+                if i < notch:
+                    candidatos[i] = [c for c in candidatos[i] if c < revelado]
+                else:
+                    candidatos[i] = [c for c in candidatos[i] if c > revelado]
+        elif clue.kind == "compare":
+            i = clue.slot
+            if i is None or not (0 <= i < len(candidatos)):
+                continue
+            puntitos_revelado = clue.tile["dots"]
+            if clue.same:
+                candidatos[i] = [c for c in candidatos[i] if tile_info(c)["dots"] == puntitos_revelado]
+            else:
+                candidatos[i] = [c for c in candidatos[i] if tile_info(c)["dots"] != puntitos_revelado]
+    return candidatos
+
+
+def _bot_mejor_estimacion(candidatos_ficha: List[int]) -> int:
+    """Cuando hay que adivinar sin estar 100% seguro (mazo por acabarse): el
+    del medio de lo que todavía queda posible es mejor apuesta que un
+    extremo. Si por lo que sea no queda ningún candidato (no debería pasar
+    nunca), cualquier número sirve para no trabar la partida."""
+    if candidatos_ficha:
+        return candidatos_ficha[len(candidatos_ficha) // 2]
+    return random.randint(1, 60)
+
+
+def _bot_elegir_clue_codigos(room: "Room", faceup_index: int, candidatos: List[List[int]]) -> bool:
+    """Decide si pedir CATEGORIZAR o COMPARAR sobre la ficha que el bot
+    acaba de revelar, y la aplica. Prioriza COMPARAR sobre la ficha (de las
+    que todavía tienen más de un candidato) cuyos candidatos tengan más de
+    un valor de puntitos posible entre sí —ahí un comparar todavía puede
+    descartar candidatos—, empezando por la más ambigua. Si ya no queda
+    ninguna así (todas las fichas sin resolver ya tienen los puntitos
+    determinados, solo falta afinar el orden), pide CATEGORIZAR."""
+    peor_slot, peor_cantidad = -1, 0
+    for i, cand in enumerate(candidatos):
+        if len(cand) <= 1:
+            continue
+        puntitos_distintos = {tile_info(c)["dots"] for c in cand}
+        if len(puntitos_distintos) > 1 and len(cand) > peor_cantidad:
+            peor_slot, peor_cantidad = i, len(cand)
+    if peor_slot != -1:
+        return room.apply_compare(faceup_index, peor_slot)
+    return room.apply_categorize(faceup_index)
+
+
+async def _bot_intentar_desactivar_codigos(room_code: str, bot_id: str, numeros: List[int]) -> None:
+    """Mismo ritual que un intento humano (ver el manejo de "guess" en
+    ws_endpoint): deja la sala en pending_guess, espera 5s (misma demora que
+    la animación de un jugador real) y recién ahí resuelve — así el rival no
+    nota nada distinto entre que le toque a un bot o a otra persona."""
+    room = rooms.get(room_code)
+    if not isinstance(room, Room) or room.status != "playing":
+        return
+    room.pending_guess = {"player_id": bot_id, "player_name": room.get_player(bot_id).name}
+    bot = room.get_player(bot_id)
+    room.log.append(f"{bot.name} intenta desactivar su bomba..." if bot else "El bot intenta desactivar su bomba...")
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    await asyncio.sleep(5)
+    room = rooms.get(room_code)
+    if room is None or not isinstance(room, Room):
+        return
+    room.pending_guess = None
+    room.guess(bot_id, numeros)
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_codigos(room.code))
+
+
+async def _bot_jugar_codigos(room_code: str) -> None:
+    """Hace jugar al bot su turno completo: revela una ficha y le pide una
+    pista (o, si ya está seguro —o el mazo casi no tiene fichas y no le
+    queda margen para seguir esperando pistas—, intenta desactivar
+    directo). Pequeña demora al principio para que no se sienta
+    instantáneo/robótico, igual que el bot de Batalla de Avatares."""
+    await asyncio.sleep(1.1 + random.random() * 1.3)
+    room = rooms.get(room_code)
+    if not isinstance(room, Room) or room.status != "playing" or room.pending_guess is not None:
+        return
+    bot = room.current_player()
+    if not bot.is_bot:
+        return
+
+    candidatos = _bot_candidatos(bot)
+    seguro_del_todo = all(len(c) == 1 for c in candidatos)
+    # Si ya no quedan fichas en el mazo para seguir pidiendo pistas, no tiene
+    # sentido esperar más: hay que tirar la mejor apuesta con lo que se
+    # sabe, aunque no esté 100% resuelto.
+    sin_margen = room.deck_remaining() <= 0 and room.phase == "reveal"
+    if seguro_del_todo or sin_margen:
+        numeros = [c[0] if len(c) == 1 else _bot_mejor_estimacion(c) for c in candidatos]
+        asyncio.create_task(_bot_intentar_desactivar_codigos(room.code, bot.id, numeros))
+        return
+
+    if room.phase == "reveal":
+        if room.reveal_tile() is None:
+            # El mazo se vació justo en este instante (nadie tenía por qué
+            # saberlo de antemano): tira la mejor apuesta en vez de quedar
+            # esperando una ficha que ya no va a aparecer.
+            numeros = [c[0] if len(c) == 1 else _bot_mejor_estimacion(c) for c in candidatos]
+            asyncio.create_task(_bot_intentar_desactivar_codigos(room.code, bot.id, numeros))
+            return
+        try:
+            await broadcast(room)
+        except Exception:
+            pass
+        await asyncio.sleep(0.8 + random.random() * 0.9)
+        room = rooms.get(room.code)
+        if not isinstance(room, Room) or room.status != "playing" or room.pending_guess is not None:
+            return
+        bot = room.current_player()
+        if not bot.is_bot:
+            return
+
+    faceup_index = len(room.faceup) - 1
+    ok = _bot_elegir_clue_codigos(room, faceup_index, candidatos)
+    if not ok:
+        # Red de seguridad: si por lo que sea ninguna de las dos pistas se
+        # pudo aplicar (no debería pasar nunca), categoriza igual para no
+        # dejar la partida trabada en el turno del bot.
+        ok = room.apply_categorize(faceup_index)
+    if not ok:
+        room.advance_turn()
+        room.phase = "reveal"
+
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_codigos(room.code))
+
+
+async def _watch_codigos_matchmake(room_code: str) -> None:
+    """Cuenta regresiva de 10s de Partida Rápida (Estratega de Códigos): si
+    nadie más entró a la sala, se completa con un bot y arranca la partida
+    sola. Igual que _watch_batalla_matchmake, para el otro juego."""
+    await asyncio.sleep(CODIGOS_MATCHMAKE_TIMEOUT)
+    room = rooms.get(room_code)
+    if not isinstance(room, Room):
+        return
+    if room.status != "waiting" or len(room.players) != 1:
+        return
+    room.agregar_bot()
+    room.start()
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_codigos(room.code))
+
+
 async def _watch_batalla_matchmake(room_code: str):
     """Cuenta regresiva de 10s de Partida Rápida: si nadie más entró a la
     sala, se completa con un bot y arranca la partida sola."""
@@ -2459,6 +2688,8 @@ async def _watch_disconnect(room_code: str, pid: str, token: int):
         await broadcast(room)
     except Exception:
         pass
+    if room.status == "playing" and room.current_player().is_bot:
+        asyncio.create_task(_bot_jugar_codigos(room.code))
 
 
 async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> None:
@@ -2669,6 +2900,13 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
         room.log.append(f"{clean_name} se unió a la sala.")
         await broadcast(room)
 
+        # Solo las salas de Partida Rápida (MM-) arrancan la cuenta
+        # regresiva de emparejamiento con bot; una sala privada espera a un
+        # humano indefinidamente (igual que en Batalla de Avatares, ver
+        # ws_batalla_endpoint).
+        if room_code.upper().startswith(MATCHMAKE_PREFIX) and len(room.players) == 1:
+            asyncio.create_task(_watch_codigos_matchmake(room_code))
+
     _add_online(clean_name)
     await _broadcast_lobby()
 
@@ -2710,8 +2948,13 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
         except Exception:
             pass
 
-        # Limpieza de memoria (cierre de sala) si todos se desconectaron de esta sala
-        if not any(p.connected for p in room.players):
+        # Limpieza de memoria (cierre de sala) si todos se desconectaron de
+        # esta sala. Los bots (ver Room.agregar_bot) quedan "connected" para
+        # siempre —no tiene sentido que lo estén de otra forma, nunca se
+        # desconectan de verdad—, así que sin el "if not p.is_bot" acá
+        # cualquier sala que alguna vez completó con un bot se quedaría en
+        # memoria para siempre apenas la única persona real se fuera.
+        if not any(p.connected for p in room.players if not p.is_bot):
             if room.code in rooms:
                 del rooms[room.code]
 
@@ -2758,6 +3001,8 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
                         ok = room.apply_compare(faceup_index, msg.get("slot"))
                     if ok:
                         await broadcast(room)
+                        if room.status == "playing" and room.current_player().is_bot:
+                            asyncio.create_task(_bot_jugar_codigos(room.code))
 
             elif mtype == "guess" and room.status == "playing":
                 numbers = msg.get("numbers", [])
@@ -2785,6 +3030,8 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
                                 await broadcast(target_room)
                             except Exception:
                                 pass
+                            if target_room.status == "playing" and target_room.current_player().is_bot:
+                                asyncio.create_task(_bot_jugar_codigos(target_room.code))
 
                         asyncio.create_task(_resolver_intento_desactivacion())
 
@@ -2816,8 +3063,13 @@ async def ws_endpoint(websocket: WebSocket, room_code: str, player_name: str, to
                     await broadcast(room)
                 except Exception:
                     pass
+                if room.status == "playing" and room.current_player().is_bot:
+                    asyncio.create_task(_bot_jugar_codigos(room.code))
 
-                if not any(p.connected for p in room.players):
+                # Ver el comentario equivalente en _cleanup_desconexion: sin
+                # el "if not p.is_bot", una sala completada con un bot nunca
+                # se limpiaría de memoria después de esto.
+                if not any(p.connected for p in room.players if not p.is_bot):
                     if room.code in rooms:
                         del rooms[room.code]
 
