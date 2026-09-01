@@ -2107,6 +2107,9 @@
       <button class="full" id="btn-abrir-tienda" style="margin-top: 10px; font-size: 1.05rem; background: var(--accent2);">
         🛍️ Avatares y tableros
       </button>
+      <button class="full" id="btn-mis-avatares-juego" style="margin-top: 10px; font-size: 1.05rem; background: var(--good);">
+        🎭 Cambiar avatar
+      </button>
 
       <button class="full ghost" id="btn-cambiar-nombre-juego" style="margin-top: 16px; font-size: 0.8rem;">← Cerrar sesión</button>
     </div>
@@ -3634,6 +3637,10 @@ document.getElementById('overlay-tienda').onclick = (e) => {
 };
 document.getElementById('btn-abrir-tienda').onclick = () => abrirTienda(false);
 document.getElementById('btn-mis-avatares').onclick = () => abrirSelectorAvatares();
+// Mismo botón que "Mis avatares" (ver arriba), pero repetido en la pantalla
+// de elegir juego (paso 2) para no tener que entrar a un juego primero
+// solo para cambiar de avatar.
+document.getElementById('btn-mis-avatares-juego').onclick = () => abrirSelectorAvatares();
 
 // ---------------------------------------------------------------------------
 // Ranking de jugadores (avatar, rango y puntos de todos)
