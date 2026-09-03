@@ -1,0 +1,1713 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0510">
+<title>Drift</title>
+<style>
+  /* ---------- Prototipo suelto (frontend/drift.html) -------------------
+     Juego APARTE, todavía no conectado a index.html ni a main.py. Motor de
+     pista "pseudo-3D" (curvas + lomas con matemática de proyección en
+     canvas 2D, sin WebGL) adaptado del tutorial de código abierto (MIT)
+     "javascript-racer" de Jake Gordon — github.com/jakesgordon/javascript-
+     racer — pero reescrito acá con autos/pista dibujados con formas
+     vectoriales (no los sprites de ejemplo del tutorial, esos eran solo
+     para la clase) y con la mecánica nueva: DERRAPE PARA BOOST, estilo
+     Speed Drifters/KartRider — mantener el botón de derrapar al tomar una
+     curva llena un medidor (chispas azul→naranja→violeta según cuánto
+     aguantaste), soltarlo dispara un empujón de velocidad proporcional.
+     Un solo jugador por ahora — el plan de multijugador (mismo patrón de
+     salas que Estratega de Códigos) está comentado al final del script. */
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; user-select:none; -webkit-user-select:none; }
+  html, body {
+    width:100%; height:100%; overflow:hidden; background:#0a0510;
+    touch-action:none; overscroll-behavior:none;
+    font-family: 'Segoe UI', Arial, sans-serif;
+  }
+  #gameCanvas { position:absolute; top:0; left:0; touch-action:none; display:block; }
+
+  /* Controles: dos botones de girar juntos a la izquierda, DRIFT solo a
+     la derecha — reemplaza las zonas invisibles de medio-pantalla de
+     antes, que se sentían raras/impredecibles en el teléfono. */
+  #steerWrap {
+    position:absolute; left:max(18px, env(safe-area-inset-left)); bottom:max(22px, env(safe-area-inset-bottom));
+    display:flex; gap:14px; z-index:9;
+  }
+  .steerBtn {
+    width:78px; height:78px; border-radius:50%; touch-action:none;
+    background: radial-gradient(circle at 35% 30%, #4db8ff, #0d5aa8 70%);
+    border:3px solid rgba(255,255,255,0.7); color:#fff; font-weight:900; font-size:30px;
+    box-shadow:0 0 18px rgba(51,170,255,0.55);
+  }
+  .steerBtn.activo { background: radial-gradient(circle at 35% 30%, #fff, #bfe6ff 55%, #4db8ff 100%); box-shadow:0 0 30px rgba(120,200,255,0.9); }
+  .steerBtn:active { transform: scale(0.94); }
+
+  #driftBtn {
+    position:absolute; right:max(18px, env(safe-area-inset-right)); bottom:max(22px, env(safe-area-inset-bottom));
+    width:96px; height:96px; border-radius:50%; z-index:9; touch-action:none;
+    background: radial-gradient(circle at 35% 30%, #ff9d3d, #c2450c 70%);
+    border:3px solid rgba(255,255,255,0.7); color:#fff; font-weight:900; font-size:14px;
+    letter-spacing:1px; box-shadow:0 0 22px rgba(255,140,0,0.6);
+  }
+  #driftBtn.activo { background: radial-gradient(circle at 35% 30%, #fff, #ffd93d 55%, #ff9d3d 100%); box-shadow:0 0 34px rgba(255,217,61,0.9); }
+  #driftBtn:active { transform: scale(0.94); }
+
+  #hud {
+    position:absolute; top:0; left:0; width:100%;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding: max(14px, env(safe-area-inset-top)) 16px 0 16px;
+    pointer-events:none; z-index:6;
+  }
+  #hud .box { color:#fff; font-weight:bold; text-shadow: 0 0 8px rgba(255,140,0,0.8), 0 2px 2px rgba(0,0,0,0.6); font-size:16px; }
+  #vuelta { font-size:20px; letter-spacing:1px; }
+  #tiempoActual { font-size:12px; opacity:0.85; font-weight:normal; }
+  #velWrap { text-align:right; }
+  #vel { font-size:18px; }
+  #mejorVuelta { font-size:11px; opacity:0.8; font-weight:normal; }
+
+  /* Medidor de derrape: se llena de abajo hacia arriba, cambia de color
+     según el tramo (chispa azul/naranja/violeta) igual que el juego real.
+     Pegado a la IZQUIERDA del botón DRIFT (no arriba) para dejar el espacio
+     de arriba libre para el cluster de TURBO/cápsulas — ver más abajo. */
+  #driftMeterWrap {
+    position:absolute; right:calc(max(18px, env(safe-area-inset-right)) + 96px + 14px);
+    bottom:max(22px, env(safe-area-inset-bottom)); width:14px; height:100px; z-index:6;
+    background:rgba(255,255,255,0.15); border-radius:8px; overflow:hidden;
+    box-shadow: inset 0 0 4px rgba(0,0,0,0.6); pointer-events:none;
+  }
+  #driftMeter { position:absolute; bottom:0; left:0; width:100%; height:0%; background:#33aaff; transition:height 0.05s linear, background 0.15s; }
+
+  /* Cluster de TURBO: botón independiente (activa la cápsula más vieja),
+     separado de DRIFT — va ARRIBA del botón de derrapar, con hueco de por
+     medio, no pegado. Las 3 cápsulas rodean a ESTE botón en media luna
+     (arriba, arriba-izquierda, izquierda). Vacía = circulito apagado;
+     con carga = azul(1) / naranja(2) / violeta(3, llena) según cuánto
+     acumuló — ver acumularCarga() en el script. */
+  #turboWrap {
+    position:absolute; right:max(18px, env(safe-area-inset-right));
+    bottom:calc(max(22px, env(safe-area-inset-bottom)) + 96px + 30px);
+    width:74px; height:74px; z-index:9;
+  }
+  #turboBtn {
+    width:100%; height:100%; border-radius:50%; touch-action:none;
+    background: radial-gradient(circle at 35% 30%, #d9a8ff, #6a1fb0 70%);
+    border:3px solid rgba(255,255,255,0.7); color:#fff; font-weight:900; font-size:26px;
+    box-shadow:0 0 16px rgba(160,80,255,0.55);
+  }
+  #turboBtn:active { transform: scale(0.92); }
+  #turboBtn.deshabilitado { opacity:0.38; }
+  .capsula {
+    position:absolute; width:28px; height:28px; border-radius:50%;
+    background: rgba(255,255,255,0.10); border:2px solid rgba(255,255,255,0.35);
+    box-shadow: inset 0 0 6px rgba(0,0,0,0.5);
+    transition: background 0.15s, box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+  }
+  #capsula0 { left:23px; top:-31px; }  /* arriba del botón de turbo */
+  #capsula1 { left:-15px; top:-15px; } /* arriba-a-la-izquierda de la primera */
+  #capsula2 { left:-31px; top:23px;  } /* a la izquierda de la segunda */
+  .capsula.llena { border-color:rgba(255,255,255,0.85); transform:scale(1.08); }
+  .capsula.llena.t1 { background: radial-gradient(circle at 35% 30%, #9cd8ff, #0d5aa8); box-shadow:0 0 12px rgba(51,170,255,0.85); }
+  .capsula.llena.t2 { background: radial-gradient(circle at 35% 30%, #ffc98a, #c2450c); box-shadow:0 0 12px rgba(255,140,0,0.85); }
+  .capsula.llena.t3 { background: radial-gradient(circle at 35% 30%, #ecc4ff, #7a1fb0); box-shadow:0 0 14px rgba(192,77,255,0.9); animation:pulsoCapsula 1.1s ease-in-out infinite; }
+  @keyframes pulsoCapsula { 0%,100%{ box-shadow:0 0 10px rgba(192,77,255,0.75);} 50%{ box-shadow:0 0 18px rgba(192,77,255,1);} }
+
+  #message {
+    position:absolute; top:34%; left:0; width:100%; text-align:center;
+    color:#fff; font-size:30px; font-weight:900; letter-spacing:1px;
+    text-shadow: 0 0 20px currentColor, 0 3px 6px rgba(0,0,0,0.8);
+    opacity:0; pointer-events:none; z-index:7; transition:opacity 0.15s, transform 0.15s;
+    transform: scale(0.8);
+  }
+  #message.show { opacity:1; transform:scale(1); }
+
+  .overlay {
+    position:absolute; top:0; left:0; width:100%; height:100%;
+    background: radial-gradient(circle at 50% 30%, #3a1a00 0%, #0a0510 75%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    z-index:20; text-align:center; padding:24px;
+  }
+  .hidden { display:none !important; }
+  .title { font-size:38px; font-weight:900; color:#ff9d3d; text-shadow: 0 0 20px #ff9d3d, 0 0 40px #ff6a00; margin-bottom:6px; letter-spacing:1px; }
+  .subtitle { color:#ffd9b3; font-size:15px; margin-bottom:26px; max-width:340px; line-height:1.5; }
+  .btn {
+    background: linear-gradient(180deg, #ff9d3d, #c2450c);
+    color:#fff; border:none; padding:16px 42px; font-size:20px; font-weight:bold;
+    border-radius:50px; box-shadow: 0 6px 0 #7a2a08, 0 8px 20px rgba(255,140,0,0.4);
+    letter-spacing:1px; margin-top:10px; touch-action:manipulation;
+  }
+  .btn:active { transform:translateY(4px); box-shadow: 0 2px 0 #7a2a08; }
+  .stat { color:#fff; font-size:17px; margin:4px 0; }
+  .stat b { color:#ffcf8a; }
+  .instructions { font-size:13px; color:#c99b73; margin-top:18px; line-height:1.6; max-width:320px; }
+
+  /* Selección de pista: 4 tarjetas (una por circuito) + un botón grande de
+     Copa que las corre las 4 seguidas. */
+  #pistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; width:100%; max-width:320px; }
+  .pistaCard {
+    background: linear-gradient(180deg, #3a2a1a, #1a1008);
+    border:2px solid rgba(255,159,61,0.4); border-radius:14px;
+    color:#fff; padding:14px 4px; font-size:13px; font-weight:bold;
+    line-height:1.4; touch-action:manipulation;
+  }
+  .pistaCard:active { transform:scale(0.96); border-color:#ff9d3d; }
+  .pistaCard .emoji { font-size:26px; display:block; margin-bottom:4px; }
+  #copaBtn { font-size:15px; padding:13px 26px; background:linear-gradient(180deg,#ffd93d,#c2450c); box-shadow:0 6px 0 #7a4a08, 0 8px 20px rgba(255,200,0,0.35); }
+  #copaLista .stat { font-size:14px; }
+
+  #rotateHint {
+    position:absolute; top:0; left:0; width:100%; height:100%; z-index:40;
+    background:#0a0510; color:#fff; display:none; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+  }
+  #rotateHint.show { display:flex; }
+  #rotateHint .icono { font-size:52px; margin-bottom:14px; }
+
+  #closeBtn {
+    position:fixed; top: max(10px, env(safe-area-inset-top)); left:12px; z-index:30;
+    background:rgba(0,0,0,0.5); color:#fff; border:none; width:34px; height:34px;
+    border-radius:50%; font-size:16px; font-weight:800; touch-action:manipulation;
+  }
+  #closeBtn:active { background:rgba(0,0,0,0.75); }
+</style>
+</head>
+<body>
+
+<button id="closeBtn">✕</button>
+
+<canvas id="gameCanvas"></canvas>
+<div id="steerWrap">
+  <button class="steerBtn" id="steerLeftBtn">◀</button>
+  <button class="steerBtn" id="steerRightBtn">▶</button>
+</div>
+<button id="driftBtn">DRIFT</button>
+<div id="turboWrap">
+  <button id="turboBtn">⚡</button>
+  <div class="capsula" id="capsula0"></div>
+  <div class="capsula" id="capsula1"></div>
+  <div class="capsula" id="capsula2"></div>
+</div>
+
+<div id="hud">
+  <div class="box">
+    <div id="vuelta">Vuelta 1/3</div>
+    <div id="tiempoActual">0.0s</div>
+  </div>
+  <div class="box" id="velWrap">
+    <div id="vel">0</div>
+    <div id="mejorVuelta">Mejor: —</div>
+  </div>
+</div>
+<div id="driftMeterWrap"><div id="driftMeter"></div></div>
+<div id="message"></div>
+
+<div id="rotateHint">
+  <div class="icono">📱↻</div>
+  <div class="subtitle">Girá el teléfono — este juego se juega apaisado (horizontal).</div>
+</div>
+
+<div class="overlay" id="startScreen">
+  <div class="title">DRIFT</div>
+  <div class="subtitle">Mantené DRIFT en la curva para cargar el medidor — al soltar, esa carga se suma a una cápsula. Llená hasta 3 y apretá TURBO cuando quieras. Elegí una pista suelta, o corré la COPA (las 4 seguidas) para ver quién es el mejor.</div>
+  <div id="pistaGrid">
+    <button class="pistaCard" data-track="0"><span class="emoji">🏁</span>Clásico</button>
+    <button class="pistaCard" data-track="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
+    <button class="pistaCard" data-track="2"><span class="emoji">🏖️</span>Costa</button>
+    <button class="pistaCard" data-track="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+  </div>
+  <button class="btn" id="copaBtn">🏆 COPA — LAS 4 PISTAS</button>
+  <div class="instructions">Zonas invisibles a los costados para girar, DRIFT y TURBO abajo a la derecha. Prototipo de un jugador — la idea es sumarle multijugador más adelante si esta sensación convence.</div>
+</div>
+
+<div class="overlay hidden" id="resultScreen">
+  <div class="title" style="font-size:30px;">¡CARRERA TERMINADA!</div>
+  <div class="stat" id="resultPista" style="opacity:0.75; font-size:14px;"></div>
+  <div class="stat">Mejor vuelta: <b id="finalMejorVuelta">—</b></div>
+  <div class="stat">Tiempo total: <b id="finalTiempoTotal">—</b></div>
+  <button class="btn" id="restartBtn" style="margin-top:20px;">CORRER DE NUEVO</button>
+</div>
+
+<div class="overlay hidden" id="copaScreen">
+  <div class="title" style="font-size:28px;">🏆 COPA COMPLETA</div>
+  <div id="copaLista"></div>
+  <div class="stat">Tiempo total (4 pistas): <b id="copaTotal">—</b></div>
+  <button class="btn" id="copaVolverBtn" style="margin-top:18px;">VOLVER AL MENÚ</button>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  let DPR;
+  // OJO: acá "width"/"height" son el tamaño LÓGICO del canvas (en el que
+  // viven todas las fórmulas de proyección, igual que el tutorial
+  // original) — el tamaño real en píxeles del <canvas> lo escala DPR
+  // aparte, mismo patrón que monster-crazy.html/carrera.html.
+  let width, height;
+
+  function resize(){
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    width = window.innerWidth; height = window.innerHeight;
+    canvas.width = width * DPR; canvas.height = height * DPR;
+    canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    Dom_get('rotateHint').classList.toggle('show', height > width && width < 620);
+  }
+  function Dom_get(id){ return document.getElementById(id); }
+  window.addEventListener('resize', resize);
+  resize();
+
+  document.getElementById('closeBtn').addEventListener('click', ()=>{
+    document.getElementById('resultScreen').classList.add('hidden');
+    document.getElementById('copaScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+    copaActiva = false;
+    state = 'idle';
+  });
+
+  // ---------- Util (matemática pura, adaptada del tutorial) -------------
+  const Util = {
+    limit:            (v, min, max) => Math.max(min, Math.min(v, max)),
+    percentRemaining: (n, total)    => (n % total) / total,
+    accelerate:       (v, accel, dt)=> v + accel*dt,
+    interpolate:      (a,b,p)       => a + (b-a)*p,
+    easeIn:           (a,b,p)       => a + (b-a)*Math.pow(p,2),
+    easeInOut:        (a,b,p)       => a + (b-a)*((-Math.cos(p*Math.PI)/2)+0.5),
+    exponentialFog:   (dist, dens)  => 1/(Math.pow(Math.E, dist*dist*dens)),
+    increase: (start, inc, max) => { let r = start+inc; while(r>=max) r-=max; while(r<0) r+=max; return r; },
+    project: (p, cameraX, cameraY, cameraZ, cameraDepth, width, height, roadWidth) => {
+      p.camera.x     = (p.world.x || 0) - cameraX;
+      p.camera.y     = (p.world.y || 0) - cameraY;
+      p.camera.z     = (p.world.z || 0) - cameraZ;
+      p.screen.scale = cameraDepth/p.camera.z;
+      p.screen.x     = (width/2)  + (p.screen.scale * p.camera.x * width/2);
+      p.screen.y     = (height/2) - (p.screen.scale * p.camera.y * height/2);
+      p.screen.w     =              (p.screen.scale * roadWidth  * width/2);
+    },
+  };
+
+  const COLORS = {
+    LIGHT: { road:'#6B6B6B', grass:'#123a1a', rumble:'#d94a4a', lane:'#cfcfcf' },
+    DARK:  { road:'#606060', grass:'#0e2f14', rumble:'#f2f2f2'                },
+    START: { road:'#ffffff', grass:'#ffffff', rumble:'#ffffff'                },
+    FINISH:{ road:'#101010', grass:'#101010', rumble:'#101010'                },
+  };
+
+  // ---------- Temas por pista ---------------------------------------------
+  // Las 4 pistas comparten el mismo motor/física — lo que cambia es paleta
+  // (cielo/pasto/asfalto/banquina) y qué se dibuja como "decoración al
+  // costado" (pino/roca/palmera/nube), elegido según el tema de la pista
+  // activa. aplicarTema() pisa los colores de COLORS antes de construir el
+  // trazado (ver resetPista) — así drawSegmentRoad/drawCielo no necesitan
+  // saber nada de pistas, solo leen las variables globales de siempre.
+  const TEMAS = {
+    clasico: {
+      cielo:  ['#1a0a2e', '#3a1a4a'],
+      road:   { a:'#6B6B6B', b:'#606060' },
+      grass:  { a:'#123a1a', b:'#0e2f14' },
+      rumble: { a:'#d94a4a', b:'#f2f2f2' },
+      lane: '#cfcfcf', decor: 'arbol',
+    },
+    montana: {
+      cielo:  ['#241f38', '#5d5468'],
+      road:   { a:'#5a5a5e', b:'#4c4c50' },
+      grass:  { a:'#2c2820', b:'#211d17' },
+      rumble: { a:'#c97b3d', b:'#8a5c2e' },
+      lane: '#d8c9a3', decor: 'roca',
+    },
+    costa: {
+      cielo:  ['#0d3a5c', '#7fd4e8'],
+      road:   { a:'#736a5e', b:'#655d51' },
+      grass:  { a:'#e3cd8f', b:'#d4bd78' },
+      rumble: { a:'#ffffff', b:'#1a5c8a' },
+      lane: '#ffffff', decor: 'palmera',
+    },
+    cielo: {
+      cielo:  ['#0a1030', '#20408a'],
+      road:   { a:'#8a8ab0', b:'#75759c' },
+      grass:  { a:'#d8e6ff', b:'#c2d6ff' },
+      rumble: { a:'#ffe066', b:'#3a3a70' },
+      lane: '#ffffff', decor: 'nube',
+    },
+  };
+  let cieloColores = TEMAS.clasico.cielo;
+  let temaDecorActual = 'arbol';
+  function aplicarTema(id){
+    const t = TEMAS[id] || TEMAS.clasico;
+    COLORS.LIGHT  = { road:t.road.a, grass:t.grass.a, rumble:t.rumble.a, lane:t.lane };
+    COLORS.DARK   = { road:t.road.b, grass:t.grass.b, rumble:t.rumble.b };
+    COLORS.START  = { road:'#ffffff', grass:'#ffffff', rumble:'#ffffff' };
+    COLORS.FINISH = { road:'#101010', grass:'#101010', rumble:'#101010' };
+    cieloColores = t.cielo;
+    temaDecorActual = t.decor;
+  }
+
+  // ---------- Config de pista/cámara (mismos parámetros que el tutorial) -
+  const roadWidth     = 2000;
+  const segmentLength = 200;
+  const rumbleLength  = 3;
+  const lanes         = 3;
+  const fieldOfView   = 100;
+  const cameraHeight  = 1000;
+  const cameraDepth   = 1 / Math.tan((fieldOfView/2) * Math.PI/180);
+  const playerZ       = cameraHeight * cameraDepth;
+  const drawDistance  = 180;
+  const fogDensity    = 5;
+  // El auto del jugador se dibuja SIEMPRE en este punto fijo de pantalla
+  // (ver drawAuto) — es una elección de diseño, no algo que salga de
+  // proyectar playerZ. Para que el choque contra el tráfico dispare justo
+  // cuando el otro auto llega VISUALMENTE hasta acá (y no antes, ni recién
+  // cuando ya está pegado al borde de abajo de la pantalla), hace falta
+  // la distancia de mundo que al proyectarse cae exactamente en este
+  // punto — se despeja una sola vez de la fórmula de proyección (Util.
+  // project, asumiendo el piso llano: camera.y ≈ -cameraHeight):
+  //   JUGADOR_Y_RATIO*height = height/2 + (cameraDepth/z)*cameraHeight*height/2
+  //   => z = cameraDepth*cameraHeight / (2*JUGADOR_Y_RATIO - 1)
+  const JUGADOR_Y_RATIO       = 0.86;
+  const PLAYER_VISUAL_Z_AHEAD = cameraDepth*cameraHeight / (2*JUGADOR_Y_RATIO - 1);
+
+  const fps            = 60;
+  const step           = 1/fps;
+  const centrifugal    = 0.32;
+  const maxSpeed        = segmentLength/step;
+  const accel           = maxSpeed/4.2;
+  const decel           = -maxSpeed/5;
+  const offRoadDecel    = -maxSpeed/2;
+  const offRoadLimit    = maxSpeed/4;
+  // ~22s por vuelta — 3 vueltas da una carrera de poco más de un minuto.
+  const TOTAL_VUELTAS   = 3;
+
+  // Contención: antes playerX se podía ir hasta ±2.2 (más de dos carriles
+  // de ancho fuera de la pista) — ahora hay una baranda física un poco más
+  // allá del borde (±1, donde ya se considera "afuera") que frena en seco
+  // y avisa, para no perderse pista adentro. LIMITE_BARANDA tiene que
+  // coincidir con el offset donde se DIBUJA la baranda (ver addBarandas).
+  const LIMITE_BARANDA = 1.3;
+
+  // Rampas: un tramo de pista marcado como salto (ver marcarRampa) pone al
+  // auto "en el aire" un rato — es puramente visual/de indulgencia (no hay
+  // física real de gravedad en este motor pseudo-3D, el auto sigue
+  // seteado a la altura de la carretera de siempre) pero mientras dura se
+  // ignoran el fuera-de-pista y el choque contra tráfico, y drawAuto lo
+  // dibuja despegado del piso con una sombra que se achica.
+  const SALTO_DURACION  = 0.85; // s en el aire
+  const SALTO_ALTURA_PX = 90;   // qué tan alto se despega en pantalla
+
+  // ---------- Derrape / boost (lo nuevo) ---------------------------------
+  const DRIFT_CARGA_POR_SEG = 95;   // % que carga el medidor por segundo derrapando
+  const DRIFT_MIN_PARA_BOOST = 18;  // % mínimo para que soltar dé algún empujón
+  const DRIFT_TIER2 = 55, DRIFT_TIER3 = 85;
+  // % de maxSpeed que se suma mientras dura el empujón — calibrado para
+  // que, con el velocímetro yendo de 0 a 120km/h en velocidad normal
+  // (ver "vel" en update()), el turbo llegue como mucho a 180km/h.
+  const BOOST_BONUS  = { 1: 0.158, 2: 0.300, 3: 0.500 };
+  // Cuánto dura el empujón: una base chica (para que hasta un derrape
+  // cortito se sienta) más un extra por cada % de carga del medidor — así
+  // un derrape grande no solo empuja más fuerte, dura bastante más.
+  const BOOST_APAGADO_MS = 300; // se apaga suave (no de un frenazo) en el último tramo
+  // Cuánto dura el empujón según el tier con el que se USA la cápsula (ya
+  // no depende del % exacto del derrape que la cargó — una cápsula puede
+  // completarse con varios derrapitos chicos, así que se fija un valor por
+  // tier en vez de arrastrar el % original).
+  const BOOST_DURACION_TIER = { 1: 900, 2: 1450, 3: 2000 };
+
+  // ---------- Cápsulas de turbo ------------------------------------------
+  // Ya no es "un derrape = un turbo": cada derrape suma UNIDADES a una
+  // cápsula (tier 1/2/3 del medidor = 1/2/3 unidades) y cada cápsula tiene
+  // capacidad 3. Por eso 3 derrapes celestes, o uno celeste + uno naranja,
+  // o un solo derrape violeta (que ya vale 3 de una) llenan una cápsula
+  // entera. Si al sumar se pasa de 3, el sobrante se acumula en la
+  // cápsula SIGUIENTE (ej: cápsula en naranja=2 + otro naranja=2 → esta se
+  // llena a 3 (violeta) y sobra 1, que se va como celeste a la próxima).
+  // El botón TURBO (independiente de DRIFT) gasta la cápsula más vieja
+  // (capsulas[0]) con la carga que tenga en ese momento, aunque no esté
+  // llena — el jugador decide si espera a completarla o la usa ya.
+  const MAX_CAPSULAS = 3;
+
+  let segments = [];
+  let trackLength = 0;
+  let position = 0, speed = 0, playerX = 0;
+  let boostFuerza = 0;            // 0-1, qué tan fuerte es el empujón activo (según el tier logrado)
+  let boostDuracionRestante = 0;  // ms que le quedan al empujón activo
+  let driftHeld = false;
+  let driftCharge = 0;
+  let driftAngle = 0; // grados, para inclinar el dibujo del auto
+  let capsulas = [0,0,0]; // unidades acumuladas (0-3) en cada una de las 3 ranuras, capsulas[0] = la más vieja
+  let keyLeft = false, keyRight = false;
+  let vuelta = 1, tiempoVuelta = 0, mejorVuelta = null, tiempoTotal = 0;
+  let state = 'idle'; // idle | playing | finished
+  let shakeT = 0;
+  let flashAlpha = 0; // destello rojo al chocar contra el tráfico
+  let saltando = false, saltoT = 0; // rampas
+  let ultimoGolpeBaranda = 0;
+
+  // Pista elegida y modo Copa (las 4 seguidas) — ver TRACKS más abajo.
+  let trackIndex = 0;
+  let copaActiva = false, copaIndice = 0, copaResultados = [];
+
+  function findSegment(z){ return segments[Math.floor(z/segmentLength) % segments.length]; }
+  function lastY(){ return segments.length ? segments[segments.length-1].p2.world.y : 0; }
+
+  function addSegment(curve, y){
+    const n = segments.length;
+    segments.push({
+      index: n,
+      p1: { world: { y: lastY(), z: n*segmentLength },     camera:{}, screen:{} },
+      p2: { world: { y: y,       z: (n+1)*segmentLength }, camera:{}, screen:{} },
+      curve, sprites: [], cars: [], color: Math.floor(n/rumbleLength)%2 ? COLORS.DARK : COLORS.LIGHT,
+    });
+  }
+  function addSprite(n, tipo, offset){ segments[n % segments.length].sprites.push({ tipo, offset }); }
+  function addRoad(enter, hold, leave, curve, y){
+    const startY = lastY();
+    const endY   = startY + (y||0)*segmentLength;
+    const total  = enter+hold+leave;
+    for(let n=0;n<enter;n++) addSegment(Util.easeIn(0, curve, n/enter), Util.easeInOut(startY, endY, n/total));
+    for(let n=0;n<hold;n++)  addSegment(curve, Util.easeInOut(startY, endY, (enter+n)/total));
+    for(let n=0;n<leave;n++) addSegment(Util.easeInOut(curve, 0, n/leave), Util.easeInOut(startY, endY, (enter+hold+n)/total));
+  }
+  // Pista corta a propósito (vueltas de ~30s): esto es para iterar rápido
+  // probando el derrape, no una carrera larga — fácil de agrandar después.
+  // CURVE bastante más fuerte que en el tutorial original: al acortar
+  // ROAD.LEN (menos segmentos por tramo, para vueltas de ~30-50s en vez
+  // de minutos) la curva se acumula sobre MENOS pasos y el giro total se
+  // queda corto si no se compensa — se sentía "casi recto" aunque la
+  // pista sí doblaba.
+  const ROAD = { LEN:{S:12,M:24,L:48}, HILL:{L:20,M:40,H:60}, CURVE:{E:5,M:9,H:14} };
+  function addStraight(n){ n=n||ROAD.LEN.M; addRoad(n,n,n,0,0); }
+  function addCurve(n,curve,h){ n=n||ROAD.LEN.M; addRoad(n,n,n,curve||ROAD.CURVE.M,h||0); }
+  function addHill(n,h){ n=n||ROAD.LEN.M; addRoad(n,n,n,0,h||ROAD.HILL.M); }
+  function addSCurves(){
+    addRoad(ROAD.LEN.M,ROAD.LEN.M,ROAD.LEN.M, -ROAD.CURVE.E, 0);
+    addRoad(ROAD.LEN.M,ROAD.LEN.M,ROAD.LEN.M,  ROAD.CURVE.M, ROAD.HILL.M);
+    addRoad(ROAD.LEN.M,ROAD.LEN.M,ROAD.LEN.M,  ROAD.CURVE.E, -ROAD.HILL.L);
+    addRoad(ROAD.LEN.M,ROAD.LEN.M,ROAD.LEN.M, -ROAD.CURVE.E, ROAD.HILL.M);
+    addRoad(ROAD.LEN.M,ROAD.LEN.M,ROAD.LEN.M, -ROAD.CURVE.M, -ROAD.HILL.M);
+  }
+  function addPoles(everyN){
+    for(let n=0;n<segments.length;n+=everyN){
+      addSprite(n, 'poste', -1.05);
+      addSprite(n, 'poste',  1.05);
+    }
+  }
+  function addArboles(everyN){
+    for(let n=3; n<segments.length; n+=everyN){
+      addSprite(n, 'arbol', -(1.7 + Math.random()*1.8));
+      addSprite(n + Math.floor(Math.random()*3), 'arbol', 1.7 + Math.random()*1.8);
+    }
+  }
+  // Cartelitos de aviso antes de las curvas fuertes — sirven de referencia
+  // visual y avisan "ojo, viene curva" (útil para saber cuándo conviene
+  // empezar a cargar el derrape).
+  function addCartel(n, texto, offset){
+    addSprite(Math.max(0,n), 'cartel_'+texto, offset);
+  }
+  // Baranda de contención: viga continua un poco más allá del borde de la
+  // pista (mismo offset que LIMITE_BARANDA, para que se vea justo donde de
+  // verdad frena el auto). everyN chico = franja casi continua.
+  function addBarandas(everyN){
+    for(let n=0;n<segments.length;n+=everyN){
+      addSprite(n, 'baranda', -LIMITE_BARANDA);
+      addSprite(n, 'baranda',  LIMITE_BARANDA);
+    }
+  }
+  // Marca los últimos n segmentos agregados como rampa/túnel — se llaman
+  // JUSTO DESPUÉS del addHill/addRoad correspondiente, cuando esos
+  // segmentos ya existen en el array.
+  function marcarRampa(n){
+    for(let i=Math.max(0,segments.length-n); i<segments.length; i++) segments[i].rampa = true;
+  }
+  function marcarTunel(n){
+    for(let i=Math.max(0,segments.length-n); i<segments.length; i++) segments[i].enTunel = true;
+  }
+
+  // ---------- Las 4 pistas ------------------------------------------------
+  // Circuito cerrado: la altura tiene que volver EXACTO a 0 al final para
+  // que la vuelta cierre sin un salto brusco (el curveo no necesita
+  // cerrar, ver comentario en render() — solo la altura world.y) — eso lo
+  // resuelve SIEMPRE el mismo "tramo de cierre" compartido al final de
+  // resetPista(), sin importar qué construyó cada pista de acá abajo.
+
+  // Pista 1 — CLÁSICO: la original, armada con el rompecabezas de
+  // pista-editor.html (arrastrando piezas a la cuadrícula 24x24) y pegada
+  // tal cual el código que tira esa herramienta, más lomas agregadas a
+  // mano después (el editor es 2D puro, no genera altura).
+  function construirClasico(){
+    addStraight(ROAD.LEN.M); // meta
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.M); // loma subiendo
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, -15, 0); // curva izquierda media
+    addHill(ROAD.LEN.M, -ROAD.HILL.M); // loma bajando
+    addCurve(ROAD.LEN.M, -15, 0); // curva izquierda media
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addHill(ROAD.LEN.M, ROAD.HILL.L); // lomita subiendo
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, -ROAD.HILL.L); // lomita bajando
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, -15, 0); // curva izquierda media
+    addCurve(ROAD.LEN.M, -15, 0); // curva izquierda media
+    addHill(ROAD.LEN.M, ROAD.HILL.H); // loma grande subiendo
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, -ROAD.HILL.H); // loma grande bajando
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.M); // loma subiendo
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0); // curva derecha media
+    addStraight(ROAD.LEN.M);
+  }
+
+  // Pista 2 — MONTAÑA Y TÚNEL: subida serpenteante, un tramo de túnel
+  // oscuro (marcarTunel — ver el apagón de pantalla en render()) y un
+  // salto en la bajada.
+  function construirMontana(){
+    addStraight(ROAD.LEN.M); // meta
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.M);
+    addCurve(ROAD.LEN.M, 12, ROAD.HILL.L);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.H);
+    addCurve(ROAD.LEN.M, -12, 0);
+    addCurve(ROAD.LEN.M, -12, -ROAD.HILL.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.S);
+    // --- túnel: tramo más recto y oscuro, para poder ver bien adentro ---
+    addCartel(segments.length-2, 'TUNEL', -1.3);
+    const inicioTunel = segments.length;
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 10, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    marcarTunel(segments.length - inicioTunel);
+    // --- sale del túnel, baja la montaña con un salto ---
+    addHill(ROAD.LEN.M, -ROAD.HILL.M);
+    addCurve(ROAD.LEN.M, 15, ROAD.HILL.L);
+    addStraight(ROAD.LEN.M);
+    addCartel(segments.length-4, 'SALTO', 1.3);
+    addHill(ROAD.LEN.S, ROAD.HILL.H);
+    marcarRampa(ROAD.LEN.S);
+    addHill(ROAD.LEN.S, -ROAD.HILL.H);
+    addCurve(ROAD.LEN.M, -18, 0);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, -18, ROAD.HILL.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, -ROAD.HILL.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+  }
+
+  // Pista 3 — COSTA: curvas largas y suaves de litoral, casi sin lomas
+  // (dunas chicas nomás) y un saltito en el muelle.
+  function construirCosta(){
+    addStraight(ROAD.LEN.M); // meta
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.L, 8, 0);
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.L); // dunita
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.L, -8, 0);
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, -ROAD.HILL.L);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCartel(segments.length-4, 'SALTO', -1.3);
+    addHill(ROAD.LEN.S, ROAD.HILL.M); // rampita del muelle
+    marcarRampa(ROAD.LEN.S);
+    addHill(ROAD.LEN.S, -ROAD.HILL.M);
+    addCurve(ROAD.LEN.L, -8, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, -15, 0);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, -15, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+  }
+
+  // Pista 4 — CIELO EXTREMO: la más loca — flota sobre nubes (no hay
+  // "pasto" real, ver TEMAS.cielo) y encadena tres saltos grandes.
+  function construirCielo(){
+    addStraight(ROAD.LEN.M); // meta
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCartel(segments.length-2, 'SALTO', 1.3);
+    addHill(ROAD.LEN.S, ROAD.HILL.H);
+    marcarRampa(ROAD.LEN.S);
+    addHill(ROAD.LEN.S, -ROAD.HILL.H);
+    addCurve(ROAD.LEN.M, 20, ROAD.HILL.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 20, -ROAD.HILL.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCartel(segments.length-2, 'SALTO', -1.3);
+    addHill(ROAD.LEN.S, ROAD.HILL.H);
+    marcarRampa(ROAD.LEN.S);
+    addHill(ROAD.LEN.S, -ROAD.HILL.H);
+    addCurve(ROAD.LEN.M, -20, 0);
+    addCurve(ROAD.LEN.M, -20, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addHill(ROAD.LEN.M, ROAD.HILL.H);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addCurve(ROAD.LEN.M, 15, -ROAD.HILL.H);
+    addStraight(ROAD.LEN.M);
+    addCartel(segments.length-2, 'SALTO', 1.3);
+    addHill(ROAD.LEN.S, ROAD.HILL.H);
+    marcarRampa(ROAD.LEN.S);
+    addHill(ROAD.LEN.S, -ROAD.HILL.H);
+    addCurve(ROAD.LEN.M, 15, 0);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+    addStraight(ROAD.LEN.M);
+  }
+
+  const TRACKS = [
+    { nombre:'Circuito Clásico', tema:'clasico', construir:construirClasico },
+    { nombre:'Montaña y Túnel',  tema:'montana', construir:construirMontana },
+    { nombre:'Costa',            tema:'costa',   construir:construirCosta   },
+    { nombre:'Cielo Extremo',    tema:'cielo',   construir:construirCielo   },
+  ];
+
+  function resetPista(){
+    segments = [];
+    aplicarTema(TRACKS[trackIndex].tema);
+    TRACKS[trackIndex].construir();
+
+    // Tramo de cierre: mismo truco que "addDownhillToEnd" del original,
+    // curvando de nuevo hacia 0 y bajando (o subiendo) hacia la altura del
+    // arranque. addRoad reparte esa bajada en tramos escalonados (ver
+    // easeInOut) y el ÚLTIMO escalón nunca llega exacto al objetivo — por
+    // eso se fuerza a mano el final a 0 acá abajo, así la costura de la
+    // vuelta (segments[último].p2 con segments[0].p1) queda perfecta, sin
+    // saltito.
+    addRoad(ROAD.LEN.M, ROAD.LEN.M, ROAD.LEN.M, ROAD.CURVE.E, -lastY()/segmentLength);
+    segments[segments.length-1].p2.world.y = 0;
+
+    addPoles(6);
+    addArboles(9);
+    addBarandas(3); // contención: ver LIMITE_BARANDA en update()
+
+    const startSeg = findSegment(playerZ).index;
+    for(let n=0;n<rumbleLength;n++) segments[(startSeg+2+n)%segments.length].color = COLORS.START;
+    for(let n=0;n<rumbleLength;n++) segments[(startSeg-1-n+segments.length)%segments.length].color = COLORS.FINISH;
+    addCartel(startSeg + 6, 'META', -1.3);
+
+    trackLength = segments.length * segmentLength;
+    calcularMapaPuntos();
+    resetCars();
+  }
+
+  // ---------- Minimapa ----------------------------------------------------
+  // El render 3D de arriba NUNCA calcula coordenadas 2D reales de la
+  // pista (es el truco clásico pseudo-3D: solo curva/altura por segmento,
+  // nada de X/Z de verdad) — por eso, para poder mostrar un mapita, hay
+  // que integrar esa curva en un heading acumulado y una posición 2D
+  // aparte, una sola vez que se arma la pista. MAPA_CURVA_A_RADIANES es
+  // un ajuste a ojo (no hay una escala "física" correcta) tuneado para
+  // que el trazado se vea bien. Como esa integración no cierra el lazo
+  // sola, se reparte la diferencia final-inicial a lo largo de todo el
+  // recorrido — así el mapa siempre queda cerrado, sea cual sea la pista.
+  let mapaPuntos = [];
+  let mapaMinX = 0, mapaMaxX = 0, mapaMinZ = 0, mapaMaxZ = 0;
+  const MAPA_CURVA_A_RADIANES = 0.0011;
+
+  function calcularMapaPuntos(){
+    let heading = 0, x = 0, z = 0;
+    const puntos = [];
+    segments.forEach(seg=>{
+      puntos.push({ x, z });
+      // RESTA, no suma: la fuerza centrífuga del auto real (ver
+      // playerX -= dx*...*curve*centrifugal en update()) empuja hacia
+      // AFUERA de la curva — con curve positivo te tira hacia la
+      // izquierda, o sea que positivo es una curva a la DERECHA. Sumar acá
+      // (como estaba antes) dibujaba el mapa en espejo, doblando para el
+      // lado contrario al que en realidad dobla la pista.
+      heading -= seg.curve * MAPA_CURVA_A_RADIANES;
+      x += Math.sin(heading) * segmentLength;
+      z += Math.cos(heading) * segmentLength;
+    });
+    const ultimo = puntos[puntos.length-1];
+    const n = puntos.length;
+    puntos.forEach((p,i)=>{
+      const t = i/n;
+      p.x -= ultimo.x*t;
+      p.z -= ultimo.z*t;
+    });
+    mapaPuntos = puntos;
+    mapaMinX = Math.min(...puntos.map(p=>p.x)); mapaMaxX = Math.max(...puntos.map(p=>p.x));
+    mapaMinZ = Math.min(...puntos.map(p=>p.z)); mapaMaxZ = Math.max(...puntos.map(p=>p.z));
+  }
+
+  function drawMinimapa(){
+    if(mapaPuntos.length === 0) return;
+    const tam = Math.min(width,height) * 0.30;
+    const margen = 14;
+    const cx = margen + tam/2; // arriba a la izquierda (antes iba a la derecha)
+    const cy = 78 + tam/2; // deja lugar arriba para el HUD de vuelta/tiempo
+    const spanX = Math.max(1, mapaMaxX-mapaMinX), spanZ = Math.max(1, mapaMaxZ-mapaMinZ);
+    const pad = tam*0.16;
+    const escala = (tam - pad*2) / Math.max(spanX, spanZ);
+    const centroX = (mapaMinX+mapaMaxX)/2, centroZ = (mapaMinZ+mapaMaxZ)/2;
+    // Mismo espejo que usa el editor de pistas (pista-editor.html) en su
+    // vista previa — así una curva a la derecha de verdad se ve doblando
+    // a la derecha acá también, no al revés.
+    function proy(p){ return { sx: cx - (p.x-centroX)*escala, sy: cy + (p.z-centroZ)*escala }; }
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, tam/2, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(8,4,14,0.72)'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, cy, tam/2-4, 0, Math.PI*2); ctx.clip();
+
+    // Trazado del circuito estilo "camino de mapa": una línea gruesa
+    // oscura de base (para que se lea como asfalto, no como un dibujo
+    // suelto) y una más fina y clara encima, como el borde de la ruta.
+    ctx.beginPath();
+    mapaPuntos.forEach((p,i)=>{
+      const s = proy(p);
+      if(i===0) ctx.moveTo(s.sx, s.sy); else ctx.lineTo(s.sx, s.sy);
+    });
+    ctx.closePath();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    ctx.strokeStyle = '#3a2a1a';
+    ctx.lineWidth = Math.max(4, tam*0.075);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffd93d';
+    ctx.lineWidth = Math.max(2, tam*0.032);
+    ctx.stroke();
+
+    // Acá van los puntitos de los DEMÁS JUGADORES cuando esto sea
+    // multijugador de verdad (nada de tráfico de IA — eso solo estorbaba).
+    // Cada uno se ubicaría en mapaPuntos[Math.floor(suPosicion/segmentLength)
+    // % mapaPuntos.length], igual que el punto del jugador de acá abajo.
+
+    // jugador: punta blanca con contorno, siempre encima del resto.
+    const idxJugador = Math.floor(position/segmentLength) % mapaPuntos.length;
+    const pj = mapaPuntos[idxJugador];
+    if(pj){
+      const s = proy(pj);
+      ctx.beginPath(); ctx.arc(s.sx, s.sy, tam*0.045, 0, Math.PI*2);
+      ctx.fillStyle = '#fff'; ctx.shadowColor = '#fff'; ctx.shadowBlur = 10; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = '#ff9d3d'; ctx.shadowBlur = 0; ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+  }
+
+  // ---------- Tráfico de IA (para esquivar) ------------------------------
+  // Bastante más simple que el del tutorial original: cada auto anda a su
+  // propio carril fijo y velocidad fija, sin steering entre ellos — no hay
+  // sala compartida todavía así que no hace falta esa complejidad para
+  // probar la sensación de esquivar tráfico mientras derrapás.
+  let cars = [];
+  const TOTAL_CARS = 10;
+  // Ancho "de verdad" de cada auto, en las mismas unidades de mundo que
+  // roadWidth (2000 = medio camino) — tienen que hacer juego con lo que
+  // se dibuja en drawAuto/drawCocheTrafico, si no el choque no coincide
+  // con lo que se ve (ver comentario grande en update()). Subidos ~30%
+  // junto con el tamaño visual de los autos (ver dibujarCocheDetallado).
+  const ANCHO_MUNDO_AUTO_JUGADOR = 170;
+  const ANCHO_MUNDO_AUTO_TRAFICO = 170;
+  const LARGO_MUNDO_COLISION     = 250;
+  // Dos tonos por color (claro/oscuro) para el degradé metálico — ver
+  // dibujarCocheDetallado.
+  const CAR_COLORS = [
+    { a:'#ff6b6b', b:'#7a1414' },
+    { a:'#5ec4ff', b:'#0d3d70' },
+    { a:'#7ee787', b:'#155023' },
+    { a:'#ffd93d', b:'#8a5c00' },
+    { a:'#c977ff', b:'#4a1470' },
+  ];
+  function resetCars(){
+    cars = [];
+    segments.forEach(s => s.cars = []);
+    for(let i=0;i<TOTAL_CARS;i++){
+      const z      = Math.floor(3 + Math.random()*(segments.length-6))*segmentLength;
+      const offset = (Math.random()<0.5 ? -1 : 1) * (0.35 + Math.random()*0.55);
+      const speed  = maxSpeed * (0.26 + Math.random()*0.20); // tráfico bastante más lento que a fondo
+      const color  = CAR_COLORS[Math.floor(Math.random()*CAR_COLORS.length)];
+      const car = { z, offset, speed, color, percent: 0, lastHit: 0 };
+      findSegment(z).cars.push(car);
+      cars.push(car);
+    }
+  }
+  function updateCars(dt){
+    cars.forEach(car=>{
+      const oldSeg = findSegment(car.z);
+      car.z = Util.increase(car.z, dt*car.speed, trackLength);
+      car.percent = Util.percentRemaining(car.z, segmentLength);
+      const newSeg = findSegment(car.z);
+      if(oldSeg !== newSeg){
+        const idx = oldSeg.cars.indexOf(car);
+        if(idx >= 0) oldSeg.cars.splice(idx, 1);
+        newSeg.cars.push(car);
+      }
+    });
+  }
+
+  // ---------- Sonido / feedback ----------
+  function vibrate(pattern){ if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
+  let audioCtx;
+  function getAudio(){
+    if(!audioCtx){ try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ return null; } }
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+  // beep(): pitido sintetizado de respaldo — ya no se usa para el feedback
+  // de juego (reemplazado por los mp3 de sonidos/, ver SND más abajo), pero
+  // se deja la función por si hace falta un sonido rápido sin archivo.
+  function beep(freq, dur, type, vol){
+    const ac = getAudio(); if(!ac) return;
+    const osc = ac.createOscillator(), gain = ac.createGain();
+    osc.type = type||'square'; osc.frequency.value = freq; gain.gain.value = vol||0.12;
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+dur);
+    osc.stop(ac.currentTime+dur);
+  }
+
+  // ---------- Efectos de sonido (archivos en sonidos/) --------------------
+  // Todos son <audio> comunes, no Web Audio — más simple para clips cortos
+  // sueltos. reproducir() clona el <audio> en cada llamada para poder
+  // superponer el mismo sonido si se dispara dos veces seguidas (ej. dos
+  // derrapes rapidísimos). desbloquearSonidos() los "activa" con un
+  // play()+pause() silencioso en el primer toque del jugador — los
+  // navegadores de celular bloquean el audio que no arranca dentro de un
+  // gesto del usuario, y el choque/la contención se disparan solos desde
+  // el loop del juego, no desde un toque.
+  function sonido(archivo){ const a = new Audio('sonidos/' + archivo); a.preload = 'auto'; return a; }
+  const SND = {
+    capsula: [null, sonido('capsula_celeste.mp3'), sonido('capsula_naranja.mp3'), sonido('capsula_violeta.mp3')],
+    turbo:   [null, sonido('turbo_celeste.mp3'),   sonido('turbo_naranja.mp3'),   sonido('turbo_violeta.mp3')],
+    capsulasLlenas: sonido('capsulas_llenas.mp3'),
+    choque:         sonido('choque.mp3'),
+    contencion:     sonido('contencion.mp3'),
+    click:          sonido('click_menu.mp3'),
+  };
+  function reproducir(audioEl, vol){
+    if(!audioEl) return;
+    try{
+      const copia = audioEl.cloneNode(true);
+      copia.volume = vol!==undefined ? vol : 1;
+      copia.play().catch(()=>{});
+    }catch(e){}
+  }
+  let sonidosDesbloqueados = false;
+  function desbloquearSonidos(){
+    if(sonidosDesbloqueados) return;
+    sonidosDesbloqueados = true;
+    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click]).forEach(a=>{
+      if(!a) return;
+      a.play().then(()=>{ a.pause(); a.currentTime = 0; }).catch(()=>{});
+    });
+  }
+
+  function flashMessage(text, color){
+    const el = document.getElementById('message');
+    el.textContent = text; el.style.color = color||'#fff'; el.classList.add('show');
+    clearTimeout(flashMessage._t);
+    flashMessage._t = setTimeout(()=> el.classList.remove('show'), 650);
+  }
+
+  // ---------- Derrape / boost ----------
+  function actualizarDrift(dt, estaGirando){
+    const derrapando = driftHeld && estaGirando;
+    if(derrapando) driftCharge = Math.min(100, driftCharge + DRIFT_CARGA_POR_SEG*dt);
+    const meter = document.getElementById('driftMeter');
+    meter.style.height = driftCharge + '%';
+    meter.style.background = driftCharge >= DRIFT_TIER3 ? '#c04dff' : driftCharge >= DRIFT_TIER2 ? '#ff8c00' : '#33aaff';
+
+    const anguloObjetivo = derrapando ? (keyLeft ? 26 : keyRight ? -26 : 0) : (keyLeft ? 7 : keyRight ? -7 : 0);
+    driftAngle += (anguloObjetivo - driftAngle) * Math.min(1, dt*8);
+
+    if(boostDuracionRestante > 0){
+      boostDuracionRestante = Math.max(0, boostDuracionRestante - dt*1000);
+      if(boostDuracionRestante <= 0) boostFuerza = 0;
+    }
+  }
+  function actualizarHudCapsulas(){
+    for(let i=0;i<MAX_CAPSULAS;i++){
+      const el = document.getElementById('capsula'+i);
+      const n = capsulas[i]; // 0 vacía, 1/2/3 = celeste/naranja/violeta
+      el.className = 'capsula' + (n > 0 ? (' llena t'+n) : '');
+    }
+    document.getElementById('turboBtn').classList.toggle('deshabilitado', capsulas[0] <= 0);
+  }
+
+  // Reparte "unidades" (1/2/3, según el tier del derrape) en las ranuras
+  // en orden: si la ranura actual no tiene lugar para todo, la deja llena
+  // (3) y el sobrante pasa a la siguiente — ver comentario grande arriba
+  // de MAX_CAPSULAS con el ejemplo de naranja+naranja.
+  function acumularCarga(unidades){
+    let restante = unidades;
+    for(let i=0; i<MAX_CAPSULAS && restante>0; i++){
+      const espacio = 3 - capsulas[i];
+      if(espacio <= 0) continue;
+      const usado = Math.min(espacio, restante);
+      capsulas[i] += usado;
+      restante -= usado;
+    }
+    if(restante > 0){ flashMessage('¡CÁPSULAS LLENAS!', '#ff3b3b'); reproducir(SND.capsulasLlenas, 0.6); }
+    actualizarHudCapsulas();
+  }
+
+  // Gastar la cápsula más vieja (capsulas[0]), con la carga que tenga en
+  // ese momento (llena o no) — y correr la cola un lugar (la 2da pasa a
+  // ser la 1ra, etc). Botón TURBO, independiente de DRIFT.
+  function onTurboPress(){
+    if(state !== 'playing') return;
+    const tier = capsulas[0];
+    if(tier <= 0) return;
+    const fuerza   = BOOST_BONUS[tier];
+    const duracion = BOOST_DURACION_TIER[tier];
+    boostFuerza = Math.max(boostFuerza, fuerza);
+    boostDuracionRestante = Math.max(boostDuracionRestante, duracion);
+    speed = Math.min(maxSpeed*(1+boostFuerza), speed + maxSpeed*fuerza*0.85);
+    flashMessage(tier===3 ? '¡TURBO MÁXIMO!' : tier===2 ? '¡BUEN TURBO!' : '¡TURBO!',
+                 tier===3 ? '#c04dff' : tier===2 ? '#ff8c00' : '#33aaff');
+    vibrate(tier===3 ? [40,30,40,30,90] : tier===2 ? [40,60] : [30]);
+    reproducir(SND.turbo[tier]);
+    capsulas.shift(); capsulas.push(0);
+    actualizarHudCapsulas();
+  }
+
+  function onDriftPress(){
+    if(state !== 'playing') return;
+    driftHeld = true;
+    document.getElementById('driftBtn').classList.add('activo');
+  }
+  function onDriftRelease(){
+    document.getElementById('driftBtn').classList.remove('activo');
+    if(!driftHeld) return; // ya se había soltado (touchcancel duplicado, etc.)
+    driftHeld = false;
+    if(driftCharge >= DRIFT_MIN_PARA_BOOST){
+      const tier = driftCharge >= DRIFT_TIER3 ? 3 : driftCharge >= DRIFT_TIER2 ? 2 : 1;
+      acumularCarga(tier);
+      flashMessage(tier===3 ? '¡CÁPSULA VIOLETA!' : tier===2 ? '¡CÁPSULA NARANJA!' : '¡CÁPSULA CELESTE!',
+                   tier===3 ? '#c04dff' : tier===2 ? '#ff8c00' : '#33aaff');
+      vibrate(tier===3 ? [30,20,30] : [25]);
+      reproducir(SND.capsula[tier]);
+    }
+    driftCharge = 0;
+  }
+
+  // ---------- Update ----------
+  function update(dt){
+    const playerSegment = findSegment(position + playerZ);
+    const speedPercent  = speed / maxSpeed;
+    const dx            = dt * 2 * speedPercent;
+    const startPosition = position;
+    const estaGirando   = keyLeft || keyRight;
+    const derrapando    = driftHeld && estaGirando;
+
+    // Rampas: si el segmento bajo el jugador está marcado (marcarRampa),
+    // arranca (o sigue) el arco de salto — ver SALTO_DURACION/ALTURA y el
+    // dibujo en drawAuto(). Mientras dura, más abajo se ignoran el
+    // fuera-de-pista/baranda y el choque contra tráfico.
+    if(playerSegment.rampa && !saltando){ saltando = true; saltoT = 0; }
+    if(saltando){
+      saltoT += dt;
+      if(saltoT >= SALTO_DURACION){ saltando = false; saltoT = 0; }
+    }
+
+    position = Util.increase(position, dt*speed, trackLength);
+
+    const dxSteerMult = derrapando ? 1.7 : 1;
+    if(keyLeft) playerX -= dx*dxSteerMult;
+    else if(keyRight) playerX += dx*dxSteerMult;
+
+    // Mientras derrapás, la fuerza centrífuga te empuja mucho menos hacia
+    // afuera — así podés sostener una línea más ancha en la curva sin
+    // salirte, que es justamente el premio de arriesgarte a derrapar.
+    playerX -= dx*speedPercent*playerSegment.curve*centrifugal*(derrapando ? 0.35 : 1);
+
+    speed = Util.accelerate(speed, accel, dt);
+
+    if(!saltando && (playerX < -1 || playerX > 1)){
+      if(speed > offRoadLimit) speed = Util.accelerate(speed, offRoadDecel, dt);
+    }
+
+    // Contención: antes de acá playerX se limitaba a ±2.2 (podías perderte
+    // pista adentro). Ahora hay una baranda física en LIMITE_BARANDA —
+    // comparamos ANTES de recortar para saber si de verdad la tocaste (y
+    // no solo llegaste justo al límite) y ahí frenar en seco + avisar, con
+    // cooldown para no repetir el golpe cuadro a cuadro. En el aire
+    // (saltando) no hay baranda que valga — es parte de la gracia de
+    // saltar sobre la contención.
+    const preClampX = playerX;
+    playerX = Util.limit(playerX, -LIMITE_BARANDA, LIMITE_BARANDA);
+    if(!saltando && Math.abs(preClampX) > LIMITE_BARANDA){
+      const ahoraB = performance.now();
+      if(ahoraB - ultimoGolpeBaranda > 400){
+        ultimoGolpeBaranda = ahoraB;
+        speed = Math.min(speed, Math.max(offRoadLimit*0.7, speed*0.5));
+        shakeT = Math.max(shakeT, 200); flashAlpha = Math.max(flashAlpha, 0.22);
+        flashMessage('¡CONTENCIÓN!', '#ffcf3d');
+        vibrate([25,20,25]);
+        reproducir(SND.contencion);
+      }
+    }
+    // Mientras dura el empujón el tope de velocidad sube; en los últimos
+    // BOOST_APAGADO_MS se apaga en rampa (no de un frenazo) para que no
+    // se sienta como que "chocaste contra una pared" cuando se termina.
+    const boostActivo = boostDuracionRestante > 0
+      ? boostFuerza * Math.min(1, boostDuracionRestante/BOOST_APAGADO_MS)
+      : 0;
+    speed = Util.limit(speed, 0, maxSpeed*(1+boostActivo));
+
+    updateCars(dt);
+    // Chocar contra el tráfico: si vas más rápido que el auto de adelante
+    // y te solapás con él, te frena a su ritmo — igual que chocarte contra
+    // alguien en la vida real, no te para en seco pero te arruina el
+    // envión. Cooldown por auto para no restar velocidad 60 veces por
+    // segundo mientras seguís pegado.
+    //
+    // El "toque" se mide en las MISMAS unidades que se usan para DIBUJAR
+    // (ver drawAuto/drawCocheTrafico, que usan ANCHO_MUNDO_AUTO=100 sobre
+    // un roadWidth de 2000) — antes acá se usaba 0.5 en la escala -1..1
+    // del camino, que en unidades reales son 1000, ¡diez veces más ancho
+    // que el auto dibujado! Por eso chocaba sin tocarse (se sentía como
+    // que toda la pantalla era la colisión).
+    //
+    // En Z se compara contra PLAYER_VISUAL_Z_AHEAD (no playerZ) — playerZ
+    // es la distancia "de fórmula" cámara-jugador, pero el auto se dibuja
+    // en un punto de pantalla elegido a mano (JUGADOR_Y_RATIO) que cae un
+    // poco más lejos que eso; comparar contra playerZ hacía que el choque
+    // disparara cuando el otro auto ya estaba pegado al borde de abajo de
+    // la pantalla en vez de cuando tocaba el dibujo del auto. Como ese
+    // punto puede caer en un segmento vecino al de playerSegment, se
+    // revisan varios segmentos alrededor (no solo uno) para no perderse
+    // ningún auto candidato. La distancia es CIRCULAR por la costura de
+    // la vuelta (donde position+algo puede pasarse de trackLength).
+    // En el aire (rampa) no hay choque contra tráfico — parte de la gracia
+    // de saltar por encima de los autos.
+    if(!saltando){
+      const ahora = performance.now();
+      const zRef = position + PLAYER_VISUAL_Z_AHEAD;
+      const idxBase = findSegment(zRef).index;
+      for(let s=-2; s<=2; s++){
+        const seg = segments[((idxBase+s)%segments.length+segments.length)%segments.length];
+        for(let i=0;i<seg.cars.length;i++){
+          const car = seg.cars[i];
+          if(ahora - car.lastHit < 500) continue;
+          let distZ = Math.abs(car.z - zRef);
+          if(distZ > trackLength/2) distZ = trackLength - distZ; // distancia corta alrededor del circuito
+          const distX = Math.abs(car.offset - playerX) * roadWidth;
+          const tocando = distZ < LARGO_MUNDO_COLISION && distX < (ANCHO_MUNDO_AUTO_JUGADOR + ANCHO_MUNDO_AUTO_TRAFICO)/2;
+          if(!(tocando && speed > car.speed*1.05)) continue;
+          car.lastHit = ahora;
+          speed = car.speed * 0.75;
+          shakeT = 260; flashAlpha = 0.3;
+          flashMessage('¡CHOQUE!', '#ff3b3b');
+          vibrate([50,40,50]);
+          reproducir(SND.choque);
+        }
+      }
+    }
+
+    actualizarDrift(dt, estaGirando);
+
+    // Vueltas: mismo truco que el original — se cruza playerZ cuando la
+    // posición ya dio la vuelta completa a trackLength.
+    if(position > playerZ){
+      if(tiempoVuelta && startPosition < playerZ){
+        if(mejorVuelta === null || tiempoVuelta < mejorVuelta){
+          mejorVuelta = tiempoVuelta;
+          document.getElementById('mejorVuelta').textContent = 'Mejor: ' + mejorVuelta.toFixed(1) + 's';
+        }
+        vuelta++;
+        if(vuelta > TOTAL_VUELTAS){ finalizarCarrera(); return; }
+        document.getElementById('vuelta').textContent = 'Vuelta ' + vuelta + '/' + TOTAL_VUELTAS;
+        tiempoVuelta = 0;
+      } else {
+        tiempoVuelta += dt;
+        tiempoTotal += dt;
+      }
+    }
+
+    document.getElementById('vel').textContent = Math.round((speed/maxSpeed)*120) + ' km/h';
+    document.getElementById('tiempoActual').textContent = tiempoVuelta.toFixed(1) + 's';
+  }
+
+  function finalizarCarrera(){
+    state = 'finished';
+    document.getElementById('finalMejorVuelta').textContent = (mejorVuelta!==null ? mejorVuelta.toFixed(1)+'s' : '—');
+    document.getElementById('finalTiempoTotal').textContent = tiempoTotal.toFixed(1)+'s';
+    const btn = document.getElementById('restartBtn');
+    const resultPista = document.getElementById('resultPista');
+    if(copaActiva){
+      copaResultados.push({ nombre: TRACKS[trackIndex].nombre, tiempo: tiempoTotal, mejor: mejorVuelta });
+      resultPista.textContent = 'Copa — pista ' + (copaIndice+1) + ' de ' + TRACKS.length + ': ' + TRACKS[trackIndex].nombre;
+      btn.textContent = (copaIndice < TRACKS.length-1) ? 'SIGUIENTE PISTA ▶' : '🏆 VER RESULTADOS DE LA COPA';
+    } else {
+      resultPista.textContent = TRACKS[trackIndex].nombre;
+      btn.textContent = 'CORRER DE NUEVO';
+    }
+    document.getElementById('resultScreen').classList.remove('hidden');
+  }
+
+  // Botón único de la pantalla de resultado: corre de nuevo la misma
+  // pista suelta, o — en modo Copa — pasa a la próxima pista / muestra el
+  // resumen final si ya corrió las 4.
+  function accionBotonResultado(){
+    if(copaActiva){
+      if(copaIndice < TRACKS.length-1){
+        copaIndice++;
+        trackIndex = copaIndice;
+        mejorVuelta = null; // el mejor tiempo es por pista, no tiene sentido arrastrarlo a la siguiente
+        iniciarCarrera();
+      } else {
+        mostrarResumenCopa();
+      }
+    } else {
+      iniciarCarrera();
+    }
+  }
+  function iniciarCopa(){
+    copaActiva = true; copaIndice = 0; copaResultados = [];
+    trackIndex = 0; mejorVuelta = null;
+    iniciarCarrera();
+  }
+  function mostrarResumenCopa(){
+    document.getElementById('resultScreen').classList.add('hidden');
+    let totalT = 0;
+    document.getElementById('copaLista').innerHTML = copaResultados.map((r,i)=>{
+      totalT += r.tiempo;
+      const mejorTxt = r.mejor!==null ? r.mejor.toFixed(1)+'s' : '—';
+      return '<div class="stat">' + (i+1) + '. ' + r.nombre + ': <b>' + r.tiempo.toFixed(1) + 's</b> (mejor vuelta ' + mejorTxt + ')</div>';
+    }).join('');
+    document.getElementById('copaTotal').textContent = totalT.toFixed(1) + 's';
+    document.getElementById('copaScreen').classList.remove('hidden');
+    copaActiva = false;
+    state = 'idle';
+  }
+
+  // ---------- Render ----------
+  function polygon(x1,y1,x2,y2,x3,y3,x4,y4,color){
+    ctx.fillStyle = color; ctx.beginPath();
+    ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3); ctx.lineTo(x4,y4);
+    ctx.closePath(); ctx.fill();
+  }
+  function rumbleWidth(w){ return w/Math.max(6, 2*lanes); }
+  function laneWidth(w){ return w/Math.max(32, 8*lanes); }
+
+  function drawSegmentRoad(x1,y1,w1,x2,y2,w2,fog,color){
+    const r1=rumbleWidth(w1), r2=rumbleWidth(w2), l1=laneWidth(w1), l2=laneWidth(w2);
+    ctx.fillStyle = color.grass;
+    ctx.fillRect(0, y2, width, y1-y2);
+    polygon(x1-w1-r1,y1, x1-w1,y1, x2-w2,y2, x2-w2-r2,y2, color.rumble);
+    polygon(x1+w1+r1,y1, x1+w1,y1, x2+w2,y2, x2+w2+r2,y2, color.rumble);
+    polygon(x1-w1,y1, x1+w1,y1, x2+w2,y2, x2-w2,y2, color.road);
+    if(color.lane){
+      let lanew1=w1*2/lanes, lanew2=w2*2/lanes, lanex1=x1-w1+lanew1, lanex2=x2-w2+lanew2;
+      for(let lane=1; lane<lanes; lane++, lanex1+=lanew1, lanex2+=lanew2)
+        polygon(lanex1-l1/2,y1, lanex1+l1/2,y1, lanex2+l2/2,y2, lanex2-l2/2,y2, color.lane);
+    }
+    if(fog < 1){
+      ctx.globalAlpha = 1-fog; ctx.fillStyle = '#0a0510';
+      ctx.fillRect(0, y1, width, y2-y1); ctx.globalAlpha = 1;
+    }
+  }
+  function drawPoste(x, y, scale, offset){
+    const h = 60*scale*width/2, w = Math.max(2, 4*scale*width/2);
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = '#e8e8e8';
+    ctx.fillRect(px-w/2, y-h, w, h);
+    ctx.fillStyle = '#ff3b3b';
+    ctx.fillRect(px-w/2, y-h, w, h*0.28);
+  }
+  // Decoración al costado de la pista: qué se dibuja depende del tema de
+  // la pista activa (temaDecorActual, seteado en aplicarTema) — mismo
+  // sprite 'arbol' de siempre, pero acá adentro elige pino/roca/palmera/
+  // nube. Así addArboles() y el dispatch de sprites en render() no
+  // necesitan saber nada de pistas.
+  function drawArbol(x, y, scale, offset){
+    if(temaDecorActual === 'roca')    return drawRoca(x, y, scale, offset);
+    if(temaDecorActual === 'palmera') return drawPalmera(x, y, scale, offset);
+    if(temaDecorActual === 'nube')    return drawNube(x, y, scale, offset);
+    const h = 260*scale*width/2, w = h*0.5;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = '#4a3018';
+    ctx.fillRect(px-w*0.07, y-h*0.36, w*0.14, h*0.36);
+    ctx.fillStyle = '#1f6b2e';
+    ctx.beginPath();
+    ctx.moveTo(px, y-h);
+    ctx.lineTo(px-w*0.5, y-h*0.3);
+    ctx.lineTo(px+w*0.5, y-h*0.3);
+    ctx.closePath();
+    ctx.fill();
+  }
+  function drawRoca(x, y, scale, offset){
+    const h = 150*scale*width/2, w = h*0.9;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = '#6b6560';
+    ctx.beginPath();
+    ctx.moveTo(px-w*0.5, y);
+    ctx.lineTo(px-w*0.42, y-h*0.55);
+    ctx.lineTo(px-w*0.1, y-h);
+    ctx.lineTo(px+w*0.28, y-h*0.7);
+    ctx.lineTo(px+w*0.5, y-h*0.15);
+    ctx.lineTo(px+w*0.5, y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#524d49';
+    ctx.beginPath();
+    ctx.moveTo(px-w*0.1, y-h);
+    ctx.lineTo(px+w*0.28, y-h*0.7);
+    ctx.lineTo(px+w*0.15, y-h*0.35);
+    ctx.closePath();
+    ctx.fill();
+  }
+  function drawPalmera(x, y, scale, offset){
+    const h = 240*scale*width/2, w = h*0.5;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.strokeStyle = '#8a6a3a'; ctx.lineWidth = Math.max(2, w*0.14); ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(px, y);
+    ctx.quadraticCurveTo(px+w*0.18, y-h*0.55, px+w*0.05, y-h*0.92);
+    ctx.stroke();
+    const topeX = px+w*0.05, topeY = y-h*0.92;
+    ctx.fillStyle = '#1f8a4a';
+    [[-1,-0.15],[-0.6,-0.5],[0,-0.6],[0.6,-0.5],[1,-0.15]].forEach(([dx,dy])=>{
+      ctx.beginPath();
+      ctx.moveTo(topeX, topeY);
+      ctx.quadraticCurveTo(topeX+dx*w*0.9, topeY+dy*h*0.35, topeX+dx*w*1.3, topeY+h*0.05);
+      ctx.quadraticCurveTo(topeX+dx*w*0.5, topeY-h*0.02, topeX, topeY);
+      ctx.closePath(); ctx.fill();
+    });
+  }
+  function drawNube(x, y, scale, offset){
+    const h = 90*scale*width/2, w = h*2.1;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = 'rgba(255,255,255,0.92)';
+    [[-0.32,0.55],[0,0.75],[0.32,0.55],[-0.12,0.4],[0.12,0.4]].forEach(([dx,rr])=>{
+      ctx.beginPath();
+      ctx.ellipse(px+dx*w, y-h*0.35, w*rr*0.42, h*rr*0.5, 0, 0, Math.PI*2);
+      ctx.fill();
+    });
+  }
+  // Baranda de contención — se dibuja en el mismo offset donde de verdad
+  // frena el auto (LIMITE_BARANDA), como una viga con franjas de peligro.
+  function drawBaranda(x, y, scale, offset){
+    const h = 46*scale*width/2, w = 90*scale*width/2;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(px-w*0.05, y-h, w*0.1, h);
+    ctx.fillStyle = '#e8e8e8';
+    ctx.fillRect(px-w/2, y-h*0.85, w, h*0.22);
+    ctx.fillStyle = '#ff3b3b';
+    for(let i=0;i<3;i++) ctx.fillRect(px-w/2+(w/3)*i, y-h*0.85, w/6, h*0.22);
+  }
+  function drawCartel(x, y, scale, offset, texto){
+    const h = 90*scale*width/2, w = 260*scale*width/2;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.fillStyle = '#555';
+    ctx.fillRect(px-Math.max(1,w*0.02), y-h*1.7, Math.max(2,w*0.04), h*1.7);
+    ctx.fillStyle = '#8a1a1a';
+    ctx.fillRect(px-w/2, y-h*1.9, w, h);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1,h*0.04);
+    ctx.strokeRect(px-w/2, y-h*1.9, w, h);
+    ctx.fillStyle = '#fff';
+    ctx.font = `900 ${Math.round(h*0.42)}px Arial`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(texto, px, y-h*1.4);
+  }
+  // Silueta curva (no un rectángulo/hexágono con esquinas rectas) — con
+  // esto solo, ya deja de leerse como "bloque simple" y empieza a leerse
+  // como carrocería de verdad. Path2D para poder reusarla como clip del
+  // brillo especular sin tener que redibujar el contorno dos veces.
+  function siluetaAuto(w, h){
+    const p = new Path2D();
+    p.moveTo(-w*0.30, -h*0.50);
+    p.quadraticCurveTo(-w*0.53, -h*0.18, -w*0.47, h*0.08);
+    p.quadraticCurveTo(-w*0.42, h*0.40, -w*0.18, h*0.50);
+    p.lineTo(w*0.18, h*0.50);
+    p.quadraticCurveTo(w*0.42, h*0.40, w*0.47, h*0.08);
+    p.quadraticCurveTo(w*0.53, -h*0.18, w*0.30, -h*0.50);
+    p.closePath();
+    return p;
+  }
+
+  // Dibuja el auto (jugador o tráfico) centrado en (0,0) del canvas ya
+  // trasladado — así drawAuto/drawCocheTrafico solo se ocupan de UBICAR
+  // el auto en pantalla, y todo el detalle visual vive acá una sola vez.
+  function dibujarCocheDetallado(w, h, colorA, colorB, glowColor, glowBlur, esJugador, alturaSalto){
+    // sombra — si el auto está "en el aire" (rampa, ver drawAuto), el
+    // cuerpo del auto se dibuja despegado (drawAuto ya trasladó el
+    // contexto hacia arriba) pero la sombra tiene que quedarse pegada al
+    // piso: se compensa sumando alturaSalto acá (así, en coordenadas
+    // locales ya trasladadas, vuelve a caer en la posición real de
+    // pantalla) y se la achica/aclara un poco para vender la distancia.
+    alturaSalto = alturaSalto || 0;
+    const factorSombra = Math.max(0.35, 1 - alturaSalto/160);
+    ctx.fillStyle = `rgba(0,0,0,${0.4*factorSombra})`;
+    ctx.beginPath(); ctx.ellipse(0, h*0.46+alturaSalto, w*0.5*factorSombra, h*0.15*factorSombra, 0, 0, Math.PI*2); ctx.fill();
+
+    const silueta = siluetaAuto(w, h);
+
+    // carrocería: degradé metálico (más oscuro en los bordes, brillante
+    // al centro) más un brillo especular diagonal recortado a la silueta.
+    const grad = ctx.createLinearGradient(-w*0.5, 0, w*0.5, 0);
+    grad.addColorStop(0,    colorB);
+    grad.addColorStop(0.42, colorA);
+    grad.addColorStop(0.58, colorA);
+    grad.addColorStop(1,    colorB);
+    ctx.fillStyle = grad;
+    ctx.shadowColor = glowColor; ctx.shadowBlur = glowBlur;
+    ctx.fill(silueta);
+    ctx.shadowBlur = 0;
+
+    ctx.save();
+    ctx.clip(silueta);
+    const brillo = ctx.createLinearGradient(-w*0.5, -h*0.55, w*0.15, h*0.55);
+    brillo.addColorStop(0,    'rgba(255,255,255,0.4)');
+    brillo.addColorStop(0.14, 'rgba(255,255,255,0.05)');
+    brillo.addColorStop(0.4,  'rgba(255,255,255,0)');
+    ctx.fillStyle = brillo;
+    ctx.fillRect(-w/2, -h/2, w, h);
+    ctx.restore();
+
+    // parabrisas trasero, más angosto arriba que abajo (perspectiva)
+    ctx.fillStyle = 'rgba(20,30,42,0.94)';
+    ctx.beginPath();
+    ctx.moveTo(-w*0.15, -h*0.40);
+    ctx.quadraticCurveTo(-w*0.22, -h*0.05, -w*0.20, h*0.10);
+    ctx.lineTo(w*0.20, h*0.10);
+    ctx.quadraticCurveTo(w*0.22, -h*0.05, w*0.15, -h*0.40);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.beginPath();
+    ctx.moveTo(-w*0.11, -h*0.36); ctx.lineTo(-w*0.02, -h*0.36);
+    ctx.lineTo(-w*0.09, h*0.02); ctx.lineTo(-w*0.16, -h*0.01);
+    ctx.closePath(); ctx.fill();
+
+    // faroles traseros
+    ctx.fillStyle = '#ff3b3b';
+    ctx.fillRect(-w*0.36, h*0.32, w*0.11, h*0.10);
+    ctx.fillRect(w*0.25, h*0.32, w*0.11, h*0.10);
+
+    // espejos laterales
+    ctx.fillStyle = colorB;
+    ctx.fillRect(-w*0.53, -h*0.06, w*0.07, h*0.08);
+    ctx.fillRect(w*0.46, -h*0.06, w*0.07, h*0.08);
+
+    if(esJugador){
+      // alerón trasero — le da onda deportiva y ayuda a distinguir al
+      // jugador del resto del tráfico de un vistazo.
+      ctx.fillStyle = colorB;
+      ctx.fillRect(-w*0.30, h*0.26, w*0.60, h*0.045);
+      ctx.fillRect(-w*0.27, h*0.20, w*0.05, h*0.09);
+      ctx.fillRect(w*0.22, h*0.20, w*0.05, h*0.09);
+    }
+  }
+
+  function drawCocheTrafico(x, y, scale, offset, colorPar){
+    const w = 170*scale*width/2, h = w*0.82;
+    const px = x + (scale*offset*roadWidth*width/2);
+    ctx.save();
+    ctx.translate(px, y);
+    dibujarCocheDetallado(w, h, colorPar.a, colorPar.b, colorPar.a, 8, false);
+    ctx.restore();
+  }
+
+  function drawCielo(){
+    const grad = ctx.createLinearGradient(0,0,0,height*0.55);
+    grad.addColorStop(0, cieloColores[0]); grad.addColorStop(1, cieloColores[1]);
+    ctx.fillStyle = grad; ctx.fillRect(0,0,width,height*0.55);
+  }
+
+  // Llamas de escape mientras dura el turbo (boostDuracionRestante > 0):
+  // dos chorros de fuego saliendo de atrás del auto (mismo lado que los
+  // faroles traseros de dibujarCocheDetallado), con degradé blanco→amarillo
+  // →naranja→rojo-transparente y un flicker random cuadro a cuadro para
+  // que tiemble como fuego de verdad. Se llama YA trasladado/rotado igual
+  // que dibujarCocheDetallado, así que gira junto con el auto en un
+  // derrape en vez de quedarse "pegado a la pantalla".
+  function dibujarLlamasTurbo(w, h){
+    const salidas = [-0.30, 0.30];
+    salidas.forEach(ox=>{
+      const px = ox*w;
+      const flicker = 0.7 + Math.random()*0.6;
+      const largo = h*0.62*flicker;
+      const ancho = w*0.16*flicker;
+      const baseY = h*0.46;
+      const grad = ctx.createLinearGradient(px, baseY, px, baseY+largo);
+      grad.addColorStop(0,    'rgba(255,255,255,0.95)');
+      grad.addColorStop(0.22, 'rgba(255,221,90,0.95)');
+      grad.addColorStop(0.55, 'rgba(255,130,20,0.85)');
+      grad.addColorStop(1,    'rgba(255,60,20,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(px-ancho/2, baseY);
+      ctx.quadraticCurveTo(px-ancho*0.85, baseY+largo*0.5, px, baseY+largo);
+      ctx.quadraticCurveTo(px+ancho*0.85, baseY+largo*0.5, px+ancho/2, baseY);
+      ctx.closePath();
+      ctx.fill();
+    });
+  }
+
+  function drawAuto(){
+    const w = Math.min(width,height)*0.18, h = w*0.68;
+    const x = width/2, y = height*JUGADOR_Y_RATIO;
+    const enTurbo = boostDuracionRestante > 0;
+    // Arco de salto: sube y baja en seno durante SALTO_DURACION — ver
+    // saltando/saltoT en update() (se activa al pisar un segmento marcado
+    // con marcarRampa). Puramente visual, la física sigue el piso de
+    // siempre; dibujarCocheDetallado compensa la sombra por separado.
+    const saltoOffset = saltando ? Math.sin(Math.min(1, saltoT/SALTO_DURACION)*Math.PI) * SALTO_ALTURA_PX : 0;
+    ctx.save();
+    ctx.translate(x, y - saltoOffset);
+    ctx.rotate(driftAngle * Math.PI/180);
+    dibujarCocheDetallado(w, h, '#ff9d3d', '#c2450c', '#ff9d3d', driftHeld ? 26 : (enTurbo ? 30 : 12), true, saltoOffset);
+    if(enTurbo) dibujarLlamasTurbo(w, h);
+    ctx.restore();
+
+    // chispas de derrape (visual, según el tramo del medidor)
+    if(driftHeld && driftCharge > 8){
+      const color = driftCharge >= DRIFT_TIER3 ? '#c04dff' : driftCharge >= DRIFT_TIER2 ? '#ff8c00' : '#33aaff';
+      for(let i=0;i<3;i++){
+        const ox = x + (Math.random()-0.5)*w*0.9;
+        const oy = y + h*0.4 + Math.random()*10;
+        ctx.beginPath();
+        ctx.arc(ox, oy, 2+Math.random()*2, 0, Math.PI*2);
+        ctx.fillStyle = color; ctx.globalAlpha = 0.8;
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function render(){
+    // Antes de tocar "Iniciar" todavía no existe la pista (segments=[]) —
+    // sin este corte, findSegment() con segments.length=0 hacía "% 0"
+    // (NaN) y todo lo de abajo explotaba desde el primer cuadro, matando
+    // el loop de animación para siempre (ver requestAnimationFrame al
+    // final de loop()).
+    if(segments.length === 0){
+      ctx.clearRect(0,0,width,height);
+      drawCielo();
+      return;
+    }
+    const baseSegment   = findSegment(position);
+    const basePercent   = Util.percentRemaining(position, segmentLength);
+    const playerSegment = findSegment(position+playerZ);
+    const playerPercent = Util.percentRemaining(position+playerZ, segmentLength);
+    const playerY       = Util.interpolate(playerSegment.p1.world.y, playerSegment.p2.world.y, playerPercent);
+    let maxy = height;
+    let x = 0, dx = -(baseSegment.curve*basePercent);
+
+    ctx.clearRect(0,0,width,height);
+    if(shakeT > 0){
+      ctx.save();
+      const mag = Math.min(shakeT/300,1)*6;
+      ctx.translate((Math.random()-0.5)*mag, (Math.random()-0.5)*mag);
+    }
+    drawCielo();
+
+    // NOTA sobre por qué esto puede ser un circuito cerrado sin drama: el
+    // offset horizontal (x/dx, por curva) es puramente de esta pasada de
+    // dibujo — se reinicia en 0 cada cuadro y solo depende de las curvas
+    // que hay ADELANTE del jugador ahora mismo. Lo único que necesita
+    // "cerrar" para que la vuelta no tenga un salto es la ALTURA
+    // (world.y) del último segmento con el primero — y eso ya lo
+    // garantiza resetPista() con el tramo final que resta lastY().
+    for(let n=0; n<drawDistance; n++){
+      const segment  = segments[(baseSegment.index+n) % segments.length];
+      segment.looped = segment.index < baseSegment.index;
+      segment.fog    = Util.exponentialFog(n/drawDistance, fogDensity);
+      segment.clip   = maxy;
+
+      Util.project(segment.p1, (playerX*roadWidth)-x,      playerY+cameraHeight, position-(segment.looped?trackLength:0), cameraDepth, width, height, roadWidth);
+      Util.project(segment.p2, (playerX*roadWidth)-x-dx,   playerY+cameraHeight, position-(segment.looped?trackLength:0), cameraDepth, width, height, roadWidth);
+
+      x += dx; dx += segment.curve;
+
+      if(segment.p1.camera.z <= cameraDepth || segment.p2.screen.y >= segment.p1.screen.y || segment.p2.screen.y >= maxy) continue;
+
+      drawSegmentRoad(segment.p1.screen.x, segment.p1.screen.y, segment.p1.screen.w,
+                       segment.p2.screen.x, segment.p2.screen.y, segment.p2.screen.w,
+                       segment.fog, segment.color);
+      maxy = segment.p1.screen.y;
+    }
+
+    // Postes/árboles/carteles y tráfico, de atrás hacia adelante (para que
+    // se tapen entre sí como corresponde según la distancia).
+    for(let n=drawDistance-1; n>0; n--){
+      const segment = segments[(baseSegment.index+n) % segments.length];
+      if(segment.p1.screen.scale <= 0) continue;
+
+      for(let i=0;i<segment.sprites.length;i++){
+        const sp = segment.sprites[i];
+        if(sp.tipo === 'poste') drawPoste(segment.p1.screen.x, segment.p1.screen.y, segment.p1.screen.scale, sp.offset);
+        else if(sp.tipo === 'arbol') drawArbol(segment.p1.screen.x, segment.p1.screen.y, segment.p1.screen.scale, sp.offset);
+        else if(sp.tipo === 'baranda') drawBaranda(segment.p1.screen.x, segment.p1.screen.y, segment.p1.screen.scale, sp.offset);
+        else if(sp.tipo.startsWith('cartel_')) drawCartel(segment.p1.screen.x, segment.p1.screen.y, segment.p1.screen.scale, sp.offset, sp.tipo.slice(7));
+      }
+
+      // segment.p2 ya quedó proyectado en la pasada de arriba con el mismo
+      // acumulado x/dx que usó el segmento siguiente para SU p1 — son el
+      // mismo punto, así que sirve para interpolar la posición del auto
+      // dentro de este segmento sin tener que ir a buscar el vecino.
+      for(let i=0;i<segment.cars.length;i++){
+        const car = segment.cars[i];
+        const scale = Util.interpolate(segment.p1.screen.scale, segment.p2.screen.scale, car.percent);
+        const sx    = Util.interpolate(segment.p1.screen.x,     segment.p2.screen.x,     car.percent) + (scale*car.offset*roadWidth*width/2);
+        const sy    = Util.interpolate(segment.p1.screen.y,     segment.p2.screen.y,     car.percent);
+        if(scale > 0) drawCocheTrafico(sx, sy, scale, 0, car.color);
+      }
+    }
+
+    drawAuto();
+    if(shakeT > 0){ shakeT -= 1000/fps; ctx.restore(); }
+
+    // Apagón de túnel: la pista de Montaña marca un tramo con marcarTunel()
+    // — mientras el jugador esté parado sobre esos segmentos, se oscurece
+    // toda la escena (menos el minimapa, que se dibuja después de esto).
+    if(baseSegment.enTunel){
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(0,0,width,height);
+    }
+
+    drawMinimapa();
+  }
+
+  // ---------- Loop de tiempo fijo (igual que el original: la física está
+  // afinada para un paso de 1/60s, así que se usa un acumulador en vez del
+  // dt crudo de requestAnimationFrame). ----------
+  let last = 0, acumulado = 0;
+  function loop(t){
+    if(!last) last = t;
+    let dt = (t-last)/1000;
+    dt = Math.min(dt, 0.25);
+    last = t;
+    if(state === 'playing'){
+      acumulado += dt;
+      while(acumulado > step){ acumulado -= step; update(step); }
+    }
+    render();
+    if(flashAlpha > 0){
+      ctx.fillStyle = `rgba(255,0,0,${flashAlpha*0.35})`;
+      ctx.fillRect(0,0,width,height);
+      flashAlpha -= dt/0.45;
+    }
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // ---------- Controles ----------
+  function bindHold(id, onDown, onUp){
+    const el = document.getElementById(id);
+    el.addEventListener('touchstart', e=>{ e.preventDefault(); onDown(); });
+    el.addEventListener('touchend',   e=>{ e.preventDefault(); onUp();   });
+    el.addEventListener('touchcancel',e=>{ e.preventDefault(); onUp();   });
+    el.addEventListener('mousedown',  e=>{ e.preventDefault(); onDown(); });
+    el.addEventListener('mouseup',    e=>{ e.preventDefault(); onUp();   });
+    el.addEventListener('mouseleave', e=>{ if(e.buttons===1) onUp();     });
+  }
+  const steerLeftBtn = document.getElementById('steerLeftBtn');
+  const steerRightBtn = document.getElementById('steerRightBtn');
+  bindHold('steerLeftBtn',  ()=>{ keyLeft=true;  steerLeftBtn.classList.add('activo');  }, ()=>{ keyLeft=false;  steerLeftBtn.classList.remove('activo');  });
+  bindHold('steerRightBtn', ()=>{ keyRight=true; steerRightBtn.classList.add('activo'); }, ()=>{ keyRight=false; steerRightBtn.classList.remove('activo'); });
+  bindHold('driftBtn',      onDriftPress,        onDriftRelease);
+
+  // TURBO: botón de un solo toque (no de mantener), gasta la cápsula más
+  // vieja al instante — nada que "soltar" acá.
+  const turboBtn = document.getElementById('turboBtn');
+  turboBtn.addEventListener('touchstart', e=>{ e.preventDefault(); onTurboPress(); });
+  turboBtn.addEventListener('mousedown',  e=>{ e.preventDefault(); onTurboPress(); });
+
+  // Teclado, para probar cómodo en la compu: flechas + espacio + T (turbo).
+  window.addEventListener('keydown', e=>{
+    if(e.code==='ArrowLeft')  keyLeft=true;
+    if(e.code==='ArrowRight') keyRight=true;
+    if(e.code==='Space' && !e.repeat) onDriftPress();
+    if(e.code==='KeyT'  && !e.repeat) onTurboPress();
+  });
+  window.addEventListener('keyup', e=>{
+    if(e.code==='ArrowLeft')  keyLeft=false;
+    if(e.code==='ArrowRight') keyRight=false;
+    if(e.code==='Space')      onDriftRelease();
+  });
+
+  // ---------- Inicio ----------
+  function iniciarCarrera(){
+    state = 'playing';
+    resetPista();
+    position = 0; speed = 0; playerX = 0;
+    boostFuerza = 0; boostDuracionRestante = 0; driftHeld = false; driftCharge = 0; driftAngle = 0;
+    capsulas = [0,0,0]; actualizarHudCapsulas();
+    vuelta = 1; tiempoVuelta = 0; tiempoTotal = 0;
+    shakeT = 0; flashAlpha = 0; saltando = false; saltoT = 0;
+    document.getElementById('vuelta').textContent = 'Vuelta 1/' + TOTAL_VUELTAS;
+    document.getElementById('mejorVuelta').textContent = mejorVuelta!==null ? 'Mejor: '+mejorVuelta.toFixed(1)+'s' : 'Mejor: —';
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('resultScreen').classList.add('hidden');
+    if(document.documentElement.requestFullscreen){
+      document.documentElement.requestFullscreen().catch(()=>{});
+    }
+  }
+
+  // Tarjetas de pista suelta: cada una arranca directo esa pista (sin Copa).
+  document.querySelectorAll('.pistaCard').forEach(btn=>{
+    const elegir = ()=>{ getAudio(); desbloquearSonidos(); reproducir(SND.click); trackIndex = Number(btn.dataset.track); copaActiva = false; mejorVuelta = null; iniciarCarrera(); };
+    btn.addEventListener('touchend', e=>{ e.preventDefault(); elegir(); });
+    btn.addEventListener('click', elegir);
+  });
+  document.getElementById('copaBtn').addEventListener('touchend', e=>{ e.preventDefault(); getAudio(); desbloquearSonidos(); reproducir(SND.click); iniciarCopa(); });
+  document.getElementById('copaBtn').addEventListener('click', ()=>{ getAudio(); desbloquearSonidos(); reproducir(SND.click); iniciarCopa(); });
+
+  document.getElementById('restartBtn').addEventListener('touchend', e=>{ e.preventDefault(); reproducir(SND.click); accionBotonResultado(); });
+  document.getElementById('restartBtn').addEventListener('click', ()=>{ reproducir(SND.click); accionBotonResultado(); });
+  const volverAlMenu = ()=>{ reproducir(SND.click); document.getElementById('copaScreen').classList.add('hidden'); document.getElementById('startScreen').classList.remove('hidden'); };
+  document.getElementById('copaVolverBtn').addEventListener('touchend', e=>{ e.preventDefault(); volverAlMenu(); });
+  document.getElementById('copaVolverBtn').addEventListener('click', volverAlMenu);
+
+  /* ---------- MULTIJUGADOR (próximo paso, todavía no implementado) -----
+     Mismo plan que dejamos en carrera.html: nueva sala de WebSocket en
+     main.py con el mismo patrón de código-al-azar/host que ya tiene
+     Estratega de Códigos. resetPista() es determinística (no usa
+     Math.random en ningún lado de la generación de la pista), así que el
+     circuito ya sale IGUAL para cualquiera que la corra — no hace falta
+     ni mandar una semilla. Cada cliente le manda al server, ~12 veces por
+     segundo, su {position, playerX, vuelta} — el server solo reenvía esos
+     paquetes al resto de la sala (los derrapes/choques contra el borde
+     son locales, no hay choque auto-contra-auto en este modo) y anota el
+     orden de llegada a las 3 vueltas para repartir monedas al final. Los
+     rivales se dibujan interpolando entre el último paquete y el
+     anterior, ubicados en la pista con Util.project como cualquier otro
+     objeto de la escena. */
+
+})();
+</script>
+</body>
+</html>

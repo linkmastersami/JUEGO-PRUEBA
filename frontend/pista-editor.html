@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0510">
+<title>Editor de Pista</title>
+<style>
+  /* ---------- Herramienta suelta (frontend/pista-editor.html) ----------
+     v2: rompecabezas de cuadrícula (24x24), reemplaza al editor de
+     botones — con ese, el dibujo se auto-reescalaba y una curva se podía
+     perder de vista entre rectas largas ("la línea sigue pareciendo
+     derecha" aunque sí doblaba). Acá arrastrás piezas físicas (recta,
+     3 curvas, meta) a una grilla fija: lo que ves ES lo que se arma, sin
+     reescalados que engañen el ojo.
+
+     Cómo se arma el circuito real a partir de esto: cada pieza es un
+     "codo" de 90° (las curvas) o un tramo derecho (recta/meta) dentro de
+     su celda, con conectores en 2 de sus 4 lados según la rotación. Se
+     camina el circuito desde la META siguiendo pieza tras pieza — si en
+     algún punto falta una pieza o no conecta, se avisa dónde. Una vez
+     cerrado el lazo, cada pieza se traduce a addStraight()/addCurve() con
+     los MISMOS valores ya probados en el juego (no hace falta que el
+     ángulo real coincida exacto con 90°, la grilla es solo un plano
+     esquemático para diseñar, no una réplica geométrica exacta). */
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; user-select:none; -webkit-user-select:none; }
+  html, body { width:100%; height:100%; overflow:hidden; background:#0a0510; font-family:'Segoe UI', Arial, sans-serif; touch-action:none; }
+  #wrap { display:flex; flex-direction:column; height:100%; }
+
+  #estadoWrap {
+    flex-shrink:0; padding:8px 12px; text-align:center;
+    background:#150a1e; border-bottom:1px solid rgba(255,255,255,0.08);
+  }
+  #estado { font-size:12.5px; font-weight:700; line-height:1.4; }
+  #estado.ok { color:#7ee787; }
+  #estado.falta { color:#ffd93d; }
+  #estado.error { color:#ff8a8a; }
+
+  #lienzoWrap { flex:1; position:relative; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; }
+  /* pan-x/pan-y (no "none"): así el navegador deja arrastrar para
+     desplazarse cuando el toque NO arranca sobre una pieza — el drag de
+     piezas sigue funcionando porque inicioEnGrid() llama preventDefault()
+     recién al confirmar que hay una pieza ahí (ver JS). */
+  #lienzo { touch-action:pan-x pan-y; display:block; }
+
+  #zoomControles {
+    position:absolute; top:8px; right:8px; z-index:10;
+    display:flex; flex-direction:column; gap:6px; align-items:center;
+  }
+  .btnZoom {
+    width:38px; height:38px; border-radius:10px; border:1px solid rgba(255,255,255,0.2);
+    background:rgba(21,10,30,0.85); color:#fff; font-size:18px; font-weight:800;
+    touch-action:manipulation;
+  }
+  .btnZoom:active { background:rgba(126,231,135,0.3); }
+  #zoomEtiqueta { font-size:10.5px; color:#c99b73; background:rgba(21,10,30,0.85); padding:2px 6px; border-radius:6px; }
+
+  #paleta {
+    flex-shrink:0; background:#150a1e; padding:8px 8px max(8px, env(safe-area-inset-bottom));
+    border-top:1px solid rgba(255,255,255,0.1);
+  }
+  #paletaFila { display:flex; gap:6px; justify-content:center; }
+  .piezaPaleta {
+    width:52px; height:52px; border-radius:10px; background:#20122c;
+    border:1px solid rgba(255,255,255,0.15); position:relative; touch-action:none;
+  }
+  .piezaPaleta canvas { position:absolute; inset:0; pointer-events:none; }
+  .piezaPaleta .etiqueta {
+    position:absolute; bottom:-16px; left:0; width:100%; text-align:center;
+    font-size:8.5px; color:#a98bc4; pointer-events:none; white-space:nowrap;
+  }
+  #accionesFila { display:flex; gap:8px; margin-top:22px; }
+  .btn {
+    flex:1; padding:11px 4px; border:none; border-radius:10px; color:#fff;
+    font-weight:800; font-size:12px; touch-action:manipulation;
+  }
+  .btn:active { transform:scale(0.96); }
+  .btn.borrar { background:transparent; border:2px solid rgba(255,90,90,0.5); color:#ff9a9a; }
+  .btn.limpiar { background:transparent; border:2px solid rgba(255,255,255,0.3); }
+  .btn.generar { background:linear-gradient(180deg,#7ee787,#1e8449); }
+  .btn.generar:disabled { background:#333; color:#777; }
+
+  #fantasma {
+    position:fixed; width:52px; height:52px; pointer-events:none; z-index:30;
+    transform:translate(-50%,-50%); display:none;
+  }
+  #fantasma canvas { width:100%; height:100%; }
+
+  #papelera {
+    position:fixed; z-index:25; width:56px; height:56px; border-radius:50%;
+    background:rgba(255,60,60,0.18); border:2px dashed rgba(255,100,100,0.6);
+    display:none; align-items:center; justify-content:center; font-size:22px;
+  }
+  #papelera.activa { background:rgba(255,60,60,0.4); }
+
+  #salidaWrap {
+    position:fixed; top:0; left:0; width:100%; height:100%; z-index:40;
+    background:rgba(10,5,16,0.97); display:none; flex-direction:column; padding:18px;
+  }
+  #salidaWrap.show { display:flex; }
+  #salidaWrap h2 { color:#7ee787; font-size:18px; margin-bottom:10px; }
+  #salidaWrap p { color:#c99b73; font-size:13px; margin-bottom:10px; line-height:1.5; }
+  #salidaCodigo {
+    flex:1; width:100%; background:#0a0510; color:#7ee787; font-family:monospace;
+    font-size:12.5px; padding:12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15);
+    resize:none; line-height:1.6;
+  }
+  #salidaBotones { display:flex; gap:10px; margin-top:12px; }
+  #salidaBotones .btn { padding:14px; }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <div id="estadoWrap"><div id="estado">Arrastrá la 🏁 META a la grilla para empezar</div></div>
+  <div id="lienzoWrap">
+    <canvas id="lienzo"></canvas>
+    <div id="zoomControles">
+      <button class="btnZoom" id="btnZoomMas">➕</button>
+      <div id="zoomEtiqueta">100%</div>
+      <button class="btnZoom" id="btnZoomMenos">➖</button>
+      <button class="btnZoom" id="btnZoomAjustar" style="font-size:13px;">↺</button>
+    </div>
+  </div>
+  <div id="paleta">
+    <div id="paletaFila">
+      <div class="piezaPaleta" data-tipo="meta"><canvas width="52" height="52"></canvas><div class="etiqueta">META</div></div>
+      <div class="piezaPaleta" data-tipo="recta"><canvas width="52" height="52"></canvas><div class="etiqueta">Recta</div></div>
+      <div class="piezaPaleta" data-tipo="curva_suave"><canvas width="52" height="52"></canvas><div class="etiqueta">Suave</div></div>
+      <div class="piezaPaleta" data-tipo="curva_media"><canvas width="52" height="52"></canvas><div class="etiqueta">Media</div></div>
+      <div class="piezaPaleta" data-tipo="curva_cerrada"><canvas width="52" height="52"></canvas><div class="etiqueta">Cerrada</div></div>
+    </div>
+    <div id="accionesFila">
+      <button class="btn limpiar" id="btnLimpiar">Vaciar todo</button>
+      <button class="btn generar" id="btnGenerar" disabled>✓ Generar código</button>
+    </div>
+  </div>
+</div>
+
+<div id="fantasma"><canvas width="52" height="52"></canvas></div>
+<div id="papelera">🗑️</div>
+
+<div id="salidaWrap">
+  <h2>🏁 Circuito listo</h2>
+  <p>Copiá este texto y pasámelo — es el código que reemplaza el contenido de <code>resetPista()</code> en drift.html.</p>
+  <textarea id="salidaCodigo" readonly></textarea>
+  <div id="salidaBotones">
+    <button class="btn generar" id="btnCopiar">📋 Copiar código</button>
+    <button class="btn limpiar" id="btnVolver">← Seguir editando</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const canvas = document.getElementById('lienzo');
+  const ctx = canvas.getContext('2d');
+  const N = 24; // grilla de 24x24, como pediste
+  let cellSize = 20, DPR = 1, canvasCssSize = 480;
+  let tamanoAjustado = 480; // el tamaño "ajustar a pantalla" (zoom 100%), se recalcula si cambia el tamaño de ventana
+  let zoom = 1;
+  const ZOOM_MIN = 0.6, ZOOM_MAX = 2.5, ZOOM_PASO = 0.25;
+
+  // ---------- Piezas: qué lados conecta cada tipo en rotación 0, y a qué
+  // se traduce en el juego real. 0=Norte,1=Este,2=Sur,3=Oeste. ----------
+  const BASE_SIDES = {
+    recta:          [0,2],
+    meta:           [0,2],
+    curva_suave:    [0,1],
+    curva_media:    [0,1],
+    curva_cerrada:  [0,1],
+  };
+  const CURVA_VALOR = { curva_suave: 6, curva_media: 15, curva_cerrada: 30 };
+  const PIEZA_COLOR = {
+    recta:'#9a9aa8', meta:'#ffffff',
+    curva_suave:'#5ec4ff', curva_media:'#ff9d3d', curva_cerrada:'#ff5252',
+  };
+  const PIEZA_GROSOR = { recta:4, meta:5, curva_suave:4, curva_media:5.5, curva_cerrada:7 };
+
+  // ---------- Estado del tablero ----------
+  let grid = {}; // "r,c" -> { tipo, rotacion (0-3) }
+  function clave(r,c){ return r+','+c; }
+
+  function ladosDePieza(pieza){
+    return BASE_SIDES[pieza.tipo].map(s => (s + pieza.rotacion) % 4);
+  }
+
+  // ---------- Dibujo de una pieza dentro de una celda (o de un ícono de
+  // paleta/fantasma, pasando su propio ctx/tamaño) ----------
+  function dibujarPiezaEn(c2d, cx, cy, size, tipo, rotacion){
+    const h = size/2;
+    const lados = BASE_SIDES[tipo].map(s => (s+rotacion)%4);
+    const puntos = { 0:[cx,cy-h], 1:[cx+h,cy], 2:[cx,cy+h], 3:[cx-h,cy] };
+    c2d.save();
+    c2d.lineCap = 'round';
+    c2d.strokeStyle = PIEZA_COLOR[tipo];
+    c2d.lineWidth = PIEZA_GROSOR[tipo] * (size/64);
+    if(tipo === 'meta') c2d.setLineDash([size*0.09, size*0.07]);
+    c2d.shadowColor = PIEZA_COLOR[tipo];
+    c2d.shadowBlur = tipo==='curva_cerrada' ? 6 : 0;
+    c2d.beginPath();
+    const esCurva = tipo !== 'recta' && tipo !== 'meta';
+    if(esCurva){
+      const s = lados.slice().sort((a,b)=>a-b).join(',');
+      let ax, ay, a0, a1;
+      if(s==='0,1'){ ax=cx+h; ay=cy-h; a0=Math.PI/2; a1=Math.PI; }
+      else if(s==='1,2'){ ax=cx+h; ay=cy+h; a0=Math.PI; a1=Math.PI*1.5; }
+      else if(s==='2,3'){ ax=cx-h; ay=cy+h; a0=Math.PI*1.5; a1=Math.PI*2; }
+      else { ax=cx-h; ay=cy-h; a0=0; a1=Math.PI/2; }
+      c2d.arc(ax, ay, h, a0, a1);
+    } else {
+      const [p1,p2] = lados.map(l=>puntos[l]);
+      c2d.moveTo(p1[0],p1[1]); c2d.lineTo(p2[0],p2[1]);
+    }
+    c2d.stroke();
+    if(tipo === 'meta'){
+      c2d.setLineDash([]);
+      c2d.fillStyle = '#fff';
+      c2d.beginPath(); c2d.arc(cx, cy, size*0.09, 0, Math.PI*2); c2d.fill();
+    }
+    c2d.restore();
+  }
+
+  // ---------- Iconos fijos de la paleta y del fantasma ----------
+  document.querySelectorAll('.piezaPaleta').forEach(el=>{
+    const tipo = el.dataset.tipo;
+    const c = el.querySelector('canvas');
+    const cx2 = c.getContext('2d');
+    dibujarPiezaEn(cx2, 26, 26, 40, tipo, 0);
+  });
+  const fantasmaCanvas = document.querySelector('#fantasma canvas');
+  const fantasmaCtx = fantasmaCanvas.getContext('2d');
+
+  // ---------- Tamaño del lienzo: se ajusta para que la grilla 24x24
+  // entre siempre en pantalla sin scroll (herramienta de diseño, no hace
+  // falta precisión de píxel). ----------
+  function resize(){
+    const wrap = document.getElementById('lienzoWrap');
+    tamanoAjustado = Math.max(280, Math.min(wrap.clientWidth, wrap.clientHeight) - 16);
+    aplicarTamano();
+  }
+  window.addEventListener('resize', resize);
+
+  // Separado de resize(): esto es lo que corre cada vez que cambia el
+  // zoom (no hace falta recalcular tamanoAjustado, solo el tamaño final).
+  function aplicarTamano(){
+    canvasCssSize = tamanoAjustado * zoom;
+    cellSize = canvasCssSize / N;
+    DPR = Math.min(window.devicePixelRatio||1, 2);
+    canvas.width = canvasCssSize*DPR; canvas.height = canvasCssSize*DPR;
+    canvas.style.width = canvasCssSize+'px'; canvas.style.height = canvasCssSize+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    document.getElementById('zoomEtiqueta').textContent = Math.round(zoom*100)+'%';
+    dibujar();
+  }
+  document.getElementById('btnZoomMas').addEventListener('click', ()=>{
+    zoom = Math.min(ZOOM_MAX, +(zoom+ZOOM_PASO).toFixed(2));
+    aplicarTamano();
+  });
+  document.getElementById('btnZoomMenos').addEventListener('click', ()=>{
+    zoom = Math.max(ZOOM_MIN, +(zoom-ZOOM_PASO).toFixed(2));
+    aplicarTamano();
+  });
+  document.getElementById('btnZoomAjustar').addEventListener('click', ()=>{
+    zoom = 1;
+    aplicarTamano();
+    document.getElementById('lienzoWrap').scrollTo(0,0);
+  });
+
+  function dibujar(){
+    ctx.clearRect(0,0,canvasCssSize,canvasCssSize);
+    ctx.fillStyle = '#120a1a'; ctx.fillRect(0,0,canvasCssSize,canvasCssSize);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+    for(let i=0;i<=N;i++){
+      ctx.beginPath(); ctx.moveTo(i*cellSize,0); ctx.lineTo(i*cellSize,canvasCssSize); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0,i*cellSize); ctx.lineTo(canvasCssSize,i*cellSize); ctx.stroke();
+    }
+    for(const k in grid){
+      const [r,c] = k.split(',').map(Number);
+      const pieza = grid[k];
+      const cx = c*cellSize + cellSize/2, cy = r*cellSize + cellSize/2;
+      dibujarPiezaEn(ctx, cx, cy, cellSize*0.94, pieza.tipo, pieza.rotacion);
+    }
+    actualizarEstado();
+  }
+
+  // ---------- Caminar el circuito desde la meta y validar que cierre ----
+  function ladoOpuesto(l){ return (l+2)%4; }
+  function direccionDesdeLado(l){ return [[0,-1],[1,0],[0,1],[-1,0]][l]; } // [dCol, dFila]
+
+  function encontrarMeta(){
+    for(const k in grid){ if(grid[k].tipo === 'meta'){ const [r,c]=k.split(',').map(Number); return {r,c,pieza:grid[k]}; } }
+    return null;
+  }
+
+  function validarYCaminar(){
+    const metas = Object.values(grid).filter(p=>p.tipo==='meta');
+    if(metas.length === 0) return { ok:false, msg:'Falta la 🏁 META en la grilla.' };
+    if(metas.length > 1) return { ok:false, msg:'Hay más de una 🏁 META — dejá una sola.' };
+    const info = encontrarMeta();
+    const [ladoA, ladoB] = ladosDePieza(info.pieza);
+    let r = info.r, c = info.c, ladoSalida = ladoB;
+    const pasos = [{ r, c, pieza: info.pieza, ladoEntrada: ladoA, ladoSalida: ladoB }];
+    for(let i=0;i<N*N*2;i++){
+      const [dc,dr] = direccionDesdeLado(ladoSalida);
+      const nr = r+dr, nc = c+dc;
+      if(nr<0||nr>=N||nc<0||nc>=N) return { ok:false, msg:`El circuito se sale de la grilla cerca de fila ${r+1}, col ${c+1}.` };
+      const vecino = grid[clave(nr,nc)];
+      if(!vecino) return { ok:false, msg:`Falta una pieza en fila ${nr+1}, columna ${nc+1}.` };
+      const ladoEsperado = ladoOpuesto(ladoSalida);
+      const ladosVecino = ladosDePieza(vecino);
+      if(!ladosVecino.includes(ladoEsperado)) return { ok:false, msg:`La pieza en fila ${nr+1}, col ${nc+1} no queda conectada — probá rotarla.` };
+      if(vecino.tipo === 'meta'){
+        if(ladoEsperado !== ladoA) return { ok:false, msg:'El circuito vuelve a la meta pero por el lado que no es — rotá la meta o la pieza anterior.' };
+        return { ok:true, pasos };
+      }
+      const ladoSalidaVecino = ladosVecino[0]===ladoEsperado ? ladosVecino[1] : ladosVecino[0];
+      pasos.push({ r:nr, c:nc, pieza:vecino, ladoEntrada:ladoEsperado, ladoSalida:ladoSalidaVecino });
+      r = nr; c = nc; ladoSalida = ladoSalidaVecino;
+    }
+    return { ok:false, msg:'El circuito no cierra (¿quedaron piezas sueltas armando un lazo aparte?).' };
+  }
+
+  function actualizarEstado(){
+    const el = document.getElementById('estado');
+    const btn = document.getElementById('btnGenerar');
+    if(Object.keys(grid).length === 0){
+      el.textContent = 'Arrastrá la 🏁 META a la grilla para empezar';
+      el.className = 'falta'; btn.disabled = true; return;
+    }
+    const r = validarYCaminar();
+    if(r.ok){
+      el.textContent = `✓ Circuito cerrado — ${r.pasos.length} piezas`;
+      el.className = 'ok'; btn.disabled = false;
+    } else {
+      el.textContent = r.msg;
+      el.className = 'error'; btn.disabled = true;
+    }
+  }
+
+  // ---------- Generar el código para pegar en resetPista() ----
+  function girarDireccion(ladoEntrada, ladoSalida){
+    const headingEntrada = ladoOpuesto(ladoEntrada);
+    const diff = (ladoSalida - headingEntrada + 4) % 4;
+    if(diff === 1) return 'derecha';
+    if(diff === 3) return 'izquierda';
+    return 'recta';
+  }
+  function generarCodigo(pasos){
+    const lineas = pasos.map(p=>{
+      if(p.pieza.tipo === 'recta' || p.pieza.tipo === 'meta'){
+        return '    addStraight(ROAD.LEN.M);' + (p.pieza.tipo==='meta' ? ' // meta' : '');
+      }
+      const dir = girarDireccion(p.ladoEntrada, p.ladoSalida);
+      const valorBase = CURVA_VALOR[p.pieza.tipo];
+      const valor = dir === 'derecha' ? valorBase : -valorBase;
+      const nombre = p.pieza.tipo==='curva_suave' ? 'suave' : p.pieza.tipo==='curva_media' ? 'media' : 'cerrada';
+      return `    addCurve(ROAD.LEN.M, ${valor}, 0); // curva ${dir} ${nombre}`;
+    });
+    return lineas.join('\n');
+  }
+
+  // ---------- Arrastre táctil: desde la paleta (siempre arranca drag) o
+  // desde una celda ya ocupada (arranca drag SOLO si se mueve más que un
+  // umbral chico — si no, cuenta como un toque simple = rotar). ----------
+  let arrastre = null; // { origen:'paleta'|'grid', tipo, rotacion, r0,c0, movido }
+  const UMBRAL_DRAG = 10;
+
+  function celdaBajoPunto(x, y){
+    const rect = canvas.getBoundingClientRect();
+    const lx = x - rect.left, ly = y - rect.top;
+    if(lx<0||ly<0||lx>=canvasCssSize||ly>=canvasCssSize) return null;
+    return { r: Math.floor(ly/cellSize), c: Math.floor(lx/cellSize) };
+  }
+  function papeleraBajoPunto(x, y){
+    const el = document.getElementById('papelera');
+    const rect = el.getBoundingClientRect();
+    return x>=rect.left && x<=rect.right && y>=rect.top && y<=rect.bottom;
+  }
+
+  function mostrarFantasma(x, y, tipo, rotacion){
+    const el = document.getElementById('fantasma');
+    el.style.display = 'block';
+    el.style.left = x+'px'; el.style.top = y+'px';
+    fantasmaCtx.clearRect(0,0,52,52);
+    dibujarPiezaEn(fantasmaCtx, 26, 26, 40, tipo, rotacion);
+    document.getElementById('papelera').style.display = 'flex';
+    document.getElementById('papelera').classList.toggle('activa', papeleraBajoPunto(x,y));
+  }
+  function ocultarFantasma(){
+    document.getElementById('fantasma').style.display = 'none';
+    document.getElementById('papelera').style.display = 'none';
+  }
+
+  function posDeEvento(e){
+    const t = (e.changedTouches && e.changedTouches[0]) || e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  // -- Paleta: siempre arranca un drag --
+  document.querySelectorAll('.piezaPaleta').forEach(el=>{
+    const inicio = (e)=>{
+      e.preventDefault();
+      const p = posDeEvento(e);
+      arrastre = { origen:'paleta', tipo: el.dataset.tipo, rotacion: 0, movido: true };
+      mostrarFantasma(p.x, p.y, arrastre.tipo, 0);
+    };
+    el.addEventListener('touchstart', inicio, {passive:false});
+    el.addEventListener('mousedown', inicio);
+  });
+
+  // -- Celdas de la grilla: touchstart sobre una celda ocupada --
+  function inicioEnGrid(e){
+    const p = posDeEvento(e);
+    const celda = celdaBajoPunto(p.x, p.y);
+    if(!celda) return;
+    const pieza = grid[clave(celda.r, celda.c)];
+    if(!pieza) return; // toque sobre celda vacía: no hacemos nada acá, así el
+                        // navegador puede usarlo para desplazar la vista
+                        // (ver touch-action:pan-x pan-y en #lienzo)
+    e.preventDefault(); // recién ahora: sí va a haber un arrastre/rotación
+    arrastre = { origen:'grid', tipo:pieza.tipo, rotacion:pieza.rotacion, r0:celda.r, c0:celda.c, movido:false, xInicio:p.x, yInicio:p.y };
+  }
+  canvas.addEventListener('touchstart', inicioEnGrid, {passive:false});
+  canvas.addEventListener('mousedown', inicioEnGrid);
+
+  function mover(e){
+    if(!arrastre) return;
+    e.preventDefault();
+    const p = posDeEvento(e);
+    if(arrastre.origen === 'grid' && !arrastre.movido){
+      const dist = Math.hypot(p.x-arrastre.xInicio, p.y-arrastre.yInicio);
+      if(dist < UMBRAL_DRAG) return; // todavía podría ser un simple toque (rotar)
+      arrastre.movido = true;
+      delete grid[clave(arrastre.r0, arrastre.c0)]; // se "levanta" de la grilla mientras se arrastra
+      dibujar();
+    }
+    if(arrastre.movido) mostrarFantasma(p.x, p.y, arrastre.tipo, arrastre.rotacion);
+  }
+  window.addEventListener('touchmove', mover, {passive:false});
+  window.addEventListener('mousemove', mover);
+
+  function soltar(e){
+    if(!arrastre) return;
+    const p = posDeEvento(e);
+
+    if(arrastre.origen === 'grid' && !arrastre.movido){
+      // fue un toque simple sobre una pieza ya puesta: rotarla.
+      const k = clave(arrastre.r0, arrastre.c0);
+      if(grid[k]) grid[k].rotacion = (grid[k].rotacion+1)%4;
+      arrastre = null; dibujar(); return;
+    }
+
+    if(papeleraBajoPunto(p.x, p.y)){
+      // se soltó en la papelera: si venía de la grilla ya se sacó arriba;
+      // si venía de la paleta, nunca se llegó a poner — no hay que hacer nada más.
+      arrastre = null; ocultarFantasma(); dibujar(); return;
+    }
+
+    const celda = celdaBajoPunto(p.x, p.y);
+    if(celda && !grid[clave(celda.r, celda.c)]){
+      grid[clave(celda.r, celda.c)] = { tipo: arrastre.tipo, rotacion: arrastre.rotacion };
+    } else if(arrastre.origen === 'grid'){
+      // no había celda válida (vacía) donde soltar: vuelve a su lugar.
+      grid[clave(arrastre.r0, arrastre.c0)] = { tipo: arrastre.tipo, rotacion: arrastre.rotacion };
+    }
+    arrastre = null; ocultarFantasma(); dibujar();
+  }
+  window.addEventListener('touchend', soltar, {passive:false});
+  window.addEventListener('mouseup', soltar);
+
+  // ---------- Botones ----------
+  document.getElementById('btnLimpiar').addEventListener('click', ()=>{
+    grid = {}; dibujar();
+  });
+  document.getElementById('btnGenerar').addEventListener('click', ()=>{
+    const r = validarYCaminar();
+    if(!r.ok) return;
+    document.getElementById('salidaCodigo').value = generarCodigo(r.pasos);
+    document.getElementById('salidaWrap').classList.add('show');
+  });
+  document.getElementById('btnVolver').addEventListener('click', ()=>{
+    document.getElementById('salidaWrap').classList.remove('show');
+  });
+  document.getElementById('btnCopiar').addEventListener('click', async ()=>{
+    const txt = document.getElementById('salidaCodigo');
+    txt.select();
+    try{
+      await navigator.clipboard.writeText(txt.value);
+      const btn = document.getElementById('btnCopiar');
+      const original = btn.textContent;
+      btn.textContent = '✓ ¡Copiado!';
+      setTimeout(()=> btn.textContent = original, 1200);
+    }catch(e){}
+  });
+
+  resize();
+})();
+</script>
+</body>
+</html>
