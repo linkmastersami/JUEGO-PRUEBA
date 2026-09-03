@@ -124,6 +124,17 @@
   .top5-nombre { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .top5-puntos { color:#ffd23f; font-weight:800; flex-shrink:0; }
 
+  /* Selector de enemigo en Práctica: una bolita fija (no gira, a diferencia
+     de la rueda de la suerte) por cada color de enemigo disponible. */
+  #practiceWheelWrap { display:flex; flex-wrap:wrap; justify-content:center; gap:16px; max-width:340px; margin:10px 0 26px; }
+  .practice-ball {
+    width:78px; height:78px; border-radius:50%; border:2px solid rgba(255,255,255,0.55);
+    color:#fff; font-size:11px; font-weight:800; letter-spacing:0.5px;
+    text-shadow:0 1px 4px rgba(0,0,0,0.85); display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:4px; touch-action:manipulation;
+  }
+  .practice-ball:active { transform:scale(0.92); }
+
   #closeBtn {
     position:fixed; top: max(10px, env(safe-area-inset-top)); left:12px; z-index:30;
     background:rgba(0,0,0,0.5); color:#fff; border:none; width:34px; height:34px;
@@ -154,10 +165,10 @@
 <div class="overlay" id="startScreen">
   <div class="title">MONSTER<br>CRAZY</div>
   <div class="subtitle">Un monstruo aparecerá en pantalla completa. Desliza tu dedo lo más rápido posible sobre sus puntos débiles antes de que se acabe el tiempo.</div>
-  <button class="btn" id="easyBtn" style="background:linear-gradient(180deg,#2ecc71,#1e8449); box-shadow:0 6px 0 #145a32, 0 8px 20px rgba(46,204,113,0.4);">FÁCIL</button>
-  <div class="instructions">Golpea los puntos débiles en cualquier orden. 3 vidas.</div>
-  <button class="btn" id="hardBtn" style="margin-top:20px;">DIFÍCIL</button>
-  <div class="instructions">Cada punto tiene un número — solo puedes eliminarlos de menor a mayor. 5 vidas.</div>
+  <button class="btn" id="startBtn">INICIAR</button>
+  <div class="instructions">Golpea los puntos débiles antes de que se acabe el tiempo. 3 vidas.</div>
+  <button class="btn ghost" id="practiceBtn" style="margin-top:20px;">PRÁCTICA</button>
+  <div class="instructions">Elegí un enemigo y entrená sin límite de oleadas. No suma puntos ni monedas.</div>
 </div>
 
 <div class="overlay hidden" id="gameOverScreen">
@@ -177,6 +188,13 @@
 
   <button class="btn" id="restartBtn" style="margin-top:20px;">JUGAR DE NUEVO</button>
   <button class="btn ghost" id="exitBtn" style="margin-top:14px;">SALIR</button>
+</div>
+
+<div class="overlay hidden" id="practiceScreen">
+  <div class="title" style="font-size:30px;">PRÁCTICA</div>
+  <div class="subtitle">Elegí un enemigo para entrenar. Empezás con 10 vidas y no hay límite de oleadas — no suma puntos ni monedas.</div>
+  <div id="practiceWheelWrap"></div>
+  <button class="btn ghost" id="practiceExitBtn">SALIR</button>
 </div>
 
 <script>
@@ -214,8 +232,13 @@
   resize();
 
   // ---------- Estado del juego ----------
-  let state = 'idle'; // idle | playing | over
+  let state = 'idle'; // idle | wheel | playing | over
   let difficulty = 'easy'; // easy | hard
+  // Modo Práctica: un solo enemigo elegido a mano, sin límite de oleadas
+  // (nunca gira la rueda ni cambia de enemigo) y sin puntaje/récord/monedas
+  // al perder (ver gameOver, blockIndexForWave, enemyIndexForWave).
+  let practicando = false;
+  let practicaEnemyIndex = null;
   let maxLives = 3;
   let currentTarget = 1; // en modo difícil, número que toca eliminar ahora
   let score = 0, lives = 3, wave = 1, combo = 0, comboFadeT = 0;
@@ -235,6 +258,891 @@
 
   const zoneColors = ['#ff4757','#ffa502','#ff6b81','#eccc68','#ff7f50','#f368e0'];
   const zoneLabels = ['CABEZA','PECHO','BRAZO IZQ','BRAZO DER','PIERNA IZQ','PIERNA DER'];
+
+  // ---------- Enemigos por oleadas ----------
+  // Cada tanda de OLEADAS_POR_ENEMIGO oleadas cambia el enemigo (pensado
+  // como "uno por color"): cambia la paleta del cuerpo y puede traer una
+  // mecánica extra propia (ver "hazard"). Si se juega más allá del último
+  // enemigo definido acá, se queda en ese (no repite en loop ni rompe).
+  const OLEADAS_POR_ENEMIGO = 20;
+  // Cada tantas oleadas SUPERADAS (sin importar el enemigo ni si se venía
+  // fallando otras), un corazón extra — sin tope. Ver onWaveClear.
+  const LIFEUP_EVERY_N_WAVES = 5;
+  const ENEMY_TYPES = [
+    {
+      nombre: 'Clásico',
+      bodyA: '#3a1030', bodyB: '#150618',
+      shadow: '#ff2020', stroke: 'rgba(255,60,60,0.5)', vena: 'rgba(255,80,80,0.15)',
+      hazard: null,
+    },
+    {
+      nombre: 'Verde',
+      bodyA: '#0e3a1a', bodyB: '#06180c',
+      shadow: '#2dff6a', stroke: 'rgba(70,255,130,0.55)', vena: 'rgba(80,255,120,0.15)',
+      // 3 bolitas oscuras por oleada: si el dedo las roza, se pierde tiempo
+      // del cronómetro en vez de puntos (ver hitHazard).
+      hazard: 'bolitasOscuras',
+    },
+    {
+      nombre: 'Azul',
+      bodyA: '#0a2a45', bodyB: '#031018',
+      shadow: '#33aaff', stroke: 'rgba(90,190,255,0.55)', vena: 'rgba(90,190,255,0.15)',
+      // Modo supervivencia: acá NO hay que llegar a un número de burbujas
+      // reventadas — con que se acabe el cronómetro de la oleada ya se da
+      // por superada (ver "surviveMode" en el bucle principal). Las
+      // burbujas suben cada vez más rápido mientras dura la oleada y cada
+      // una apunta a uno de los picos de arriba (ver drawSpikes): si
+      // llega sin que la revientes, choca contra el pincho y pierdes un
+      // corazón (no se reinicia la oleada, solo sigue con menos vidas).
+      spikes: true,
+      surviveMode: true,
+      hazard: 'burbujasAscendentes',
+    },
+    {
+      nombre: 'Rosa',
+      bodyA: '#3a0e2a', bodyB: '#180616',
+      shadow: '#ff5ec4', stroke: 'rgba(255,110,196,0.55)', vena: 'rgba(255,110,196,0.15)',
+      // Modo ritmo: acá los puntos débiles vuelven a ser los de siempre
+      // (hay que revelarlos todos para superar la oleada), pero se van
+      // "armando" por turnos (ver updateRhythm/rhythmSpeeds) — solo cuenta
+      // tocar uno MIENTRAS está armado (brillo fuerte + anillo rosa); si
+      // lo tocás apagado, no pasa nada (mismo aviso que tocar fuera de
+      // orden en modo difícil, ver zoneMiss). No es velocidad: es esperar
+      // el momento justo.
+      rhythm: true,
+      hazard: null,
+    },
+    {
+      nombre: 'Turquesa',
+      bodyA: '#0a3a3a', bodyB: '#021616',
+      shadow: '#2de0d0', stroke: 'rgba(60,224,208,0.55)', vena: 'rgba(60,224,208,0.15)',
+      // Modo esquivar: sin puntos débiles — acá controlás un personaje
+      // (🥷) que se mueve horizontal por la base de la pantalla, arrastrando
+      // el dedo. Del enemigo caen proyectiles desde arriba, cada vez más
+      // rápido; si uno te toca, perdés un corazón (la oleada sigue, no se
+      // reinicia — mismo desenlace que el Azul). Se supera la oleada
+      // aguantando hasta que se acaba el cronómetro (ver "surviveMode").
+      surviveMode: true,
+      hazard: 'proyectilesCayendo',
+    },
+    {
+      nombre: 'Amarillo',
+      bodyA: '#8a6d00', bodyB: '#241c00',
+      shadow: '#ffd93d', stroke: 'rgba(255,217,61,0.55)', vena: 'rgba(255,217,61,0.15)',
+      // Modo onda con gravedad invertida: sin puntos débiles — el jugador
+      // es un rombo giratorio fijo del lado izquierdo de la pantalla que
+      // solo se mueve en vertical: cae por gravedad, y mientras mantenés
+      // el dedo en pantalla la gravedad se invierte y sube (ver
+      // updateOnda). Van llegando anillos desde la derecha: tocarlos es lo
+      // bueno (explotan y suman puntos), la única forma de perder un
+      // corazón es dejar que uno se pase de largo sin tocarlo (mismo
+      // desenlace que Azul/Turquesa, la oleada no se reinicia). Se supera
+      // la oleada aguantando hasta que se acaba el cronómetro, que acá se
+      // queda fijo (surviveMode, ver spawnWave).
+      surviveMode: true,
+      hazard: 'ondaAnillos',
+    },
+  ];
+  // Qué enemigo le toca a cada racha de OLEADAS_POR_ENEMIGO oleadas ya NO es
+  // fijo/secuencial: se decide al azar con la rueda de la suerte (ver más
+  // abajo, "Rueda de la suerte") la primera vez que se entra a esa racha, y
+  // queda guardado acá para el resto de sus oleadas.
+  let enemyBlockAssignment = [];
+  function blockIndexForWave(w){
+    // En Práctica no hay rachas: es un solo enemigo fijo para siempre, así
+    // que se lo trata como si fuera siempre la racha 0 — la dificultad
+    // (ver waveWithinEnemy) sigue subiendo sin techo de bloque y se
+    // mantiene al máximo después de la oleada 20, en vez de resetearse
+    // cada 20 oleadas.
+    if(practicando) return 0;
+    return Math.floor((w - 1) / OLEADAS_POR_ENEMIGO);
+  }
+  function enemyIndexForWave(w){
+    if(practicando) return practicaEnemyIndex;
+    const idx = enemyBlockAssignment[blockIndexForWave(w)];
+    return idx !== undefined ? idx : 0; // todavía sin girar: no se usa para jugar, la rueda tapa la pantalla
+  }
+  function enemyTypeForWave(w){
+    return ENEMY_TYPES[enemyIndexForWave(w)];
+  }
+  // Oleada "local" dentro de la racha del enemigo actual (1, 2, 3...) — la
+  // dificultad (tiempo, cantidad de puntos débiles) se calcula sobre ESTO
+  // en vez de la oleada absoluta, así cada enemigo nuevo arranca lento otra
+  // vez y se va acelerando de cero, en vez de heredar la velocidad ya
+  // alcanzada con el enemigo anterior. Si ya se pasó el último enemigo
+  // definido, esa racha sigue sumando oleadas para siempre (no vuelve a
+  // reiniciarse en loop cada 20).
+  function waveWithinEnemy(w){
+    // OJO: tiene que ser el índice de BLOQUE (qué racha de 20 oleadas es),
+    // no enemyIndexForWave(w) — desde que el enemigo de cada racha se
+    // sortea con la rueda (ver más abajo), un mismo enemigo puede tocarle a
+    // rachas distintas, así que ya no sirve para ubicar "la primera oleada
+    // de esta racha".
+    const idxBloque = blockIndexForWave(w);
+    const primeraOleadaDeEstaRacha = idxBloque * OLEADAS_POR_ENEMIGO + 1;
+    return w - primeraOleadaDeEstaRacha + 1;
+  }
+
+  // ---------- Trampas del enemigo (bolitas oscuras, etc.) ----------
+  let hazards = [];
+  const HAZARD_TIME_PENALTY_MS = 500;
+  const HAZARD_HIT_COOLDOWN_MS = 500; // evita restar tiempo varias veces en un mismo roce
+
+  function spawnHazards(){
+    hazards = [];
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard !== 'bolitasOscuras') return;
+    const marginX = W*0.16, marginTop = H*0.22, marginBottom = H*0.12;
+    const r = Math.max(20, Math.min(W,H)*0.04);
+    for(let i=0;i<3;i++){
+      let x,y,tries=0,valid=false;
+      do{
+        x = marginX + Math.random()*(W - marginX*2);
+        y = marginTop + Math.random()*(H - marginTop - marginBottom);
+        valid = zones.every(z => Math.hypot(z.x-x, z.y-y) > z.r + r + 16)
+             && hazards.every(h => Math.hypot(h.x-x, h.y-y) > r*2.4);
+        tries++;
+      } while(!valid && tries < 40);
+      hazards.push({ x, y, r, pulse: Math.random()*Math.PI*2, lastHit: 0 });
+    }
+  }
+
+  function hitHazard(h){
+    const now = performance.now();
+    if(now - h.lastHit < HAZARD_HIT_COOLDOWN_MS) return;
+    h.lastHit = now;
+    waveTimeRemaining = Math.max(0, waveTimeRemaining - HAZARD_TIME_PENALTY_MS);
+    flashMessage('-TIEMPO', '#ff3b3b');
+    vibrate([50,40,50]);
+    beep(110, 0.16, 'sawtooth', 0.13);
+    burst(h.x, h.y, '#150213');
+  }
+
+  // ---------- Ritmo (enemigo Rosa) ----------
+  // Los puntos débiles son los de siempre (los mismos "zones" que
+  // Clásico/Verde), pero acá se van "armando" por turnos: mientras un
+  // punto no está armado, tocarlo no cuenta (ver hitZone). Se arma 1 (o 2,
+  // más adelante en la racha del enemigo) a la vez — y a diferencia de la
+  // primera versión, YA NO se apagan solos por un cronómetro: se quedan
+  // prendidos hasta que los tocás. Recién cuando se destruye TODO el lote
+  // armado actual (todos tocados), tras una pausa corta, se prende el
+  // próximo lote — nunca "cambia" el que ya estaba prendido antes de que
+  // le llegue su turno de verdad.
+  let rhythmArmTimer = 0;
+  let rhythmEsperandoProximoLote = true; // true = en la pausa antes de armar el próximo lote
+
+  function rhythmSpeeds(){
+    const wEnemigo = waveWithinEnemy(wave);
+    const progreso = Math.min(1, (wEnemigo - 1) / (OLEADAS_POR_ENEMIGO - 1));
+    const cycleGapMs = 180 - progreso * 120;     // 180ms -> 60ms de pausa entre lotes
+    const simultaneas = progreso > 0.35 ? 2 : 1; // arma 2 a la vez pasado un tercio de la racha
+    return { cycleGapMs, simultaneas };
+  }
+
+  function spawnRhythm(){
+    zones.forEach(z=>{ z.armed = false; });
+    const enemyType = enemyTypeForWave(wave);
+    rhythmEsperandoProximoLote = true;
+    rhythmArmTimer = enemyType.rhythm ? 300 : 0; // el primer lote arranca casi al toque
+  }
+
+  function updateRhythm(t, dt){
+    const enemyType = enemyTypeForWave(wave);
+    if(!enemyType.rhythm) return;
+    const quedanArmadosSinTocar = zones.some(z => z.armed && !z.destroyed);
+    if(quedanArmadosSinTocar){
+      // Todavía hay algo prendido esperando a que lo toquen: no pasa nada,
+      // se queda así (nunca cambia solo).
+      rhythmEsperandoProximoLote = false;
+      return;
+    }
+    if(!rhythmEsperandoProximoLote){
+      // El lote que estaba armado se acaba de terminar (se tocó todo):
+      // arranca la pausa breve antes de prender el siguiente.
+      rhythmEsperandoProximoLote = true;
+      rhythmArmTimer = rhythmSpeeds().cycleGapMs;
+    }
+    rhythmArmTimer -= dt;
+    if(rhythmArmTimer > 0) return;
+    const { simultaneas } = rhythmSpeeds();
+    // En modo difícil solo puede armar el número que toca a continuación
+    // (currentTarget): así el orden y el ritmo conviven sin que nunca
+    // quede esperando un turno que jamás va a llegar.
+    const candidatas = zones.filter(z =>
+      !z.destroyed && !z.armed && (difficulty !== 'hard' || z.number === currentTarget)
+    );
+    for(let i=candidatas.length-1;i>0;i--){
+      const j = Math.floor(Math.random()*(i+1));
+      [candidatas[i], candidatas[j]] = [candidatas[j], candidatas[i]];
+    }
+    candidatas.slice(0, simultaneas).forEach(z=>{ z.armed = true; });
+    rhythmEsperandoProximoLote = false;
+  }
+
+  // ---------- Burbujas ascendentes (enemigo Azul) ----------
+  // MODO SUPERVIVENCIA: a diferencia de los demás enemigos, acá no hay que
+  // llegar a ningún número — con que se acabe el cronómetro de la oleada
+  // ya se da por superada (ver "surviveMode" en el bucle principal). Las
+  // burbujas salen seguido desde abajo y suben cada vez más rápido a
+  // medida que pasa el tiempo DE ESA MISMA OLEADA, con un vaivén de
+  // izquierda a derecha, apuntando cada una a uno de los picos de arriba
+  // (ver spikeTipPositions/drawSpikes). Reventarla suma puntos (más
+  // cuanto más rápido la agarrás); si en cambio llega arriba sin que la
+  // toques, choca contra el pincho y se pierde un corazón — la oleada NO
+  // se reinicia, sigue con menos vidas.
+  let bubbles = [];
+  let bubbleSpawnTimer = 0;
+  const MAX_BUBBLES_ALIVE = 6;
+  const BUBBLE_REACTION_WINDOW_MS = 1400; // por debajo de esto, bono de velocidad completo
+  const BUBBLE_HITBOX_MULTIPLIER = 1.6; // el área que realmente revienta es más grande que el círculo dibujado
+
+  // Fila HORIZONTAL de pinchos apuntando hacia abajo (como un techo de
+  // trampa), cerca de arriba de la pantalla — ya no siguen el contorno del
+  // cuerpo del enemigo, van todos a la misma altura. Esta misma función la
+  // reusa drawSpikes para dibujarlos, así que la punta de cada uno (donde
+  // "choca" una burbuja, ver popBubble/onBubbleEscaped) coincide siempre
+  // con el dibujo real.
+  const SPIKE_COUNT = 6;
+  const SPIKE_ROW_Y_RATIO = 0.15;    // altura de la BASE de los pinchos (arriba), % de H
+  const SPIKE_LENGTH_RATIO = 0.055;  // qué tan abajo llega la PUNTA, % de H
+  const SPIKE_MARGIN_RATIO = 0.19;   // margen a los costados, % de W — bastante centrado para que ninguna burbuja salga pegada al borde
+  function spikeTipPositions(){
+    const baseY = H * SPIKE_ROW_Y_RATIO;
+    const tipY = baseY + H * SPIKE_LENGTH_RATIO; // apunta hacia ABAJO: la punta queda más abajo que la base
+    const marginX = W * SPIKE_MARGIN_RATIO;
+    const usableWidth = W - marginX*2;
+    const positions = [];
+    for(let i=0;i<SPIKE_COUNT;i++){
+      const x = marginX + (usableWidth * i) / (SPIKE_COUNT - 1);
+      positions.push({ x, y: tipY });
+    }
+    return positions;
+  }
+
+  // Se acelera en dos capas: entre oleadas (progresoOleadas, mismo espíritu
+  // que waveTimeLimit — ver waveWithinEnemy) Y dentro de la oleada actual
+  // (progresoOleadaActual, sube de 0 a 1 a medida que se agota el
+  // cronómetro): al principio de cada oleada arranca tranqui, y hacia el
+  // final se pone frenético.
+  //
+  // OJO: la velocidad de subida se expresa como fracción de la altura de
+  // pantalla POR SEGUNDO (no px/ms fijos) — con una velocidad fija en
+  // píxeles una burbuja podía tardar 10+ segundos en cruzar la pantalla,
+  // mucho más que la oleada entera.
+  function bubbleSpeeds(){
+    const wEnemigo = waveWithinEnemy(wave);
+    const progresoOleadas = Math.min(1, (wEnemigo - 1) / (OLEADAS_POR_ENEMIGO - 1));
+    const progresoOleadaActual = 1 - Math.max(0, waveTimeRemaining) / waveTimeLimit;
+    const riseSpeedFactorBase = 0.3 + progresoOleadas * 0.25;
+    const riseSpeedFactor = riseSpeedFactorBase * (1 + progresoOleadaActual * 1.3);
+    const riseSpeed = (H * riseSpeedFactor) / 1000; // px/ms
+    const spawnInterval = Math.max(180, 480 - progresoOleadas*160 - progresoOleadaActual*260);
+    return { riseSpeed, spawnInterval };
+  }
+
+  function spawnBubbleHazard(){
+    bubbles = [];
+    bubbleSpawnTimer = 0;
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard !== 'burbujasAscendentes') return;
+    bubbleSpawnTimer = 250; // la primera sale casi al toque
+  }
+
+  function spawnBubble(){
+    const r = Math.max(26, Math.min(W,H)*0.05);
+    const picos = spikeTipPositions();
+    const objetivo = picos.length ? picos[Math.floor(Math.random()*picos.length)] : { x: W/2, y: H*0.14 };
+    bubbles.push({
+      baseX: objetivo.x, targetY: objetivo.y,
+      x: objetivo.x, y: H + r,
+      r, phase: Math.random()*Math.PI*2, bornAt: performance.now(),
+    });
+  }
+
+  function updateBubbles(t, dt){
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard !== 'burbujasAscendentes'){ bubbles = []; return; }
+    const { riseSpeed, spawnInterval } = bubbleSpeeds();
+    bubbleSpawnTimer -= dt;
+    if(bubbleSpawnTimer <= 0 && bubbles.length < MAX_BUBBLES_ALIVE){
+      spawnBubble();
+      bubbleSpawnTimer = spawnInterval;
+    }
+    const sway = Math.min(W,H)*0.045;
+    for(let i=bubbles.length-1;i>=0;i--){
+      const b = bubbles[i];
+      b.y -= riseSpeed*dt;
+      b.x = b.baseX + Math.sin((t-b.bornAt)/650 + b.phase)*sway;
+      if(b.y <= b.targetY){
+        bubbles.splice(i,1);
+        onBubbleEscaped(b);
+      }
+    }
+  }
+
+  // Una burbuja llegó al pincho sin que la revienten: pierde un corazón y
+  // sigue la MISMA oleada (nada se reinicia). Si con eso se queda sin
+  // vidas, recién ahí es game over — el guard "lives <= 0" al entrar evita
+  // restar de más o programar el game over dos veces si escapan varias
+  // juntas en el mismo instante.
+  function onBubbleEscaped(b){
+    if(state !== 'playing' || waveClearedRecently || lives <= 0) return;
+    lives--;
+    updateLivesUI();
+    combo = 0; showCombo();
+    flashMessage('¡PINCHO!', '#ff3b3b');
+    vibrate([60,40,60]);
+    beep(130, 0.2, 'sawtooth', 0.14);
+    burst(b.x, b.y, '#ff3b3b');
+    if(lives <= 0){
+      flashAlpha = 1; shakeT = 350;
+      flashMessage('DERROTA', '#ff3b3b');
+      setTimeout(gameOver, 500);
+    }
+  }
+
+  // Reventarla es el objetivo: suma puntos, más cuanto más rápido la
+  // agarrás después de que aparece (mismo espíritu que el bono de
+  // velocidad de un punto débil normal). No hay meta que cumplir: superar
+  // la oleada depende solo de aguantar hasta que se acabe el cronómetro
+  // (ver surviveMode en el bucle principal).
+  function popBubble(b){
+    if(state !== 'playing' || waveClearedRecently) return;
+    const reactionMs = performance.now() - b.bornAt;
+    const velocidadFactor = Math.max(0, 1 - reactionMs / BUBBLE_REACTION_WINDOW_MS);
+    combo++; comboFadeT = 1400;
+    const bonus = Math.round(60 + combo*12 + velocidadFactor*90);
+    score += bonus;
+    updateScoreUI();
+    showCombo();
+    burst(b.x, b.y, '#bfe9ff');
+    vibrate(18);
+    beep(700 + velocidadFactor*200, 0.08, 'sine', 0.09);
+  }
+
+  function drawBubbles(){
+    bubbles.forEach(b=>{
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+      const grad = ctx.createRadialGradient(b.x - b.r*0.3, b.y - b.r*0.3, b.r*0.1, b.x, b.y, b.r);
+      grad.addColorStop(0, 'rgba(220,250,255,0.85)');
+      grad.addColorStop(1, 'rgba(120,200,255,0.35)');
+      ctx.fillStyle = grad;
+      ctx.shadowColor = '#66ccff';
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(200,240,255,0.9)';
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(b.x - b.r*0.32, b.y - b.r*0.32, b.r*0.22, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.shadowBlur = 0;
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // ---------- Esquivar (enemigo Turquesa) ----------
+  // Sin puntos débiles: acá el jugador controla un personaje (🥷) que se
+  // mueve horizontal por la base de la pantalla siguiendo el dedo, y hay
+  // que esquivar los proyectiles que caen desde arriba. Tocar uno resta
+  // un corazón (la oleada no se reinicia, sigue con menos vidas — mismo
+  // desenlace que las burbujas del Azul); se supera la oleada aguantando
+  // hasta que se acaba el cronómetro (surviveMode).
+  let jugadorX = 0;
+  let jugadorTargetX = 0; // a donde se está arrastrando el dedo; jugadorX lo persigue
+  let projectiles = [];
+  let projectileSpawnTimer = 0;
+  const JUGADOR_Y_RATIO = 0.86; // altura del personaje, % de H (cerca de la base)
+  const JUGADOR_MOVE_MS_ANCHO_COMPLETO = 220; // ms para recorrer todo el ancho, a velocidad tope
+
+  function dodgeJugadorR(){
+    return Math.max(22, Math.min(W,H)*0.045);
+  }
+
+  // Doble aceleración, mismo espíritu que las burbujas del Azul: entre
+  // oleadas de este enemigo (progresoOleadas) Y dentro de la oleada actual
+  // a medida que se agota el cronómetro (progresoOleadaActual).
+  function dodgeSpeeds(){
+    const wEnemigo = waveWithinEnemy(wave);
+    const progresoOleadas = Math.min(1, (wEnemigo - 1) / (OLEADAS_POR_ENEMIGO - 1));
+    const progresoOleadaActual = 1 - Math.max(0, waveTimeRemaining) / waveTimeLimit;
+    const fallSpeedFactorBase = 0.55 + progresoOleadas * 0.45; // % de H por segundo
+    const fallSpeedFactor = fallSpeedFactorBase * (1 + progresoOleadaActual * 1.4);
+    const fallSpeed = (H * fallSpeedFactor) / 1000; // px/ms
+    const spawnInterval = Math.max(180, 600 - progresoOleadas*260 - progresoOleadaActual*220);
+    return { fallSpeed, spawnInterval };
+  }
+
+  function spawnDodge(){
+    projectiles = [];
+    projectileSpawnTimer = 0;
+    jugadorX = W / 2;
+    jugadorTargetX = W / 2;
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard === 'proyectilesCayendo') projectileSpawnTimer = 300;
+  }
+
+  function spawnProjectile(){
+    const r = Math.max(14, Math.min(W,H)*0.028);
+    const margin = r * 1.4;
+    projectiles.push({ x: margin + Math.random()*(W - margin*2), y: -r, r });
+  }
+
+  function updateDodge(t, dt){
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard !== 'proyectilesCayendo'){ projectiles = []; return; }
+    const { fallSpeed, spawnInterval } = dodgeSpeeds();
+    projectileSpawnTimer -= dt;
+    if(projectileSpawnTimer <= 0){
+      spawnProjectile();
+      projectileSpawnTimer = spawnInterval;
+    }
+    // El ninja persigue jugadorTargetX a velocidad limitada en vez de
+    // saltar directo ahí: así siempre se ve el recorrido, sin importar
+    // dónde toque el dedo.
+    const moveSpeed = W / JUGADOR_MOVE_MS_ANCHO_COMPLETO; // px/ms
+    const maxPaso = moveSpeed * dt;
+    const delta = jugadorTargetX - jugadorX;
+    if(Math.abs(delta) <= maxPaso){ jugadorX = jugadorTargetX; }
+    else{ jugadorX += Math.sign(delta) * maxPaso; }
+    const jugadorY = H * JUGADOR_Y_RATIO;
+    const jugadorR = dodgeJugadorR();
+    for(let i=projectiles.length-1;i>=0;i--){
+      const p = projectiles[i];
+      p.y += fallSpeed*dt;
+      const dist = Math.hypot(p.x - jugadorX, p.y - jugadorY);
+      if(dist <= p.r + jugadorR){
+        projectiles.splice(i,1);
+        onProjectileHit(p);
+        continue;
+      }
+      if(p.y - p.r > H){ projectiles.splice(i,1); } // pasó de largo sin golpear a nadie
+    }
+  }
+
+  // Un proyectil te tocó: pierde un corazón y sigue la MISMA oleada (nada
+  // se reinicia) — mismo patrón que onBubbleEscaped, con el mismo guard
+  // "lives <= 0" para no restar de más ni disparar el game over dos veces.
+  function onProjectileHit(p){
+    if(state !== 'playing' || waveClearedRecently || lives <= 0) return;
+    lives--;
+    updateLivesUI();
+    combo = 0; showCombo();
+    flashMessage('¡GOLPE!', '#ff3b3b');
+    vibrate([60,40,60]);
+    beep(120, 0.2, 'sawtooth', 0.14);
+    burst(p.x, p.y, '#ff3b3b');
+    if(lives <= 0){
+      flashAlpha = 1; shakeT = 350;
+      flashMessage('DERROTA', '#ff3b3b');
+      setTimeout(gameOver, 500);
+    }
+  }
+
+  function drawProjectiles(){
+    projectiles.forEach(p=>{
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+      ctx.fillStyle = '#ff5252';
+      ctx.shadowColor = '#ff3b3b';
+      ctx.shadowBlur = 14;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawDodgeJugador(){
+    if(enemyTypeForWave(wave).hazard !== 'proyectilesCayendo') return;
+    const r = dodgeJugadorR();
+    const y = H * JUGADOR_Y_RATIO;
+    ctx.save();
+    ctx.font = `${Math.round(r*2)}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = '#2de0d0';
+    ctx.shadowBlur = 18;
+    ctx.fillText('🥷', jugadorX, y);
+    ctx.restore();
+  }
+
+  // ---------- Onda (enemigo Amarillo, gravedad invertida) ----------------
+  // Sin puntos débiles: el jugador es un rombo que se queda SIEMPRE a la
+  // izquierda de la pantalla (nunca se mueve en X) y solo sube/baja por
+  // gravedad: normalmente cae, y mientras mantenés el dedo en pantalla (en
+  // cualquier parte) la gravedad se invierte y sube (ver updateOnda). El
+  // tiempo de oleada se queda fijo (mismo trato que el Turquesa) — lo que
+  // acelera con las oleadas es la velocidad de los anillos, no el reloj.
+  // Van llegando anillos desde la derecha: TOCARLOS es lo bueno (explotan
+  // al contacto y suman puntos, ver onAnilloTocado) — la única forma de
+  // fallar es dejar que un anillo se pase de largo sin haberlo tocado con
+  // el rombo (ver onAnilloEscapado), y ahí sí resta un corazón (la oleada
+  // no se reinicia, mismo desenlace que Azul/Turquesa). Se supera la
+  // oleada aguantando hasta que se acaba el cronómetro (surviveMode).
+  let ondaX = 0, ondaY = 0, ondaVelY = 0, ondaRotacion = 0;
+  let ondaGravedadInvertida = false; // true mientras se mantiene el dedo
+  let anillos = [];
+  let anilloSpawnTimer = 0;
+  const ONDA_JUGADOR_X_RATIO = 0.18;
+  const ONDA_CORREDOR_Y_MARGEN_RATIO = 0.16;
+  const ONDA_TIEMPO_CAIDA_COMPLETA_MS = 520; // tiempo en cruzar todo el corredor desde el reposo
+  const ONDA_VELOCIDAD_GIRO = (Math.PI*2) / 650; // rad/ms — una vuelta completa cada 650ms
+
+  function ondaJugadorR(){
+    return Math.max(16, Math.min(W,H)*0.032);
+  }
+  function ondaCorredorAlto(){
+    return H * (1 - ONDA_CORREDOR_Y_MARGEN_RATIO*2);
+  }
+  function ondaGravedad(){
+    // Despejada de "distancia = 1/2 * g * t²" para que caer todo el
+    // corredor desde el reposo tarde ONDA_TIEMPO_CAIDA_COMPLETA_MS.
+    return (2 * ondaCorredorAlto()) / (ONDA_TIEMPO_CAIDA_COMPLETA_MS ** 2); // px/ms²
+  }
+
+  function spawnOnda(){
+    ondaX = W * ONDA_JUGADOR_X_RATIO;
+    ondaY = H / 2;
+    ondaVelY = 0;
+    ondaRotacion = 0;
+    ondaGravedadInvertida = false;
+    anillos = [];
+    anilloSpawnTimer = 0;
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard === 'ondaAnillos') anilloSpawnTimer = 500;
+  }
+
+  // Solo se acelera la llegada de los anillos con las oleadas — el
+  // cronómetro se queda fijo (ver spawnWave), así que no hace falta el
+  // progresoOleadaActual que usan Azul/Turquesa dentro de una misma oleada.
+  function anilloSpeeds(){
+    const wEnemigo = waveWithinEnemy(wave);
+    const progresoOleadas = Math.min(1, (wEnemigo - 1) / (OLEADAS_POR_ENEMIGO - 1));
+    const anilloSpeed = (W * (0.55 + progresoOleadas * 0.95)) / 1000; // px/ms, hacia la izquierda
+    const spawnInterval = Math.max(450, 1300 - progresoOleadas*650);
+    return { anilloSpeed, spawnInterval };
+  }
+
+  function spawnAnillo(){
+    const holeR = Math.max(36, Math.min(W,H)*0.09);
+    const rimGrosor = Math.max(10, Math.min(W,H)*0.022);
+    const margenY = H * ONDA_CORREDOR_Y_MARGEN_RATIO;
+    const y = margenY + Math.random()*(H - margenY*2);
+    anillos.push({ x: W + holeR + rimGrosor, y, holeR, rimR: holeR + rimGrosor, resuelto:false });
+  }
+
+  function updateOnda(t, dt){
+    const enemyType = enemyTypeForWave(wave);
+    if(enemyType.hazard !== 'ondaAnillos'){ anillos = []; return; }
+    const { anilloSpeed, spawnInterval } = anilloSpeeds();
+    anilloSpawnTimer -= dt;
+    if(anilloSpawnTimer <= 0){
+      spawnAnillo();
+      anilloSpawnTimer = spawnInterval;
+    }
+
+    const r = ondaJugadorR();
+    const yMin = H*ONDA_CORREDOR_Y_MARGEN_RATIO + r, yMax = H*(1-ONDA_CORREDOR_Y_MARGEN_RATIO) - r;
+    const g = ondaGravedad();
+    const velMax = (yMax - yMin) / 200; // px/ms, tope para que no se dispare sin control
+    ondaVelY += (ondaGravedadInvertida ? -g : g) * dt;
+    ondaVelY = Math.max(-velMax, Math.min(velMax, ondaVelY));
+    ondaY += ondaVelY * dt;
+    if(ondaY <= yMin){ ondaY = yMin; ondaVelY = 0; }
+    else if(ondaY >= yMax){ ondaY = yMax; ondaVelY = 0; }
+    ondaRotacion += ONDA_VELOCIDAD_GIRO * dt;
+
+    // Tocar el aro es lo bueno acá: explota al contacto y desaparece en el
+    // momento (splice inmediato), no espera a que se termine de ir. Solo
+    // si ninguna parte del rombo llegó a rozarlo mientras cruzaba se cuenta
+    // como escapado (ver comentario arriba del bloque).
+    for(let i=anillos.length-1;i>=0;i--){
+      const a = anillos[i];
+      a.x -= anilloSpeed*dt;
+      const dist = Math.hypot(a.x-ondaX, a.y-ondaY);
+      if(dist <= a.rimR + r){
+        onAnilloTocado(a);
+        anillos.splice(i,1);
+        continue;
+      }
+      if(a.x + a.rimR + r < ondaX){
+        onAnilloEscapado(a);
+        anillos.splice(i,1);
+        continue;
+      }
+      if(a.x < -a.rimR){ anillos.splice(i,1); } // por las dudas, si algo se coló sin resolverse
+    }
+  }
+
+  // Tocarlo (en cualquier parte del aro) es el objetivo: explota y suma
+  // puntos, más combo — mismo espíritu que reventar una burbuja del Azul.
+  function onAnilloTocado(a){
+    if(state !== 'playing' || waveClearedRecently) return;
+    combo++; comboFadeT = 1400;
+    score += Math.round(40 + combo*8);
+    updateScoreUI();
+    showCombo();
+    burst(a.x, a.y, '#ffd93d');
+    burst(a.x, a.y, '#fff8dc');
+    vibrate(18);
+    beep(900, 0.08, 'sine', 0.08);
+  }
+
+  // Se pasó de largo sin tocarlo: pierde un corazón y sigue la MISMA
+  // oleada (nada se reinicia) — mismo patrón que onProjectileHit/
+  // onBubbleEscaped.
+  function onAnilloEscapado(a){
+    if(state !== 'playing' || waveClearedRecently || lives <= 0) return;
+    lives--;
+    updateLivesUI();
+    combo = 0; showCombo();
+    flashMessage('¡SE ESCAPÓ!', '#ff3b3b');
+    vibrate([60,40,60]);
+    beep(120, 0.2, 'sawtooth', 0.14);
+    burst(a.x, a.y, '#ff3b3b');
+    if(lives <= 0){
+      flashAlpha = 1; shakeT = 350;
+      flashMessage('DERROTA', '#ff3b3b');
+      setTimeout(gameOver, 500);
+    }
+  }
+
+  function drawAnillos(){
+    anillos.forEach(a=>{
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, (a.holeR+a.rimR)/2, 0, Math.PI*2);
+      ctx.lineWidth = a.rimR - a.holeR;
+      ctx.strokeStyle = '#ffd93d';
+      ctx.shadowColor = '#ffd93d';
+      ctx.shadowBlur = 14;
+      ctx.stroke();
+      ctx.restore();
+    });
+  }
+
+  function drawOndaJugador(){
+    if(enemyTypeForWave(wave).hazard !== 'ondaAnillos') return;
+    const r = ondaJugadorR();
+    ctx.save();
+    ctx.translate(ondaX, ondaY);
+    ctx.rotate(ondaRotacion);
+    ctx.beginPath();
+    ctx.rect(-r, -r, r*2, r*2);
+    ctx.fillStyle = '#ffd93d';
+    ctx.shadowColor = '#ffd93d';
+    ctx.shadowBlur = 16;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#fff8dc';
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function esModoOnda(){
+    return enemyTypeForWave(wave).hazard === 'ondaAnillos';
+  }
+
+  // ---------- Rueda de la suerte (elige el enemigo de cada racha) --------
+  // Al arrancar el juego, y de nuevo cada vez que se entra a una racha
+  // nueva de OLEADAS_POR_ENEMIGO oleadas (ver iniciarBloque), se muestra
+  // esta rueda en vez de arrancar directo: una dona con una bolita de cada
+  // color de enemigo, girando rápido sin parar. Un solo "espadazo" (deslizar
+  // el dedo, en cualquier dirección, la distancia mínima de un swipe real)
+  // la frena — el resultado se sortea en ESE momento con Math.random (ver
+  // resolverRueda) y la animación de frenado solo hace que se VEA como que
+  // cae ahí; no depende de puntería real. Una vez resuelta, el enemigo
+  // sorteado queda guardado en enemyBlockAssignment para toda la racha.
+  let ruedaAngulo = 0;
+  let ruedaVelocidad = 0; // rad/ms, negativo = gira en sentido horario
+  let ruedaFrenando = false;
+  let ruedaResultado = null; // índice en ENEMY_TYPES, null hasta que se resuelve
+  let ruedaFrenoDesde = 0;
+  let ruedaFrenoDistancia = 0;
+  let ruedaFrenoInicio = 0;
+  let ruedaTrail = null;
+  const RUEDA_VELOCIDAD_INICIAL = (Math.PI*2) / 480; // rad/ms — una vuelta cada 480ms
+  const RUEDA_SWIPE_DIST_MIN = 40; // px mínimos de arrastre para contar como espadazo
+  const RUEDA_FRENO_DURACION_MS = 1900;
+
+  function normalizarAngulo(a){
+    return ((a % (Math.PI*2)) + Math.PI*2) % (Math.PI*2);
+  }
+  function easeOutCubic(x){
+    return 1 - Math.pow(1-x, 3);
+  }
+
+  function bloqueYaAsignado(w){
+    return enemyBlockAssignment[blockIndexForWave(w)] !== undefined;
+  }
+  // Se llama en vez de ir directo a spawnWave() en cualquier punto donde
+  // pueda estar arrancando una racha nueva (inicio del juego, o después de
+  // superar la última oleada de una racha): si ese bloque ya tiene enemigo
+  // asignado (se giró antes, o vino del atajo de debug) arranca directo;
+  // si no, muestra la rueda primero.
+  function iniciarBloque(){
+    if(practicando || bloqueYaAsignado(wave)){
+      state = 'playing';
+      spawnWave();
+    } else {
+      mostrarRueda();
+    }
+  }
+
+  function mostrarRueda(){
+    state = 'wheel';
+    ruedaAngulo = 0;
+    ruedaVelocidad = -RUEDA_VELOCIDAD_INICIAL;
+    ruedaFrenando = false;
+    ruedaResultado = null;
+    ruedaTrail = null;
+    document.getElementById('wave').textContent = 'Oleada ' + wave;
+    document.getElementById('timerBar').style.width = '0%';
+  }
+
+  function resolverRueda(){
+    if(ruedaFrenando || ruedaResultado !== null) return;
+    const n = ENEMY_TYPES.length;
+    ruedaResultado = Math.floor(Math.random()*n);
+    const anguloPorBola = (Math.PI*2) / n;
+    const anguloBola = ruedaResultado * anguloPorBola;
+    // El puntero fijo está arriba (-PI/2): hace falta que la bolita elegida
+    // termine ahí. Como ruedaAngulo solo decrece, se calcula cuánto falta
+    // bajar (en [0, 2π)) hasta el próximo momento en que eso pasa, y se le
+    // suman algunas vueltas completas de más para que se sienta como una
+    // desaceleración real en vez de un frenazo seco.
+    const targetMod = normalizarAngulo(-Math.PI/2 - anguloBola);
+    const currentMod = normalizarAngulo(ruedaAngulo);
+    const distanciaHastaCaer = normalizarAngulo(currentMod - targetMod);
+    const vueltasExtra = 3 + Math.floor(Math.random()*2); // 3-4 vueltas de más
+    ruedaFrenoDesde = ruedaAngulo;
+    ruedaFrenoDistancia = distanciaHastaCaer + vueltasExtra*Math.PI*2;
+    ruedaFrenoInicio = performance.now();
+    ruedaFrenando = true;
+    vibrate(20);
+    beep(500, 0.06, 'square', 0.08);
+  }
+
+  function onRuedaDetenida(){
+    ruedaFrenando = false;
+    enemyBlockAssignment[blockIndexForWave(wave)] = ruedaResultado;
+    const enemyType = ENEMY_TYPES[ruedaResultado];
+    flashMessage(enemyType.nombre.toUpperCase(), enemyType.shadow);
+    vibrate([40,30,80]);
+    beep(760, 0.16, 'sine', 0.14);
+    setTimeout(()=>{
+      if(state !== 'wheel') return;
+      state = 'playing';
+      spawnWave();
+    }, 700);
+  }
+
+  function updateRueda(t, dt){
+    if(!ruedaFrenando){
+      ruedaAngulo += ruedaVelocidad * dt;
+      return;
+    }
+    const transcurrido = performance.now() - ruedaFrenoInicio;
+    const progreso = Math.min(1, transcurrido / RUEDA_FRENO_DURACION_MS);
+    ruedaAngulo = ruedaFrenoDesde - ruedaFrenoDistancia * easeOutCubic(progreso);
+    if(progreso >= 1) onRuedaDetenida();
+  }
+
+  function drawRueda(){
+    const centro = { x: W/2, y: H*0.42 };
+    const R = Math.min(W,H) * 0.32;
+    const n = ENEMY_TYPES.length;
+    const anguloPorBola = (Math.PI*2) / n;
+    const ballR = R * 0.24;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centro.x, centro.y, R, 0, Math.PI*2);
+    ctx.lineWidth = ballR*0.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.stroke();
+    ctx.restore();
+
+    for(let i=0;i<n;i++){
+      const ang = ruedaAngulo + i*anguloPorBola;
+      const bx = centro.x + Math.cos(ang)*R;
+      const by = centro.y + Math.sin(ang)*R;
+      const enemyType = ENEMY_TYPES[i];
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(bx, by, ballR, 0, Math.PI*2);
+      const grad = ctx.createRadialGradient(bx-ballR*0.3, by-ballR*0.3, ballR*0.15, bx, by, ballR);
+      grad.addColorStop(0, '#fff');
+      grad.addColorStop(0.35, enemyType.shadow);
+      grad.addColorStop(1, enemyType.bodyA);
+      ctx.fillStyle = grad;
+      ctx.shadowColor = enemyType.shadow;
+      ctx.shadowBlur = 16;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Puntero fijo arriba de la rueda: la bolita que termine alineada con
+    // esto es la elegida (ver resolverRueda).
+    ctx.save();
+    ctx.beginPath();
+    const px = centro.x, py = centro.y - R - ballR*1.15;
+    ctx.moveTo(px - ballR*0.5, py);
+    ctx.lineTo(px + ballR*0.5, py);
+    ctx.lineTo(px, py + ballR*0.9);
+    ctx.closePath();
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = '#fff';
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.restore();
+
+    if(!ruedaFrenando && ruedaResultado === null){
+      ctx.save();
+      ctx.font = `${Math.round(Math.min(W,H)*0.045)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 6;
+      ctx.fillText('¡Deslizá el dedo para girar!', centro.x, Math.min(H*0.92, centro.y + R + ballR*2.4));
+      ctx.restore();
+    }
+  }
+
+  function ruedaTouchStart(e){
+    if(ruedaFrenando || ruedaResultado !== null) return;
+    const t = (e.changedTouches && e.changedTouches[0]) || e;
+    const pos = getPos(t);
+    ruedaTrail = { last: pos, dist: 0 };
+    // Un simple toque (sin arrastrar nada) también la frena, no hace falta
+    // el arrastre mínimo de espadazo — ver RUEDA_SWIPE_DIST_MIN en
+    // ruedaTouchMove, que sigue funcionando igual si el dedo se mueve.
+    resolverRueda();
+  }
+  function ruedaTouchMove(e){
+    if(!ruedaTrail) return;
+    const t = (e.changedTouches && e.changedTouches[0]) || e;
+    const pos = getPos(t);
+    ruedaTrail.dist += Math.hypot(pos.x-ruedaTrail.last.x, pos.y-ruedaTrail.last.y);
+    ruedaTrail.last = pos;
+    if(ruedaTrail.dist >= RUEDA_SWIPE_DIST_MIN){
+      ruedaTrail = null;
+      resolverRueda();
+    }
+  }
+  function ruedaTouchEnd(){
+    ruedaTrail = null;
+  }
 
   function vibrate(pattern){ if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
 
@@ -261,9 +1169,35 @@
 
   // ---------- Generación de oleada ----------
   function spawnWave(){
-    const count = Math.min(3 + Math.floor((wave-1)/2), 6);
-    waveTimeLimit = Math.max(1600, 4200 - (wave-1)*180);
+    // La dificultad (tiempo y cantidad de puntos débiles) se calcula sobre
+    // la oleada DENTRO de la racha del enemigo actual, no la absoluta: así
+    // cada enemigo nuevo arranca lento otra vez en vez de heredar la
+    // velocidad ya alcanzada con el anterior (ver waveWithinEnemy).
+    const wEnemigo = waveWithinEnemy(wave);
+    const enemyType = enemyTypeForWave(wave);
+    // El cronómetro vuelve a acortarse con las oleadas igual que en los
+    // demás enemigos (antes se dejaba fijo en 4200ms para Rosa, pero eso
+    // era para compensar el viejo sistema donde los puntos se apagaban
+    // solos — ya no pasa, ahora se quedan prendidos hasta que los tocás,
+    // ver updateRhythm — así que no hace falta ese trato especial). El
+    // Turquesa (esquivar) y el Amarillo (onda) son la excepción: el tiempo
+    // de oleada se queda fijo como al inicio, la dificultad ahí sube solo
+    // por la velocidad de los proyectiles/anillos (ver dodgeSpeeds /
+    // anilloSpeeds).
+    const tiempoFijo = enemyType.hazard === 'proyectilesCayendo' || enemyType.hazard === 'ondaAnillos';
+    waveTimeLimit = tiempoFijo
+      ? 4200
+      : Math.max(1600, 4200 - (wEnemigo-1)*180);
     waveTimeRemaining = waveTimeLimit;
+    // El Azul (burbujas), el Turquesa (esquivar) y el Amarillo (onda) no
+    // tienen puntos débiles fijos: el objetivo de la oleada es otra cosa
+    // (ver spawnBubbleHazard/popBubble, spawnDodge/updateDodge y
+    // spawnOnda/updateOnda respectivamente), así que acá no se generan
+    // zonas para ellos.
+    const sinPuntosDebiles = enemyType.hazard === 'burbujasAscendentes'
+      || enemyType.hazard === 'proyectilesCayendo'
+      || enemyType.hazard === 'ondaAnillos';
+    const count = sinPuntosDebiles ? 0 : Math.min(3 + Math.floor((wEnemigo-1)/2), 6);
     zones = [];
     const marginX = W*0.16, marginTop = H*0.22, marginBottom = H*0.12;
     const shuffled = [...zoneLabels].sort(()=>Math.random()-0.5);
@@ -288,11 +1222,25 @@
       zones.forEach((z,i)=>{ z.number = nums[i]; z.missFlashT = 0; });
       currentTarget = 1;
     }
-    enemyCenter.x = zones.reduce((s,z)=>s+z.x,0)/zones.length;
-    enemyCenter.y = zones.reduce((s,z)=>s+z.y,0)/zones.length;
-    enemyMaxR = Math.max(...zones.map(z => Math.hypot(z.x-enemyCenter.x, z.y-enemyCenter.y) + z.r)) + 40;
+    // Con zonas (la mayoría de los enemigos), el cuerpo se centra sobre
+    // ellas como siempre. Sin zonas (Azul, todo burbujas), no hay de dónde
+    // sacar esa posición: se centra en pantalla con un tamaño fijo.
+    if(zones.length > 0){
+      enemyCenter.x = zones.reduce((s,z)=>s+z.x,0)/zones.length;
+      enemyCenter.y = zones.reduce((s,z)=>s+z.y,0)/zones.length;
+      enemyMaxR = Math.max(...zones.map(z => Math.hypot(z.x-enemyCenter.x, z.y-enemyCenter.y) + z.r)) + 40;
+    } else {
+      enemyCenter.x = W/2;
+      enemyCenter.y = H*0.46;
+      enemyMaxR = Math.min(W,H) * 0.3;
+    }
     enemySeedOffsets = Array.from({length:24}, ()=> 0.75 + Math.random()*0.4);
     document.getElementById('wave').textContent = 'Oleada ' + wave;
+    spawnHazards();
+    spawnBubbleHazard();
+    spawnRhythm();
+    spawnDodge();
+    spawnOnda();
   }
 
   function allZonesDestroyed(){ return zones.every(z => z.destroyed); }
@@ -341,10 +1289,18 @@
   // ---------- Golpear una zona ----------
   function hitZone(z, speedFactor){
     if(z.destroyed) return;
+    if(enemyTypeForWave(wave).rhythm && !z.armed){
+      // Tocaste un punto apagado (enemigo Rosa): no cuenta, esperá a que
+      // se arme — mismo aviso visual/sonoro que fallar el orden en modo
+      // difícil, para que se sienta a lo que ya conoce el jugador.
+      zoneMiss(z);
+      return;
+    }
     if(difficulty === 'hard' && z.number !== currentTarget){
       zoneMiss(z);
       return;
     }
+    z.armed = false;
     z.destroyed = true;
     if(difficulty === 'hard') currentTarget++;
     combo++; comboFadeT = 1400;
@@ -395,15 +1351,27 @@
     const remainingRatio = waveTimeRemaining / waveTimeLimit;
     score += Math.round(300 * remainingRatio) + 200;
     updateScoreUI();
-    flashMessage('¡ELIMINADO!', '#2ecc71');
+    // Corazón extra cada LIFEUP_EVERY_N_WAVES oleadas superadas: si hay
+    // huecos (corazones perdidos), primero rellena esos antes que nada;
+    // solo si ya está al tope sube maxLives para agregar un corazón de más.
+    const ganaVidaExtra = wave % LIFEUP_EVERY_N_WAVES === 0;
+    if(ganaVidaExtra){
+      if(lives < maxLives){ lives++; }
+      else { lives++; maxLives++; }
+      updateLivesUI();
+    }
+    flashMessage(ganaVidaExtra ? '¡ELIMINADO! +1 ❤️' : '¡ELIMINADO!', '#2ecc71');
     beep(700, 0.18, 'sine', 0.13);
-    vibrate([30,30,60]);
+    vibrate(ganaVidaExtra ? [30,30,60,40,90] : [30,30,60]);
     setTimeout(()=>{
       if(state !== 'playing') return;
       wave++;
       combo = 0; showCombo();
-      spawnWave();
       waveClearedRecently = false;
+      // iniciarBloque(), no spawnWave() directo: si esta oleada arranca una
+      // racha nueva de enemigo (cada OLEADAS_POR_ENEMIGO), primero hay que
+      // girar la rueda de la suerte (ver "Rueda de la suerte" más arriba).
+      iniciarBloque();
     }, 550);
   }
 
@@ -430,6 +1398,13 @@
 
   function gameOver(){
     state = 'over';
+    if(practicando){
+      // Acá no hay puntaje/récord/monedas: se vuelve directo al selector
+      // de Práctica para elegir otro enemigo, sin pasar por la pantalla de
+      // fin de partida ni avisarle nada a la app contenedora.
+      setTimeout(mostrarSelectorPractica, 400);
+      return;
+    }
     document.getElementById('finalScore').textContent = score;
     document.getElementById('finalWave').textContent = wave;
     // Se resetea a "calculando..." cada vez: la app contenedora todavía no
@@ -552,34 +1527,89 @@
   // ---------- Toques ----------
   // Antes se procesaba cualquier cantidad de dedos a la vez (uno por
   // touch.identifier), lo que permitía "trampear" haciendo varias líneas
-  // en simultáneo. Ahora solo se acepta un dedo: activeTouchId guarda cuál
-  // es el que está en curso y el resto de los toques se ignora hasta que
-  // ese primero se levanta.
-  let activeTouchId = null;
+  // en simultáneo. Ahora solo se acepta un dedo a la vez... EXCEPTO en el
+  // enemigo Rosa (ritmo), donde a veces se arman 2 puntos juntos y hace
+  // falta poder tocar los dos a la vez — ver esMultiToque().
+  let activeTouchIds = new Set();
+
+  function esMultiToque(){
+    return enemyTypeForWave(wave).rhythm === true;
+  }
 
   function getPos(t){
     const rect = canvas.getBoundingClientRect();
     return { x: t.clientX - rect.left, y: t.clientY - rect.top };
   }
 
+  // Toque directo (sin arrastrar nada) — antes solo contaba si el dedo
+  // pasaba por encima EN MOVIMIENTO (línea de swipe); ahora un simple tap
+  // también revienta lo que sea que esté debajo, en cualquier enemigo:
+  // puntos débiles, las bolitas oscuras del Verde, o las burbujas del
+  // Azul. El bono de velocidad va al máximo: un tap ya es "lo más rápido
+  // posible" por definición.
+  function checkTapHit(pos){
+    for(let i=zones.length-1;i>=0;i--){
+      const z = zones[i];
+      if(z.destroyed) continue;
+      if(Math.hypot(pos.x - z.x, pos.y - z.y) <= z.r){
+        hitZone(z, 3);
+        return;
+      }
+    }
+    for(let i=hazards.length-1;i>=0;i--){
+      const h = hazards[i];
+      if(Math.hypot(pos.x - h.x, pos.y - h.y) <= h.r){
+        hitHazard(h);
+        return;
+      }
+    }
+    for(let i=bubbles.length-1;i>=0;i--){
+      const b = bubbles[i];
+      if(Math.hypot(pos.x - b.x, pos.y - b.y) <= b.r * BUBBLE_HITBOX_MULTIPLIER){
+        bubbles.splice(i,1);
+        popBubble(b);
+        return;
+      }
+    }
+  }
+
+  // Enemigo Turquesa: el dedo ya no golpea nada, mueve al personaje (ver
+  // drawDodgeJugador/updateDodge). No hay zonas/hazards/burbujas en este
+  // enemigo (ver sinPuntosDebiles en spawnWave), así que redirigir acá no
+  // le saca nada al resto de los enemigos.
+  function esModoEsquivar(){
+    return enemyTypeForWave(wave).hazard === 'proyectilesCayendo';
+  }
+  function moverJugadorA(x){
+    const r = dodgeJugadorR();
+    jugadorTargetX = Math.max(r, Math.min(W - r, x));
+  }
+
   function handleStart(e){
     e.preventDefault();
+    if(state === 'wheel'){ ruedaTouchStart(e); return; }
     if(state !== 'playing') return;
     for(const t of e.changedTouches || [e]){
-      if(activeTouchId !== null) break; // ya hay un dedo en curso, se ignoran los demás
       const id = t.identifier !== undefined ? t.identifier : 'mouse';
-      activeTouchId = id;
+      if(!esMultiToque() && activeTouchIds.size > 0) continue; // ya hay un dedo en curso, se ignoran los demás
+      activeTouchIds.add(id);
       const pos = getPos(t);
+      if(esModoEsquivar()){ moverJugadorA(pos.x); continue; } // arranca a mover al personaje directo desde el toque inicial
+      if(esModoOnda()){ ondaGravedadInvertida = true; continue; } // mantener el dedo = gravedad invertida (ver handleEnd)
       trails[id] = { points:[{...pos, time: performance.now()}], alive:true };
+      checkTapHit(pos);
     }
   }
   function handleMove(e){
     e.preventDefault();
+    if(state === 'wheel'){ ruedaTouchMove(e); return; }
     if(state !== 'playing') return;
     for(const t of e.changedTouches || [e]){
       const id = t.identifier !== undefined ? t.identifier : 'mouse';
-      if(id !== activeTouchId) continue; // dedo secundario: no dibuja ni golpea nada
+      if(!activeTouchIds.has(id)) continue; // dedo secundario (fuera del enemigo Rosa): no dibuja ni golpea nada
       const pos = getPos(t);
+      if(esModoEsquivar()){ moverJugadorA(pos.x); continue; }
+      if(esModoOnda()){ continue; } // el zigzag ya se mueve solo; el dedo solo invierte dirección al bajar (ver handleStart)
       const trail = trails[id];
       if(!trail) continue;
       const last = trail.points[trail.points.length-1];
@@ -597,14 +1627,37 @@
           hitZone(z, Math.min(speed*3, 3));
         }
       });
+      hazards.forEach(h=>{
+        const d = distToSeg(h.x, h.y, last.x, last.y, pos.x, pos.y);
+        if(d <= h.r) hitHazard(h);
+      });
+      // Índice manual (no forEach) porque acá SÍ se saca del arreglo al
+      // reventarla — mutar el arreglo durante un forEach es riesgoso.
+      // El radio de choque es más grande que el círculo dibujado (ver
+      // BUBBLE_HITBOX_MULTIPLIER): tocarla "casi" también revienta, para
+      // que no se sienta injusto cuando la burbuja ya se movió un poco
+      // entre que se ve y que se toca.
+      for(let bi=bubbles.length-1; bi>=0; bi--){
+        const b = bubbles[bi];
+        const d = distToSeg(b.x, b.y, last.x, last.y, pos.x, pos.y);
+        if(d <= b.r * BUBBLE_HITBOX_MULTIPLIER){
+          bubbles.splice(bi, 1);
+          popBubble(b);
+        }
+      }
     }
   }
   function handleEnd(e){
     e.preventDefault();
+    if(state === 'wheel'){ ruedaTouchEnd(); return; }
     for(const t of e.changedTouches || [e]){
       const id = t.identifier !== undefined ? t.identifier : 'mouse';
       if(trails[id]) trails[id].alive = false;
-      if(id === activeTouchId) activeTouchId = null; // libera el turno para el próximo dedo
+      // Se suelta el dedo que estaba controlando la gravedad del Amarillo
+      // (solo si era el dedo activo — uno fantasma que nunca se registró,
+      // por ejemplo un segundo dedo ignorado, no debe cortar el vuelo).
+      if(esModoOnda() && activeTouchIds.has(id)){ ondaGravedadInvertida = false; }
+      activeTouchIds.delete(id); // libera el turno para el próximo dedo
     }
   }
 
@@ -638,8 +1691,43 @@
     ctx.globalAlpha = 1;
   }
 
+  // Fila HORIZONTAL de pinchos apuntando hacia abajo, como un techo de
+  // trampa — ya no siguen el contorno del cuerpo del enemigo (ver el
+  // comentario de spikeTipPositions). Solo para enemigos con
+  // enemyType.spikes (hoy, el Azul); se dibuja aparte de drawEnemyBody,
+  // independiente de dónde esté posicionado el cuerpo.
+  function drawSpikes(t, enemyType){
+    const baseY = H * SPIKE_ROW_Y_RATIO;
+    const marginX = W * SPIKE_MARGIN_RATIO;
+    const usableWidth = W - marginX*2;
+    const spikeWidth = (usableWidth / (SPIKE_COUNT - 1)) * 0.8; // ancho de la base, con espacio entre pinchos
+    ctx.save();
+    ctx.fillStyle = enemyType.bodyA;
+    ctx.strokeStyle = enemyType.stroke;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = enemyType.shadow;
+    ctx.shadowBlur = 10;
+    for(let i=0;i<SPIKE_COUNT;i++){
+      const x = marginX + (usableWidth * i) / (SPIKE_COUNT - 1);
+      const wobble = 1 + Math.sin(t/500 + i)*0.05;
+      const tipY = baseY + H*SPIKE_LENGTH_RATIO*wobble;
+      ctx.beginPath();
+      ctx.moveTo(x - spikeWidth/2, baseY);
+      ctx.lineTo(x, tipY);
+      ctx.lineTo(x + spikeWidth/2, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawEnemyBody(t){
-    if(zones.length === 0) return;
+    // Antes cortaba acá si no había zonas, pero el enemigo Azul no tiene
+    // (su objetivo son las burbujas) — el que ya filtra cuándo llamar a
+    // esta función es el bucle principal (state==='playing'/waveClearedRecently).
+    if(state === 'idle') return;
+    const enemyType = enemyTypeForWave(wave);
     const points = 24;
     ctx.save();
     ctx.beginPath();
@@ -653,16 +1741,18 @@
     }
     ctx.closePath();
     const grad = ctx.createRadialGradient(enemyCenter.x, enemyCenter.y, 10, enemyCenter.x, enemyCenter.y, enemyMaxR);
-    grad.addColorStop(0, '#3a1030');
-    grad.addColorStop(1, '#150618');
+    grad.addColorStop(0, enemyType.bodyA);
+    grad.addColorStop(1, enemyType.bodyB);
     ctx.fillStyle = grad;
-    ctx.shadowColor = '#ff2020';
+    ctx.shadowColor = enemyType.shadow;
     ctx.shadowBlur = 30;
     ctx.fill();
     ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(255,60,60,0.5)';
+    ctx.strokeStyle = enemyType.stroke;
     ctx.stroke();
     ctx.restore();
+
+    if(enemyType.spikes) drawSpikes(t, enemyType);
 
     // ojos
     const blink = (Math.sin(t/900) > 0.93) ? 0.15 : 1;
@@ -685,7 +1775,7 @@
     });
 
     // venas conectando zonas
-    ctx.strokeStyle = 'rgba(255,80,80,0.15)';
+    ctx.strokeStyle = enemyType.vena;
     ctx.lineWidth = 1.5;
     zones.forEach(z=>{
       if(z.destroyed) return;
@@ -697,23 +1787,42 @@
   }
 
   function drawZones(t, dt){
+    const esRitmo = enemyTypeForWave(wave).rhythm;
     zones.forEach(z=>{
       if(z.destroyed) return;
       const isLocked = difficulty === 'hard' && z.number !== currentTarget;
-      const pulse = isLocked ? 1 : 0.85 + 0.15*Math.sin(t/220 + z.pulse);
+      // Enemigo Rosa: apagado hasta que le toca su turno (ver
+      // updateRhythm) — se ve opaco y quieto igual que un punto bloqueado
+      // en modo difícil, y al armarse se prende fuerte con un anillo
+      // rosa aparte para que no haya dudas de "es este, ahora".
+      const inactivaPorRitmo = esRitmo && !z.armed;
+      const apagada = isLocked || inactivaPorRitmo;
+      const pulse = apagada ? 1 : 0.85 + 0.15*Math.sin(t/220 + z.pulse);
       const r = z.r * pulse;
       ctx.save();
-      ctx.globalAlpha = isLocked ? 0.4 : 1;
-      ctx.shadowColor = isLocked ? '#555' : (difficulty==='hard' ? '#ffd23f' : z.color);
-      ctx.shadowBlur = isLocked ? 8 : 28;
+      ctx.globalAlpha = apagada ? 0.4 : 1;
+      ctx.shadowColor = apagada ? '#555' : (difficulty==='hard' ? '#ffd23f' : z.color);
+      ctx.shadowBlur = apagada ? 8 : (z.armed ? 42 : 28);
       ctx.beginPath();
       ctx.arc(z.x, z.y, r, 0, Math.PI*2);
-      ctx.fillStyle = isLocked ? '#3a3a3a99' : z.color + 'aa';
+      ctx.fillStyle = apagada ? '#3a3a3a99' : z.color + 'aa';
       ctx.fill();
-      ctx.lineWidth = (difficulty==='hard' && !isLocked) ? 4 : 3;
-      ctx.strokeStyle = (difficulty==='hard' && !isLocked) ? '#ffd23f' : '#fff';
+      ctx.lineWidth = (difficulty==='hard' && !apagada) ? 4 : 3;
+      ctx.strokeStyle = (difficulty==='hard' && !apagada) ? '#ffd23f' : '#fff';
       ctx.stroke();
       ctx.restore();
+
+      if(z.armed){
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, r + 9, 0, Math.PI*2);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#ff5ec4';
+        ctx.shadowColor = '#ff5ec4';
+        ctx.shadowBlur = 16;
+        ctx.stroke();
+        ctx.restore();
+      }
 
       if(z.missFlashT > 0){
         ctx.save();
@@ -744,6 +1853,34 @@
       ctx.shadowBlur = 4;
       ctx.fillText(z.label, z.x, z.y + r + 16);
       ctx.shadowBlur = 0;
+    });
+  }
+
+  function drawHazards(t){
+    hazards.forEach(h=>{
+      const pulse = 0.85 + 0.15*Math.sin(t/240 + h.pulse);
+      const r = h.r * pulse;
+      ctx.save();
+      ctx.shadowColor = '#ff2020';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, r, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(10,2,10,0.88)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ff3b3b';
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold ' + Math.round(r*1.05) + 'px Arial';
+      ctx.fillStyle = '#ff5252';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 4;
+      ctx.fillText('⚠', h.x, h.y + 1);
+      ctx.shadowBlur = 0;
+      ctx.textBaseline = 'alphabetic';
     });
   }
 
@@ -784,9 +1921,24 @@
         waveTimeRemaining -= dt;
         if(waveTimeRemaining <= 0){
           waveTimeRemaining = 0;
-          waveFailedRecently = true;
-          onTimeUp();
+          // Modo supervivencia (enemigo Azul): acá agotar el cronómetro es
+          // ÉXITO, no fallo — con aguantar hasta que se acabe la barra ya
+          // se da la oleada por superada. Los demás enemigos siguen igual
+          // que siempre (agotarlo es perder una vida y reintentar).
+          if(enemyTypeForWave(wave).surviveMode){
+            onWaveClear();
+          } else {
+            waveFailedRecently = true;
+            onTimeUp();
+          }
         }
+        // Se pausa junto con el cronómetro (mismas dos banderas): que una
+        // burbuja no siga subiendo -y menos que se escape- mientras ya se
+        // está mostrando el aviso de oleada superada o fallada. Se
+        // revisan de nuevo acá (no solo arriba) porque onWaveClear/onTimeUp
+        // recién pudieron haberlas prendido un instante atrás, en este
+        // mismo cuadro.
+        if(!waveClearedRecently && !waveFailedRecently){ updateBubbles(t, dt); updateRhythm(t, dt); updateDodge(t, dt); updateOnda(t, dt); }
       }
       const ratio = Math.max(waveTimeRemaining/waveTimeLimit, 0);
       const bar = document.getElementById('timerBar');
@@ -797,6 +1949,8 @@
         comboFadeT -= dt;
         if(comboFadeT <= 0){ combo = 0; showCombo(); }
       }
+    } else if(state === 'wheel'){
+      updateRueda(t, dt);
     }
 
     ctx.clearRect(0,0,W,H);
@@ -810,6 +1964,9 @@
     if(state === 'playing' || waveClearedRecently){
       drawEnemyBody(t);
       drawZones(t, dt);
+      if(!waveClearedRecently){ drawHazards(t); drawBubbles(); drawProjectiles(); drawDodgeJugador(); drawAnillos(); drawOndaJugador(); }
+    } else if(state === 'wheel'){
+      drawRueda();
     }
     updateParticles(dt);
     drawParticles();
@@ -827,18 +1984,28 @@
   requestAnimationFrame(loop);
 
   // ---------- Inicio / reinicio ----------
-  function startGame(chosenDifficulty){
+  // practicaIdx: lo manda iniciarPractica() — arranca el modo Práctica con
+  // ESE enemigo fijo para siempre, en vez de una partida normal.
+  function startGame(chosenDifficulty, practicaIdx){
     if(chosenDifficulty) difficulty = chosenDifficulty;
-    maxLives = difficulty === 'hard' ? 5 : 3;
+    practicando = practicaIdx !== undefined;
+    practicaEnemyIndex = practicaIdx;
+    maxLives = practicando ? 10 : (difficulty === 'hard' ? 5 : 3);
     getAudio();
     score = 0; lives = maxLives; wave = 1; combo = 0; currentTarget = 1;
     updateScoreUI(); updateLivesUI(); showCombo();
-    trails = {}; particles = []; activeTouchId = null;
+    trails = {}; particles = []; activeTouchIds.clear(); hazards = []; bubbles = []; bubbleSpawnTimer = 0;
+    projectiles = []; projectileSpawnTimer = 0;
     waveClearedRecently = false; waveFailedRecently = false;
+    enemyBlockAssignment = [];
     document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('practiceScreen').classList.add('hidden');
     document.getElementById('gameOverScreen').classList.add('hidden');
-    state = 'playing';
-    spawnWave();
+    // No siempre arranca directo a jugar: si la racha de esta oleada
+    // todavía no tiene enemigo asignado, primero hay que girar la rueda de
+    // la suerte (ver iniciarBloque / "Rueda de la suerte") — salvo en
+    // Práctica, que nunca la muestra (ver iniciarBloque).
+    iniciarBloque();
     if(document.documentElement.requestFullscreen){
       document.documentElement.requestFullscreen().catch(()=>{});
     }
@@ -847,10 +2014,51 @@
     notifyParent('monsterStart');
   }
 
-  document.getElementById('easyBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('easy'); });
-  document.getElementById('easyBtn').addEventListener('click', ()=>startGame('easy'));
-  document.getElementById('hardBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('hard'); });
-  document.getElementById('hardBtn').addEventListener('click', ()=>startGame('hard'));
+  document.getElementById('startBtn').addEventListener('touchend', e=>{ e.preventDefault(); startGame('easy'); });
+  document.getElementById('startBtn').addEventListener('click', ()=>startGame('easy'));
+
+  // ---------- Práctica ----------
+  // Selector de enemigo: una bolita fija (no gira) por cada color, armada
+  // una sola vez a partir de ENEMY_TYPES — así un enemigo nuevo que se
+  // agregue más adelante aparece acá solo, sin tocar este bloque.
+  function construirSelectorPractica(){
+    const wrap = document.getElementById('practiceWheelWrap');
+    wrap.innerHTML = '';
+    ENEMY_TYPES.forEach((enemyType, idx) => {
+      const bola = document.createElement('button');
+      bola.className = 'practice-ball';
+      bola.type = 'button';
+      bola.style.background = `radial-gradient(circle at 35% 30%, #fff, ${enemyType.shadow} 45%, ${enemyType.bodyA} 100%)`;
+      bola.style.boxShadow = `0 0 14px ${enemyType.shadow}`;
+      bola.textContent = enemyType.nombre;
+      bola.addEventListener('touchend', e=>{ e.preventDefault(); iniciarPractica(idx); });
+      bola.addEventListener('click', ()=> iniciarPractica(idx));
+      wrap.appendChild(bola);
+    });
+  }
+  construirSelectorPractica();
+
+  function mostrarSelectorPractica(){
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    document.getElementById('practiceScreen').classList.remove('hidden');
+  }
+  function iniciarPractica(idx){
+    startGame('easy', idx);
+  }
+
+  document.getElementById('practiceBtn').addEventListener('touchend', e=>{ e.preventDefault(); mostrarSelectorPractica(); });
+  document.getElementById('practiceBtn').addEventListener('click', mostrarSelectorPractica);
+  document.getElementById('practiceExitBtn').addEventListener('touchend', e=>{
+    e.preventDefault();
+    document.getElementById('practiceScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+  });
+  document.getElementById('practiceExitBtn').addEventListener('click', ()=>{
+    document.getElementById('practiceScreen').classList.add('hidden');
+    document.getElementById('startScreen').classList.remove('hidden');
+  });
+
   document.getElementById('restartBtn').addEventListener('touchend', e=>{ e.preventDefault(); document.getElementById('gameOverScreen').classList.add('hidden'); document.getElementById('startScreen').classList.remove('hidden'); });
   document.getElementById('restartBtn').addEventListener('click', ()=>{ document.getElementById('gameOverScreen').classList.add('hidden'); document.getElementById('startScreen').classList.remove('hidden'); });
 
