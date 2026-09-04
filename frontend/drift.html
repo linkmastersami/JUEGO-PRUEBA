@@ -442,6 +442,23 @@
   document.addEventListener('touchend', bloquearOrientacion, { once:true, passive:true });
   document.addEventListener('click', bloquearOrientacion, { once:true });
 
+  // Reintento automático al volver de "Compartir enlace" (el menú nativo
+  // del teléfono tapa la página un rato, y al volver puede haber perdido
+  // la pantalla completa/el bloqueo de orientación). No hay garantía de
+  // que esto alcance solo — la mayoría de los navegadores piden un toque
+  // de VERDAD para pantalla completa/orientation.lock, un evento de
+  // 'visibilitychange' no cuenta como eso — por eso sigue estando el
+  // botón "Girar pantalla" en el cartel como respaldo confiable. Pero
+  // probarlo solo es gratis (si falla, no rompe nada) y en algunos
+  // navegadores alcanza a funcionar si todavía queda algo de "actividad
+  // reciente del usuario" pegada al toque que abrió el compartir.
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState === 'visible' && !document.fullscreenElement){
+      resize();
+      bloquearOrientacion();
+    }
+  });
+
   // Botón manual del cartel de "girá el teléfono": bloquearOrientacion()
   // ya se intenta sola (arriba), pero después de usar "Compartir enlace"
   // (abre el menú nativo del celular) el navegador puede volver con la
