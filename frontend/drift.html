@@ -262,6 +262,13 @@
      cliente, ver la nota grande en DriftRoom del lado del servidor). -->
 <div class="overlay hidden" id="salaScreen">
   <div class="title" style="font-size:26px;">🏁 SALA <span id="salaCodigo" style="color:#ffd93d;"></span></div>
+  <!-- Sin un toque de VERDAD acá, pantalla completa/girar la pantalla a
+       fuerza (bloquearOrientacion) fallan calladitas cuando arranca la
+       carrera sola (el host la arranca, no vos) — el touchend/click "de
+       cualquier lado" ya lo cubre para el host y para quien toque una
+       pista, pero el que se queda solo esperando sin tocar nada más
+       necesita este botón sí o sí. -->
+  <button class="btn" id="salaPantallaBtn" style="font-size:14px; padding:10px 22px; margin-bottom:10px;">📱 Preparar pantalla</button>
   <div id="salaJugadores" style="width:100%; max-width:340px; margin:10px 0;"></div>
   <div id="salaPistaGrid" class="hidden" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; margin-bottom:12px;">
     <button class="pistaCard" data-pista="0"><span class="emoji">🏁</span>Clásico</button>
@@ -299,7 +306,45 @@
   }
   function Dom_get(id){ return document.getElementById(id); }
   window.addEventListener('resize', resize);
+  // 'resize' solo a veces no alcanza al girar el teléfono (pasa más
+  // seguido adentro de un iframe, como cuando esto llega embebido desde
+  // index.html) — 'orientationchange' y visualViewport son más
+  // confiables ahí, y el intervalo de acá abajo es la última red: si por
+  // lo que sea NINGUNO de los eventos disparó, igual se re-chequea el
+  // tamaño cada medio segundo mientras siga pidiendo girar.
+  window.addEventListener('orientationchange', ()=> setTimeout(resize, 50));
+  if(window.visualViewport) window.visualViewport.addEventListener('resize', resize);
+  setInterval(()=>{ if(Dom_get('rotateHint').classList.contains('show')) resize(); }, 500);
   resize();
+
+  // Fuerza horizontal cuando se puede (Android/Chrome — iOS Safari no
+  // deja bloquear la orientación desde la web, ahí solo queda esperar a
+  // que la persona gire el teléfono a mano, por eso #rotateHint sigue
+  // existiendo como respaldo). Hace falta pantalla completa primero en
+  // casi todos los navegadores, y las dos cosas TIENEN que dispararse
+  // dentro de un gesto real del usuario (un toque) — si no, fallan
+  // calladitas. Por eso no alcanza con llamarla una sola vez al arrancar
+  // la carrera: automáticamente el rival que no es host nunca toca el
+  // botón "iniciar" (lo aprieta el host), así que acá abajo también se
+  // engancha del primer toque que sea, donde sea, en toda la pantalla.
+  function bloquearOrientacion(){
+    const pedirFullscreen = document.documentElement.requestFullscreen
+      || document.documentElement.webkitRequestFullscreen
+      || document.documentElement.msRequestFullscreen;
+    const intentarLock = ()=>{
+      try{
+        if(screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(()=>{});
+      }catch(e){}
+    };
+    if(document.fullscreenElement || document.webkitFullscreenElement){ intentarLock(); return; }
+    if(pedirFullscreen){
+      pedirFullscreen.call(document.documentElement).then(intentarLock).catch(intentarLock);
+    } else {
+      intentarLock();
+    }
+  }
+  document.addEventListener('touchend', bloquearOrientacion, { once:true, passive:true });
+  document.addEventListener('click', bloquearOrientacion, { once:true });
 
   document.getElementById('closeBtn').addEventListener('click', ()=>{
     detenerMotor();
@@ -1976,9 +2021,7 @@
     document.getElementById('mejorVuelta').textContent = mejorVuelta!==null ? 'Mejor: '+mejorVuelta.toFixed(1)+'s' : 'Mejor: —';
     document.getElementById('startScreen').classList.add('hidden');
     document.getElementById('resultScreen').classList.add('hidden');
-    if(document.documentElement.requestFullscreen){
-      document.documentElement.requestFullscreen().catch(()=>{});
-    }
+    bloquearOrientacion();
     arrancarCuentaRegresiva();
   }
 
@@ -2053,6 +2096,11 @@
     if(window.parent !== window) window.parent.postMessage({type:'driftExit'}, '*');
   }
   document.getElementById('salaSalirBtn').addEventListener('click', salirDeLaSala);
+  document.getElementById('salaPantallaBtn').addEventListener('click', (e)=>{
+    bloquearOrientacion();
+    e.currentTarget.textContent = '✅ Listo';
+    e.currentTarget.disabled = true;
+  });
   document.getElementById('salaIniciarBtn').addEventListener('click', ()=>{
     if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'iniciar'}));
   });
