@@ -1272,10 +1272,22 @@
     }catch(e){ return null; }
   }
   let sonidosDesbloqueados = false;
+  // OJO — SND.motor y SND.derrape quedan AFUERA a propósito: a los dos se
+  // los play()/pause() directo desde otro lado (iniciarMotor/
+  // actualizarDrift), no se clonan como el resto. Si además se los
+  // "desbloqueaba" acá con un play()+pause(), el pause() de ACÁ podía
+  // llegar tarde (es async, resuelve cuando el navegador confirma que
+  // arrancó) y pisar por encima al play() de verdad que ya había hecho
+  // iniciarMotor() unas líneas más abajo en el mismo toque — el motor
+  // arrancaba y quedaba pausado al toque sin que nada lo volviera a
+  // arrancar. No hace falta desbloquearlos acá igual: iniciarMotor() ya
+  // llama a .play() DENTRO del mismo gesto del jugador (mismo toque que
+  // dispara esta función), así que ese primer play() ya cuenta como el
+  // gesto que el navegador pide.
   function desbloquearSonidos(){
     if(sonidosDesbloqueados) return;
     sonidosDesbloqueados = true;
-    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor, SND.derrape, SND.carreraGanada]).forEach(a=>{
+    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.carreraGanada]).forEach(a=>{
       if(!a) return;
       a.play().then(()=>{ a.pause(); a.currentTime = 0; }).catch(()=>{});
     });
