@@ -1317,6 +1317,24 @@
   // se puede pasar de la fuerza con la que está grabado el mp3 sin ese
   // riesgo) — si hace falta más fuerte de verdad, la forma segura es
   // resubir motor_loop.mp3 ya masterizado más alto, no forzarlo por acá.
+  // OJO #2: también se probó "escrubbear" el motor (pisarle currentTime
+  // cuadro a cuadro para que la posición del audio representara la
+  // velocidad, en vez de loopear) — sonaba trabado/feo, y la pista fue
+  // clarísima: al mandar la app a segundo plano el navegador PAUSA el
+  // requestAnimationFrame (así que update() deja de pisar currentTime) y
+  // ahí sí sonaba perfecto; volviendo a primer plano, trabado de nuevo.
+  // O sea que el problema era justo ESO — reposicionar un <audio>
+  // comprimido muchas veces por segundo se escucha mal (se nota el
+  // salto/re-sincronizado del decoder), por más que se lo intente hacer
+  // pocas veces por segundo. Vuelta al camino de siempre: loop + solo
+  // playbackRate/volume (ninguno de los dos necesita re-ubicar el audio
+  // en ningún punto, así que no hay nada que saltar ni que pueda sonar
+  // trabado). El precio es el que ya se sabía: como motor_loop.mp3 es una
+  // rampa de aceleración y no un ronroneo diseñado para repetirse, se va
+  // a notar un saltito cada vez que el loop vuelve al principio — pero
+  // eso pasa una vez cada ~25s, nada comparado con sonar mal todo el
+  // tiempo.
+  SND.motor.loop = true;
   // Se llama recién en el "¡YA!" de la cuenta regresiva (ver
   // arrancarCuentaRegresiva), no al entrar a la pista — antes sonaba
   // desde que aparecía el 3-2-1, y tenía que arrancar recién cuando
@@ -1325,7 +1343,7 @@
     try{
       SND.motor.currentTime = 0;
       SND.motor.volume = 0.55;
-      SND.motor.playbackRate = 1;
+      SND.motor.playbackRate = 0.75;
       SND.motor.play().catch(()=>{});
     }catch(e){}
   }
@@ -1338,24 +1356,13 @@
   // derrapando: mientras se escucha el chirrido del derrape (SND.derrape)
   // el motor se silencia del todo — se lo tapaba igual, mejor cortarlo
   // limpio. El "volver al inicio" cuando termina el derrape lo hace
-  // actualizarDrift() (ver ahí abajo) pisando currentTime a 0 apenas se
-  // corta el chirrido, así el motor no retoma de golpe desde un punto
-  // random de la rampa — arranca de nuevo desde el principio y en un
-  // cuadro más ya lo vuelve a escrubbear a donde corresponda según la
-  // velocidad de ese momento.
-  let motorFrameContador = 0;
+  // actualizarDrift() (ver ahí abajo) pisando currentTime a 0 UNA sola
+  // vez justo al cortarse el chirrido (no en cada cuadro como se probó
+  // antes) — eso sí es seguro, es un solo salto puntual, no uno detrás
+  // de otro sin parar.
   function actualizarMotor(speedPercent, boostIntensidad, derrapando){
     if(derrapando){ SND.motor.volume = 0; return; }
-    motorFrameContador++;
-    const dur = SND.motor.duration;
-    // Reposiciona cada 3 cuadros (~20 veces por segundo) en vez de en
-    // CADA cuadro (60/seg, ver update()) — saltar de posición todo el
-    // tiempo en un <audio> comprimido puede sonar a "click"; así sigue
-    // yendo parejo con la velocidad sin exagerar cuántos saltos hace.
-    if(Number.isFinite(dur) && dur > 0.5 && motorFrameContador % 3 === 0){
-      SND.motor.currentTime = Util.limit(speedPercent + boostIntensidad*0.35, 0, 1) * (dur - 0.2);
-    }
-    SND.motor.playbackRate = 1 + boostIntensidad*0.15; // un empujoncito de tono nomás con el turbo, la velocidad ya la marca la posición
+    SND.motor.playbackRate = Util.limit(0.75 + speedPercent*0.75 + boostIntensidad*0.35, 0.5, 2);
     SND.motor.volume       = Util.limit(0.55 + speedPercent*0.45 + boostIntensidad*0.2, 0, 1);
   }
 
