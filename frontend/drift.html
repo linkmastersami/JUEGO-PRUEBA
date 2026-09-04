@@ -156,9 +156,12 @@
   .stat b { color:#ffcf8a; }
   .instructions { font-size:13px; color:#c99b73; margin-top:18px; line-height:1.6; max-width:320px; }
 
-  /* Selección de pista: 4 tarjetas (una por circuito) + un botón grande de
-     Copa que las corre las 4 seguidas. */
-  #pistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; width:100%; max-width:320px; }
+  /* Selección de pista: en pantalla ancha (el juego fuerza horizontal, ver
+     rotateHint) apilar todo en una sola columna angosta dejaba un montón
+     de espacio muerto a los costados — ahora las 4 tarjetas van a la
+     izquierda y la Copa a la derecha, aprovechando el ancho. */
+  #seleccionWrap { display:flex; flex-direction:row; align-items:stretch; gap:18px; justify-content:center; width:100%; margin-bottom:16px; }
+  #pistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; }
   .pistaCard {
     background: linear-gradient(180deg, #3a2a1a, #1a1008);
     border:2px solid rgba(255,159,61,0.4); border-radius:14px;
@@ -167,7 +170,15 @@
   }
   .pistaCard:active { transform:scale(0.96); border-color:#ff9d3d; }
   .pistaCard .emoji { font-size:26px; display:block; margin-bottom:4px; }
-  #copaBtn { font-size:15px; padding:13px 26px; background:linear-gradient(180deg,#ffd93d,#c2450c); box-shadow:0 6px 0 #7a4a08, 0 8px 20px rgba(255,200,0,0.35); }
+  #copaBtn {
+    flex:1; min-width:170px; max-width:230px; margin-top:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:16px 14px; border-radius:16px; font-size:15px;
+    background:linear-gradient(180deg,#ffd93d,#c2450c);
+    box-shadow:0 6px 0 #7a4a08, 0 8px 20px rgba(255,200,0,0.35);
+  }
+  #copaBtn .copaEmoji { font-size:36px; margin-bottom:8px; }
+  #copaBtn .copaSub { font-size:11px; font-weight:normal; opacity:0.85; margin-top:8px; line-height:1.4; letter-spacing:0; }
   #copaLista .stat { font-size:14px; }
 
   #rotateHint {
@@ -255,13 +266,19 @@
 <div class="overlay" id="startScreen">
   <div class="title">DRIFT</div>
   <div class="subtitle">Mantené DRIFT en la curva para cargar el medidor — al soltar, esa carga se suma a una cápsula. Llená hasta 3 y apretá TURBO cuando quieras. Elegí una pista suelta, o corré la COPA (las 4 seguidas) para ver quién es el mejor.</div>
-  <div id="pistaGrid">
-    <button class="pistaCard" data-track="0"><span class="emoji">🏁</span>Clásico</button>
-    <button class="pistaCard" data-track="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
-    <button class="pistaCard" data-track="2"><span class="emoji">🏖️</span>Costa</button>
-    <button class="pistaCard" data-track="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+  <div id="seleccionWrap">
+    <div id="pistaGrid">
+      <button class="pistaCard" data-track="0"><span class="emoji">🏁</span>Clásico</button>
+      <button class="pistaCard" data-track="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
+      <button class="pistaCard" data-track="2"><span class="emoji">🏖️</span>Costa</button>
+      <button class="pistaCard" data-track="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+    </div>
+    <button class="btn" id="copaBtn">
+      <span class="copaEmoji">🏆</span>
+      COPA<br>LAS 4 PISTAS
+      <span class="copaSub">Corré las 4 seguidas y mirá quién es el mejor</span>
+    </button>
   </div>
-  <button class="btn" id="copaBtn">🏆 COPA — LAS 4 PISTAS</button>
   <div class="instructions">Zonas invisibles a los costados para girar, DRIFT y TURBO abajo a la derecha. Prototipo de un jugador — la idea es sumarle multijugador más adelante si esta sensación convence.</div>
 </div>
 
