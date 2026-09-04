@@ -555,6 +555,7 @@
   let salaSoyHost = false;
   let rivales = {};            // id -> {name, is_bot, color_idx, progreso, player_x, tiempo_total, terminado, lugar}
   let rivalSegmentos = [];     // segmentos con algún rival dibujado este cuadro (para poder limpiarlos antes del próximo)
+  let rivalesSuaves = {};      // id -> {progreso, velocidad, jugadorX, ultimaVez} — ver actualizarRivalesDesdeServidor
   let ultimoEnvioSala = 0;
 
   function findSegment(z){ return segments[Math.floor(z/segmentLength) % segments.length]; }
@@ -1019,6 +1020,7 @@
     salaSoyHost = estado.host_id === estado.your_id;
     rivales = {};
     estado.players.forEach(p=>{ if(p.id !== estado.your_id) rivales[p.id] = p; });
+    actualizarRivalesDesdeServidor();
 
     // waiting -> playing: acá es donde arranca la carrera de verdad (una
     // sola vez, comparando contra el status del broadcast anterior — los
@@ -1093,15 +1095,48 @@
   // segment.rivales para que render() los dibuje en su pasada de
   // atrás-hacia-adelante, igual que el tráfico pero en un array aparte
   // (así no entran nunca en la detección de choque contra tráfico).
+  // Se llama UNA VEZ por cada mensaje de estado que llega del servidor
+  // (~10/seg mientras se corre) — nunca cuadro a cuadro. Guarda, por
+  // rival, con qué VELOCIDAD viene avanzando (progreso por segundo,
+  // sacado del delta contra el dato anterior) para que
+  // actualizarRivalesEnSegmentos() pueda extrapolar entre un mensaje y el
+  // siguiente en vez de quedarse pegado 100ms y saltar de golpe — eso era
+  // el "lag" que se veía: sin esto, el rival solo se movía una vez cada
+  // ~6 cuadros de los 60/seg que dibuja la pantalla.
+  function actualizarRivalesDesdeServidor(){
+    const ahora = performance.now();
+    Object.entries(rivales).forEach(([id, riv])=>{
+      const prev = rivalesSuaves[id];
+      if(!prev){
+        rivalesSuaves[id] = { progreso: riv.progreso, velocidad: 0, jugadorX: riv.player_x, ultimaVez: ahora };
+        return;
+      }
+      const dtSeg = Math.max(0.03, (ahora - prev.ultimaVez)/1000);
+      prev.velocidad = (riv.progreso - prev.progreso) / dtSeg;
+      prev.progreso = riv.progreso; // se resincroniza con el dato real cada vez — así no se acumula desvío
+      prev.jugadorX = riv.player_x;
+      prev.ultimaVez = ahora;
+    });
+    Object.keys(rivalesSuaves).forEach(id=>{ if(!rivales[id]) delete rivalesSuaves[id]; }); // se fue de la sala
+  }
+
   function actualizarRivalesEnSegmentos(){
     rivalSegmentos.forEach(seg => { seg.rivales.length = 0; });
     rivalSegmentos = [];
     if(!trackLength) return;
-    Object.values(rivales).forEach(riv=>{
-      if(riv.terminado) return; // ya cruzó la meta, no lo seguimos mostrando dando vueltas de más
-      const pos = posicionRivalDesdeProgreso(riv.progreso);
+    const ahora = performance.now();
+    Object.entries(rivalesSuaves).forEach(([id, sv])=>{
+      const riv = rivales[id];
+      if(!riv || riv.terminado) return; // ya cruzó la meta, no lo seguimos mostrando dando vueltas de más
+      // Tope de 0.6s de extrapolación: si hace más que eso que no llega
+      // nada nuevo (conexión cortada, etc.) mejor dejarlo quieto que
+      // seguir empujándolo hacia adelante para siempre a la velocidad
+      // vieja.
+      const dtSeg = Math.min(0.6, (ahora - sv.ultimaVez)/1000);
+      const progresoExtrapolado = Util.limit(sv.progreso + sv.velocidad*dtSeg, 0, 1);
+      const pos = posicionRivalDesdeProgreso(progresoExtrapolado);
       const seg = findSegment(pos);
-      seg.rivales.push({ nombre: riv.name, colorIdx: riv.color_idx, offset: riv.player_x, percent: Util.percentRemaining(pos, segmentLength) });
+      seg.rivales.push({ nombre: riv.name, colorIdx: riv.color_idx, offset: sv.jugadorX, percent: Util.percentRemaining(pos, segmentLength) });
       rivalSegmentos.push(seg);
     });
   }
