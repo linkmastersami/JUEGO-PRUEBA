@@ -179,6 +179,22 @@
   }
   #copaBtn .copaEmoji { font-size:36px; margin-bottom:8px; }
   #copaBtn .copaSub { font-size:11px; font-weight:normal; opacity:0.85; margin-top:8px; line-height:1.4; letter-spacing:0; }
+
+  /* Pantalla de sala multijugador: mismo espíritu de 2 columnas que
+     #seleccionWrap de arriba. */
+  #salaWrap { display:flex; flex-direction:row; align-items:stretch; gap:18px; justify-content:center; width:100%; margin-bottom:14px; }
+  #salaPistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; }
+  #salaInfoCard {
+    flex:1; min-width:190px; max-width:260px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:16px 14px; border-radius:16px;
+    background: linear-gradient(180deg, #3a2a1a, #1a1008);
+    border:2px solid rgba(255,159,61,0.4);
+  }
+  #salaJugadores { width:100%; }
+  #salaJugadores .stat { font-size:14px; }
+  #salaInfoCard .subtitle { font-size:13px; margin:8px 0 0; max-width:none; }
+  #salaBotCountdown { text-align:center; margin-top:10px; }
   #copaLista .stat { font-size:14px; }
 
   #rotateHint {
@@ -315,19 +331,29 @@
        cualquier lado" ya lo cubre para el host y para quien toque una
        pista, pero el que se queda solo esperando sin tocar nada más
        necesita este botón sí o sí. -->
-  <button class="btn" id="salaPantallaBtn" style="font-size:14px; padding:10px 22px; margin-bottom:10px;">📱 Preparar pantalla</button>
-  <div id="salaJugadores" style="width:100%; max-width:340px; margin:10px 0;"></div>
-  <div id="salaPistaGrid" class="hidden" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; margin-bottom:12px;">
-    <button class="pistaCard" data-pista="0"><span class="emoji">🏁</span>Clásico</button>
-    <button class="pistaCard" data-pista="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
-    <button class="pistaCard" data-pista="2"><span class="emoji">🏖️</span>Costa</button>
-    <button class="pistaCard" data-pista="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+  <button class="btn" id="salaPantallaBtn" style="font-size:14px; padding:10px 22px; margin-bottom:14px;">📱 Preparar pantalla</button>
+
+  <!-- Mismo espíritu que #seleccionWrap del inicio en solitario: en
+       horizontal, apilar todo en una columna angosta dejaba un montón de
+       espacio muerto a los costados — la grilla de pistas a la izquierda
+       y la lista de jugadores/estado en una tarjeta a la derecha. -->
+  <div id="salaWrap">
+    <div id="salaPistaGrid" class="hidden">
+      <button class="pistaCard" data-pista="0"><span class="emoji">🏁</span>Clásico</button>
+      <button class="pistaCard" data-pista="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
+      <button class="pistaCard" data-pista="2"><span class="emoji">🏖️</span>Costa</button>
+      <button class="pistaCard" data-pista="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+    </div>
+    <div id="salaInfoCard">
+      <div id="salaJugadores"></div>
+      <div id="salaEsperaTexto" class="subtitle">Conectando...</div>
+      <div id="salaBotCountdown" class="hidden">
+        <div style="font-size:0.75rem; color:#c99b73;">🤖 Si nadie se une, entra un bot en...</div>
+        <div id="salaBotCountdownNum" style="font-size:1.7rem; font-weight:900; color:#ff9d3d;">10</div>
+      </div>
+    </div>
   </div>
-  <div id="salaEsperaTexto" class="subtitle" style="margin:6px 0;">Conectando...</div>
-  <div id="salaBotCountdown" class="hidden" style="text-align:center; margin:4px 0 14px;">
-    <div style="font-size:0.8rem; color:#c99b73;">🤖 Si nadie se une, entra un bot en...</div>
-    <div id="salaBotCountdownNum" style="font-size:1.8rem; font-weight:900; color:#ff9d3d;">10</div>
-  </div>
+
   <button class="btn hidden" id="salaIniciarBtn">🏁 INICIAR CARRERA</button>
   <div class="instructions" id="salaSalirBtn" style="margin-top:16px; text-decoration:underline; touch-action:manipulation;">← Salir de la sala</div>
 </div>
