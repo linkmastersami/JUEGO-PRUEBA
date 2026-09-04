@@ -915,8 +915,14 @@
     contencion:     sonido('contencion.mp3'),
     click:          sonido('click_menu.mp3'),
     motor:          sonido('motor_loop.mp3'),
+    derrape:        sonido('derrape.mp3'),
   };
   SND.motor.loop = true; // este NO se clona/reproduce con reproducir() — suena solo mientras dura la carrera, ver iniciarMotor/detenerMotor/actualizarMotor
+  // SND.derrape TAMPOCO se clona/loopea: es un chirrido de 9.58s (mucho más
+  // largo que cualquier derrape posible — el medidor se llena del todo en
+  // ~1s, ver DRIFT_CARGA_POR_SEG), así que alcanza con arrancarlo una sola
+  // vez al empezar a derrapar y cortarlo en seco al soltar/dejar de girar
+  // — no hace falta que loopee.
   function reproducir(audioEl, vol){
     if(!audioEl) return;
     try{
@@ -929,7 +935,7 @@
   function desbloquearSonidos(){
     if(sonidosDesbloqueados) return;
     sonidosDesbloqueados = true;
-    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor]).forEach(a=>{
+    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor, SND.derrape]).forEach(a=>{
       if(!a) return;
       a.play().then(()=>{ a.pause(); a.currentTime = 0; }).catch(()=>{});
     });
@@ -948,7 +954,7 @@
       SND.motor.play().catch(()=>{});
     }catch(e){}
   }
-  function detenerMotor(){ try{ SND.motor.pause(); }catch(e){} }
+  function detenerMotor(){ try{ SND.motor.pause(); SND.derrape.pause(); derrapandoAntes = false; }catch(e){} }
   function actualizarMotor(speedPercent, boostIntensidad){
     SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
     SND.motor.volume       = Util.limit(0.12 + speedPercent*0.35 + boostIntensidad*0.15, 0, 0.75);
@@ -962,12 +968,25 @@
   }
 
   // ---------- Derrape / boost ----------
+  let derrapandoAntes = false; // para notar el INICIO/CORTE del derrape y no repetir el sonido cuadro a cuadro
   function actualizarDrift(dt, estaGirando){
     const derrapando = driftHeld && estaGirando;
     if(derrapando) driftCharge = Math.min(100, driftCharge + DRIFT_CARGA_POR_SEG*dt);
     const meter = document.getElementById('driftMeter');
     meter.style.height = driftCharge + '%';
     meter.style.background = driftCharge >= DRIFT_TIER3 ? '#c04dff' : driftCharge >= DRIFT_TIER2 ? '#ff8c00' : '#33aaff';
+
+    // Chirrido de derrape: arranca en el instante que empezás a derrapar
+    // de verdad (no al apretar DRIFT — recién cuando además estás
+    // girando) y se corta en seco al soltar o dejar de girar, sea cual
+    // sea el motivo. SND.derrape no loopea (ver comentario donde se
+    // define) así que sobra de sobra para cualquier derrape.
+    if(derrapando && !derrapandoAntes){
+      try{ SND.derrape.currentTime = 0; SND.derrape.volume = 0.55; SND.derrape.play().catch(()=>{}); }catch(e){}
+    } else if(!derrapando && derrapandoAntes){
+      try{ SND.derrape.pause(); }catch(e){}
+    }
+    derrapandoAntes = derrapando;
 
     const anguloObjetivo = derrapando ? (keyLeft ? 26 : keyRight ? -26 : 0) : (keyLeft ? 7 : keyRight ? -7 : 0);
     driftAngle += (anguloObjetivo - driftAngle) * Math.min(1, dt*8);
