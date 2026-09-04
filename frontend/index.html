@@ -1965,7 +1965,7 @@
 </div>
 
 <div id="overlay-drift">
-  <iframe id="drift-iframe" src="about:blank" allow="fullscreen; screen-orientation" title="Drift"></iframe>
+  <iframe id="drift-iframe" src="about:blank" allow="fullscreen; screen-orientation; clipboard-write; web-share" title="Drift"></iframe>
 </div>
 
 <div id="overlay-desconexion">
@@ -3175,6 +3175,12 @@ async function continuarConSesion(username) {
     actualizarPerfilHUD(username);
     if (juego === 'batalla') {
       conectarSalaBatalla(room, username);
+    } else if (juego === 'drift') {
+      // Drift no pasa por join-step-modo (ver btn-drift-*) — se muestra
+      // igual por si el jugador sale del iframe y queda esa pantalla de
+      // fondo, y se abre directo la sala compartida.
+      document.getElementById('join-step-juego').classList.remove('hidden');
+      lanzarDrift(room);
     } else {
       conectarSala(room, username);
     }
@@ -4050,7 +4056,8 @@ function leerInvitacionDeUrl() {
   const join = (params.get('join') || '').trim();
   if (!join) return;
   pendingInviteRoom = join.toUpperCase();
-  pendingInviteGame = params.get('game') === 'batalla' ? 'batalla' : 'codigos';
+  const gameParam = params.get('game');
+  pendingInviteGame = gameParam === 'batalla' ? 'batalla' : gameParam === 'drift' ? 'drift' : 'codigos';
   params.delete('join');
   params.delete('game');
   const resto = params.toString();

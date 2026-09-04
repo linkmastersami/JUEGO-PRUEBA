@@ -183,7 +183,11 @@
   /* Pantalla de sala multijugador: mismo espíritu de 2 columnas que
      #seleccionWrap de arriba. */
   #salaWrap { display:flex; flex-direction:row; align-items:stretch; gap:18px; justify-content:center; width:100%; margin-bottom:14px; }
-  #salaPistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; }
+  #salaPistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; width:100%; max-width:220px; }
+  /* Más chicas que las del inicio en solitario: acá comparten pantalla con
+     la tarjeta de jugadores/estado, así que no necesitan tanto lugar. */
+  #salaPistaGrid .pistaCard { padding:9px 3px; font-size:11px; }
+  #salaPistaGrid .pistaCard .emoji { font-size:18px; margin-bottom:2px; }
   #salaInfoCard {
     flex:1; min-width:190px; max-width:260px;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -354,6 +358,11 @@
     </div>
   </div>
 
+  <!-- Visible para cualquiera en la sala, no solo el host — como en las
+       salas de espera de Estratega de Códigos/Batalla de Avatares, útil
+       para invitar a un amigo puntual aunque la sala ya la haya armado el
+       sistema (Partida Rápida). -->
+  <button class="btn" id="salaCompartirBtn" style="font-size:14px; padding:10px 22px; margin-bottom:10px; background:linear-gradient(180deg,#5ec4ff,#0d5aa8); box-shadow:0 6px 0 #073a70, 0 8px 20px rgba(51,170,255,0.35);">🔗 Compartir enlace para invitar</button>
   <button class="btn hidden" id="salaIniciarBtn">🏁 INICIAR CARRERA</button>
   <div class="instructions" id="salaSalirBtn" style="margin-top:16px; text-decoration:underline; touch-action:manipulation;">← Salir de la sala</div>
 </div>
@@ -2296,6 +2305,28 @@
     bloquearOrientacion();
     e.currentTarget.textContent = '✅ Listo';
     e.currentTarget.disabled = true;
+  });
+  // Mismo enlace (?join=CODIGO&game=drift) que ya entiende index.html
+  // para las otras dos salas (ver leerInvitacionDeUrl) — apunta a la raíz
+  // del sitio, no a este mismo drift.html, porque quien lo abra puede no
+  // tener sesión iniciada todavía: tiene que pasar primero por el login
+  // de siempre antes de entrar acá con su propio nombre.
+  document.getElementById('salaCompartirBtn').addEventListener('click', async (e)=>{
+    if(!salaCodigo) return;
+    const url = `${location.origin}/?join=${encodeURIComponent(salaCodigo)}&game=drift`;
+    const texto = `¡Únete a mi carrera de Drift! Código: ${salaCodigo}`;
+    const btn = e.currentTarget;
+    const textoOriginal = btn.textContent;
+    if(navigator.share){
+      try{ await navigator.share({ title:'Drift', text:texto, url }); return; }catch(err){ /* canceló o no se pudo — sigue al respaldo de copiar */ }
+    }
+    try{
+      await navigator.clipboard.writeText(url);
+      btn.textContent = '✅ Enlace copiado';
+      setTimeout(()=>{ btn.textContent = textoOriginal; }, 2000);
+    }catch(err){
+      prompt('Copiá este enlace para invitar a tu sala:', url);
+    }
   });
   document.getElementById('salaIniciarBtn').addEventListener('click', ()=>{
     if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'iniciar'}));
