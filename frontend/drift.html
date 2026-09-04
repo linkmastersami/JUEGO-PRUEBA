@@ -856,7 +856,16 @@
   // con lo que se ve (ver comentario grande en update()). Subidos ~30%
   // junto con el tamaño visual de los autos (ver dibujarCocheDetallado).
   const ANCHO_MUNDO_AUTO_JUGADOR = 170;
-  const ANCHO_MUNDO_AUTO_TRAFICO = 170;
+  // Subido de 170 a 500: a la distancia de referencia del jugador
+  // (PLAYER_VISUAL_Z_AHEAD, el mismo punto que usa el choque) el auto del
+  // jugador se dibuja con un tamaño de pantalla FIJO (drawAuto usa
+  // min(width,height)*0.18, no proyección real) mientras que el tráfico sí
+  // se proyecta en perspectiva — con 170 se veían mucho más chicos que el
+  // jugador aun estando codo a codo. 500 es el valor que iguala esa
+  // proyección al tamaño fijo del jugador en esa distancia (despejado de
+  // Util.project). Ver drawCocheTrafico, que ahora usa esta constante en
+  // vez de un 170 suelto para no volver a desincronizar dibujo/choque.
+  const ANCHO_MUNDO_AUTO_TRAFICO = 500;
   const LARGO_MUNDO_COLISION     = 250;
   // Dos tonos por color (claro/oscuro) para el degradé metálico — ver
   // dibujarCocheDetallado.
@@ -1506,7 +1515,7 @@
   }
 
   function drawCocheTrafico(x, y, scale, offset, colorPar){
-    const w = 170*scale*width/2, h = w*0.82;
+    const w = ANCHO_MUNDO_AUTO_TRAFICO*scale*width/2, h = w*0.82;
     const px = x + (scale*offset*roadWidth*width/2);
     ctx.save();
     ctx.translate(px, y);
