@@ -1255,7 +1255,14 @@
     // de drift.html (frontend/victoria-partida.mp3), no en sonidos/.
     carreraGanada:  new Audio('victoria-partida.mp3'),
   };
-  SND.motor.loop = true; // este NO se clona/reproduce con reproducir() — suena solo mientras dura la carrera, ver iniciarMotor/detenerMotor/actualizarMotor
+  // Este NO se clona/reproduce con reproducir() como el resto — es
+  // continuo, no un golpe suelto, y va "escrubbeado" (ver actualizarMotor)
+  // en vez de loopeado: motor_loop.mp3 es una rampa de aceleración de
+  // punta a punta (no un ronroneo diseñado para repetirse), así que
+  // dejarlo en loop=true sonaba raro cada vez que volvía de golpe al
+  // principio. Sin loop, currentTime se pisa cuadro a cuadro según qué
+  // tan rápido vas — el punto del audio ES la velocidad, nunca "se
+  // termina" ni hace falta que vuelva a arrancar solo.
   // SND.derrape TAMPOCO se clona/loopea: es un chirrido de 9.58s (mucho más
   // largo que cualquier derrape posible — el medidor se llena del todo en
   // ~1s, ver DRIFT_CARGA_POR_SEG), así que alcanza con arrancarlo una sola
@@ -1310,11 +1317,15 @@
   // se puede pasar de la fuerza con la que está grabado el mp3 sin ese
   // riesgo) — si hace falta más fuerte de verdad, la forma segura es
   // resubir motor_loop.mp3 ya masterizado más alto, no forzarlo por acá.
+  // Se llama recién en el "¡YA!" de la cuenta regresiva (ver
+  // arrancarCuentaRegresiva), no al entrar a la pista — antes sonaba
+  // desde que aparecía el 3-2-1, y tenía que arrancar recién cuando
+  // arranca la carrera de verdad.
   function iniciarMotor(){
     try{
       SND.motor.currentTime = 0;
       SND.motor.volume = 0.55;
-      SND.motor.playbackRate = 0.65;
+      SND.motor.playbackRate = 1;
       SND.motor.play().catch(()=>{});
     }catch(e){}
   }
@@ -1324,8 +1335,27 @@
       if(clonFanfarria){ clonFanfarria.pause(); clonFanfarria = null; } // corta la fanfarria si quedó sonando de la carrera anterior
     }catch(e){}
   }
-  function actualizarMotor(speedPercent, boostIntensidad){
-    SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
+  // derrapando: mientras se escucha el chirrido del derrape (SND.derrape)
+  // el motor se silencia del todo — se lo tapaba igual, mejor cortarlo
+  // limpio. El "volver al inicio" cuando termina el derrape lo hace
+  // actualizarDrift() (ver ahí abajo) pisando currentTime a 0 apenas se
+  // corta el chirrido, así el motor no retoma de golpe desde un punto
+  // random de la rampa — arranca de nuevo desde el principio y en un
+  // cuadro más ya lo vuelve a escrubbear a donde corresponda según la
+  // velocidad de ese momento.
+  let motorFrameContador = 0;
+  function actualizarMotor(speedPercent, boostIntensidad, derrapando){
+    if(derrapando){ SND.motor.volume = 0; return; }
+    motorFrameContador++;
+    const dur = SND.motor.duration;
+    // Reposiciona cada 3 cuadros (~20 veces por segundo) en vez de en
+    // CADA cuadro (60/seg, ver update()) — saltar de posición todo el
+    // tiempo en un <audio> comprimido puede sonar a "click"; así sigue
+    // yendo parejo con la velocidad sin exagerar cuántos saltos hace.
+    if(Number.isFinite(dur) && dur > 0.5 && motorFrameContador % 3 === 0){
+      SND.motor.currentTime = Util.limit(speedPercent + boostIntensidad*0.35, 0, 1) * (dur - 0.2);
+    }
+    SND.motor.playbackRate = 1 + boostIntensidad*0.15; // un empujoncito de tono nomás con el turbo, la velocidad ya la marca la posición
     SND.motor.volume       = Util.limit(0.55 + speedPercent*0.45 + boostIntensidad*0.2, 0, 1);
   }
 
@@ -1353,7 +1383,10 @@
     if(derrapando && !derrapandoAntes){
       try{ SND.derrape.currentTime = 0; SND.derrape.volume = 0.55; SND.derrape.play().catch(()=>{}); }catch(e){}
     } else if(!derrapando && derrapandoAntes){
-      try{ SND.derrape.pause(); }catch(e){}
+      try{
+        SND.derrape.pause();
+        SND.motor.currentTime = 0; // "vuelve al inicio" el motor al dejar de escucharse el derrape — ver actualizarMotor
+      }catch(e){}
     }
     derrapandoAntes = derrapando;
 
@@ -1494,7 +1527,7 @@
       ? boostFuerza * Math.min(1, boostDuracionRestante/BOOST_APAGADO_MS)
       : 0;
     speed = Util.limit(speed, 0, maxSpeed*(1+boostActivo));
-    actualizarMotor(speedPercent, boostActivo);
+    actualizarMotor(speedPercent, boostActivo, derrapando);
 
     updateCars(dt);
     // Chocar contra el tráfico: si vas más rápido que el auto de adelante
@@ -2139,7 +2172,6 @@
     state = 'countdown';
     resetPista();
     getAudio(); // asegura el contexto de audio despierto para los bips del conteo (ver beep())
-    iniciarMotor(); // motor al ralentí desde ya, como en una largada de verdad
     position = 0; speed = 0; playerX = 0;
     boostFuerza = 0; boostDuracionRestante = 0; driftHeld = false; driftCharge = 0; driftAngle = 0;
     capsulas = [0,0,0]; actualizarHudCapsulas();
@@ -2190,6 +2222,7 @@
         beep(1150, 0.35, 'square', 0.28); // tono bien más agudo que la cuenta
         vibrate([40,30,70]);
         state = 'playing'; // arranca la física/el crono justo acá, no al terminar de desvanecerse
+        iniciarMotor(); // recién ahora — antes sonaba desde el 3-2-1, tiene que arrancar junto con la carrera
         setTimeout(()=> cd.classList.add('hidden'), 550);
       }
     }
