@@ -121,6 +121,21 @@
   }
   #message.show { opacity:1; transform:scale(1); }
 
+  /* Cuenta regresiva antes de arrancar: 3-2-1 grandes y "¡YA!" más chico
+     pero en otro color (acompaña el tono más agudo del bip, ver
+     arrancarCuentaRegresiva). La animación se reinicia a mano en cada
+     número (forzando reflow) para que pulse de nuevo cada vez. */
+  #countdown {
+    position:absolute; top:0; left:0; width:100%; height:100%; z-index:15;
+    display:flex; align-items:center; justify-content:center;
+    font-size:130px; font-weight:900; color:#fff;
+    text-shadow: 0 0 40px #ff9d3d, 0 0 80px #ff6a00, 0 4px 10px rgba(0,0,0,0.85);
+    pointer-events:none; letter-spacing:2px;
+  }
+  #countdown.pulso { animation: pulsoCuenta 0.75s ease-out; }
+  #countdown.ya { color:#ffd93d; font-size:96px; text-shadow: 0 0 50px #ffd93d, 0 0 100px #ff9d3d, 0 4px 10px rgba(0,0,0,0.85); }
+  @keyframes pulsoCuenta { 0%{ transform:scale(1.9); opacity:0; } 45%{ transform:scale(1); opacity:1; } 100%{ transform:scale(1); opacity:1; } }
+
   .overlay {
     position:absolute; top:0; left:0; width:100%; height:100%;
     background: radial-gradient(circle at 50% 30%, #3a1a00 0%, #0a0510 75%);
@@ -200,6 +215,7 @@
 </div>
 <div id="driftMeterWrap"><div id="driftMeter"></div></div>
 <div id="message"></div>
+<div id="countdown" class="hidden"></div>
 
 <div id="rotateHint">
   <div class="icono">📱↻</div>
@@ -259,6 +275,8 @@
 
   document.getElementById('closeBtn').addEventListener('click', ()=>{
     detenerMotor();
+    cuentaRegresivaId++; // corta cualquier cuenta regresiva que haya quedado corriendo de fondo
+    document.getElementById('countdown').classList.add('hidden');
     document.getElementById('resultScreen').classList.add('hidden');
     document.getElementById('copaScreen').classList.add('hidden');
     document.getElementById('startScreen').classList.remove('hidden');
@@ -916,6 +934,10 @@
     click:          sonido('click_menu.mp3'),
     motor:          sonido('motor_loop.mp3'),
     derrape:        sonido('derrape.mp3'),
+    // Misma fanfarria de "ganaste la partida" que usa Estratega de
+    // Códigos (frontend/index.html, soundVictoriaPartida) — vive al lado
+    // de drift.html (frontend/victoria-partida.mp3), no en sonidos/.
+    carreraGanada:  new Audio('victoria-partida.mp3'),
   };
   SND.motor.loop = true; // este NO se clona/reproduce con reproducir() — suena solo mientras dura la carrera, ver iniciarMotor/detenerMotor/actualizarMotor
   // SND.derrape TAMPOCO se clona/loopea: es un chirrido de 9.58s (mucho más
@@ -923,19 +945,21 @@
   // ~1s, ver DRIFT_CARGA_POR_SEG), así que alcanza con arrancarlo una sola
   // vez al empezar a derrapar y cortarlo en seco al soltar/dejar de girar
   // — no hace falta que loopee.
+  let clonFanfarria = null; // la última copia de SND.carreraGanada sonando — ver detenerMotor()
   function reproducir(audioEl, vol){
-    if(!audioEl) return;
+    if(!audioEl) return null;
     try{
       const copia = audioEl.cloneNode(true);
       copia.volume = vol!==undefined ? vol : 1;
       copia.play().catch(()=>{});
-    }catch(e){}
+      return copia;
+    }catch(e){ return null; }
   }
   let sonidosDesbloqueados = false;
   function desbloquearSonidos(){
     if(sonidosDesbloqueados) return;
     sonidosDesbloqueados = true;
-    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor, SND.derrape]).forEach(a=>{
+    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor, SND.derrape, SND.carreraGanada]).forEach(a=>{
       if(!a) return;
       a.play().then(()=>{ a.pause(); a.currentTime = 0; }).catch(()=>{});
     });
@@ -954,7 +978,12 @@
       SND.motor.play().catch(()=>{});
     }catch(e){}
   }
-  function detenerMotor(){ try{ SND.motor.pause(); SND.derrape.pause(); derrapandoAntes = false; }catch(e){} }
+  function detenerMotor(){
+    try{
+      SND.motor.pause(); SND.derrape.pause(); derrapandoAntes = false;
+      if(clonFanfarria){ clonFanfarria.pause(); clonFanfarria = null; } // corta la fanfarria si quedó sonando de la carrera anterior
+    }catch(e){}
+  }
   function actualizarMotor(speedPercent, boostIntensidad){
     SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
     SND.motor.volume       = Util.limit(0.12 + speedPercent*0.35 + boostIntensidad*0.15, 0, 0.75);
@@ -1204,6 +1233,7 @@
   function finalizarCarrera(){
     state = 'finished';
     detenerMotor();
+    clonFanfarria = reproducir(SND.carreraGanada, 0.7);
     document.getElementById('finalMejorVuelta').textContent = (mejorVuelta!==null ? mejorVuelta.toFixed(1)+'s' : '—');
     document.getElementById('finalTiempoTotal').textContent = tiempoTotal.toFixed(1)+'s';
     const btn = document.getElementById('restartBtn');
@@ -1704,9 +1734,13 @@
 
   // ---------- Inicio ----------
   function iniciarCarrera(){
-    state = 'playing';
+    // 'countdown', no 'playing' todavía: la pista ya se arma y se ve (así
+    // el jugador se ubica antes de arrancar) pero update() no corre nada
+    // mientras dure el 3-2-1 — ver el gate "state === 'playing'" en loop().
+    state = 'countdown';
     resetPista();
-    iniciarMotor();
+    getAudio(); // asegura el contexto de audio despierto para los bips del conteo (ver beep())
+    iniciarMotor(); // motor al ralentí desde ya, como en una largada de verdad
     position = 0; speed = 0; playerX = 0;
     boostFuerza = 0; boostDuracionRestante = 0; driftHeld = false; driftCharge = 0; driftAngle = 0;
     capsulas = [0,0,0]; actualizarHudCapsulas();
@@ -1719,6 +1753,50 @@
     if(document.documentElement.requestFullscreen){
       document.documentElement.requestFullscreen().catch(()=>{});
     }
+    arrancarCuentaRegresiva();
+  }
+
+  // 3-2-1 con un bip parejo, y el "¡YA!" con un tono más agudo y más largo
+  // — todo sintetizado con beep() (osciladores, sin archivo de audio) para
+  // que sea instantáneo y no dependa de ningún mp3. La animación de cada
+  // número se reinicia a mano (quitar y volver a poner la clase "pulso",
+  // forzando un reflow en el medio) para que pulse de nuevo cada vez.
+  // cuentaRegresivaId: si el jugador sale (✕) o arranca otra carrera a
+  // mitad de la cuenta, la cadena de setTimeout vieja quedaría corriendo
+  // sola de fondo y podría poner state='playing' en un momento raro (con
+  // el jugador ya en el menú, o pisando una cuenta regresiva nueva). Cada
+  // corrida agarra un número propio y se fija que siga siendo el vigente
+  // antes de hacer nada en cada paso — si no, se corta calladita.
+  let cuentaRegresivaId = 0;
+  function arrancarCuentaRegresiva(){
+    const miId = ++cuentaRegresivaId;
+    const cd = document.getElementById('countdown');
+    cd.classList.remove('hidden', 'ya');
+    let n = 3;
+    function pulsar(texto, clases){
+      cd.textContent = texto;
+      cd.className = 'hidden'; // fuerza a "apagar" la animación...
+      cd.classList.remove('hidden');
+      void cd.offsetWidth; // ...reflow...
+      cd.className = clases; // ...y la vuelve a prender desde cero
+    }
+    function paso(){
+      if(miId !== cuentaRegresivaId) return; // se canceló (salida o carrera nueva) — no seguir
+      if(n > 0){
+        pulsar(String(n), 'pulso');
+        beep(600, 0.15, 'square', 0.22);
+        vibrate([20]);
+        n--;
+        setTimeout(paso, 800);
+      } else {
+        pulsar('¡YA!', 'pulso ya');
+        beep(1150, 0.35, 'square', 0.28); // tono bien más agudo que la cuenta
+        vibrate([40,30,70]);
+        state = 'playing'; // arranca la física/el crono justo acá, no al terminar de desvanecerse
+        setTimeout(()=> cd.classList.add('hidden'), 550);
+      }
+    }
+    paso();
   }
 
   // Tarjetas de pista suelta: cada una arranca directo esa pista (sin Copa).
