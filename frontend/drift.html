@@ -277,6 +277,12 @@
 <div id="rotateHint">
   <div class="icono">📱↻</div>
   <div class="subtitle">Girá el teléfono — este juego se juega apaisado (horizontal).</div>
+  <!-- Después de usar "Compartir enlace" (abre el menú nativo del
+       teléfono, ej. WhatsApp) el navegador puede volver con la pantalla
+       completa/el bloqueo de orientación ya perdidos y no recuperarlos
+       solo aunque el teléfono ya esté de costado — ver forzarGiroBtn más
+       abajo, reintenta todo a mano con un toque de verdad. -->
+  <button class="btn" id="forzarGiroBtn" style="font-size:14px; padding:12px 26px; margin-top:6px;">🔄 Girar pantalla</button>
 </div>
 
 <!-- Ni el botón ✕ ni "atrás" del teléfono salen directo — muestran esto
@@ -435,6 +441,18 @@
   }
   document.addEventListener('touchend', bloquearOrientacion, { once:true, passive:true });
   document.addEventListener('click', bloquearOrientacion, { once:true });
+
+  // Botón manual del cartel de "girá el teléfono": bloquearOrientacion()
+  // ya se intenta sola (arriba), pero después de usar "Compartir enlace"
+  // (abre el menú nativo del celular) el navegador puede volver con la
+  // pantalla completa/el bloqueo de orientación perdidos y no
+  // recuperarlos solos — este botón es un toque de verdad para
+  // reintentarlo a mano, y de paso fuerza un resize() por si
+  // window.innerWidth/innerHeight habían quedado con un valor viejo.
+  document.getElementById('forzarGiroBtn').addEventListener('click', ()=>{
+    resize();
+    bloquearOrientacion();
+  });
 
   // ---------- Confirmación de salida ---------------------------------------
   // Ni el botón ✕ ni "atrás" del teléfono salen directo (antes el ✕ tiraba
