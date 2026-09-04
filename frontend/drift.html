@@ -160,38 +160,46 @@
      rotateHint) apilar todo en una sola columna angosta dejaba un montón
      de espacio muerto a los costados — ahora las 4 tarjetas van a la
      izquierda y la Copa a la derecha, aprovechando el ancho. */
-  #seleccionWrap { display:flex; flex-direction:row; align-items:stretch; gap:18px; justify-content:center; width:100%; margin-bottom:16px; }
-  #pistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; }
+  /* align-items:center (no "stretch", el default de flex) a propósito: con
+     stretch, la grilla y la tarjeta de al lado se estiraban para igualar
+     la altura de lo que fuera más alto de las dos — y como el overlay
+     tiene toda la pantalla de alto libre, terminaban gigantes. Con
+     center, cada una mide lo que su propio contenido necesita nomás.
+     align-content:start en las grillas es el mismo cuidado pero puertas
+     adentro (si no, las FILAS de la grilla se repartían el alto de más
+     que le sobraba a la grilla). */
+  #seleccionWrap { display:flex; flex-direction:row; align-items:center; gap:18px; justify-content:center; width:100%; margin-bottom:16px; }
+  #pistaGrid { display:grid; grid-template-columns:1fr 1fr; align-content:start; gap:8px; width:100%; max-width:280px; }
   .pistaCard {
     background: linear-gradient(180deg, #3a2a1a, #1a1008);
-    border:2px solid rgba(255,159,61,0.4); border-radius:14px;
-    color:#fff; padding:14px 4px; font-size:13px; font-weight:bold;
-    line-height:1.4; touch-action:manipulation;
+    border:2px solid rgba(255,159,61,0.4); border-radius:12px;
+    color:#fff; padding:10px 4px; font-size:12px; font-weight:bold;
+    line-height:1.3; touch-action:manipulation;
   }
   .pistaCard:active { transform:scale(0.96); border-color:#ff9d3d; }
-  .pistaCard .emoji { font-size:26px; display:block; margin-bottom:4px; }
+  .pistaCard .emoji { font-size:20px; display:block; margin-bottom:3px; }
   #copaBtn {
-    flex:1; min-width:170px; max-width:230px; margin-top:0;
+    flex:0 0 auto; min-width:150px; max-width:200px; margin-top:0;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    padding:16px 14px; border-radius:16px; font-size:15px;
+    padding:12px 12px; border-radius:14px; font-size:13px;
     background:linear-gradient(180deg,#ffd93d,#c2450c);
     box-shadow:0 6px 0 #7a4a08, 0 8px 20px rgba(255,200,0,0.35);
   }
-  #copaBtn .copaEmoji { font-size:36px; margin-bottom:8px; }
-  #copaBtn .copaSub { font-size:11px; font-weight:normal; opacity:0.85; margin-top:8px; line-height:1.4; letter-spacing:0; }
+  #copaBtn .copaEmoji { font-size:28px; margin-bottom:6px; }
+  #copaBtn .copaSub { font-size:10px; font-weight:normal; opacity:0.85; margin-top:6px; line-height:1.35; letter-spacing:0; }
 
   /* Pantalla de sala multijugador: mismo espíritu de 2 columnas que
-     #seleccionWrap de arriba. */
-  #salaWrap { display:flex; flex-direction:row; align-items:stretch; gap:18px; justify-content:center; width:100%; margin-bottom:14px; }
-  #salaPistaGrid { display:grid; grid-template-columns:1fr 1fr; gap:8px; width:100%; max-width:220px; }
+     #seleccionWrap de arriba (mismo motivo para center/align-content). */
+  #salaWrap { display:flex; flex-direction:row; align-items:center; gap:18px; justify-content:center; width:100%; margin-bottom:14px; }
+  #salaPistaGrid { display:grid; grid-template-columns:1fr 1fr; align-content:start; gap:6px; width:100%; max-width:180px; }
   /* Más chicas que las del inicio en solitario: acá comparten pantalla con
      la tarjeta de jugadores/estado, así que no necesitan tanto lugar. */
-  #salaPistaGrid .pistaCard { padding:9px 3px; font-size:11px; }
-  #salaPistaGrid .pistaCard .emoji { font-size:18px; margin-bottom:2px; }
+  #salaPistaGrid .pistaCard { padding:7px 3px; font-size:10px; }
+  #salaPistaGrid .pistaCard .emoji { font-size:15px; margin-bottom:2px; }
   #salaInfoCard {
-    flex:1; min-width:190px; max-width:260px;
+    flex:0 0 auto; min-width:170px; max-width:230px; margin-top:0;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    padding:16px 14px; border-radius:16px;
+    padding:12px 14px; border-radius:14px;
     background: linear-gradient(180deg, #3a2a1a, #1a1008);
     border:2px solid rgba(255,159,61,0.4);
   }
