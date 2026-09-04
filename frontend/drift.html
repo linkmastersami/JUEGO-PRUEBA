@@ -1267,6 +1267,9 @@
     // de drift.html (frontend/victoria-partida.mp3), no en sonidos/.
     carreraGanada:  new Audio('victoria-partida.mp3'),
   };
+  // Cada recorte dura solo 4s — sin loop=true se quedaban mudas apenas
+  // llegaban al final (justo el síntoma reportado: sonaba 3-4s y se cortaba).
+  SND.motorBajo.loop = SND.motorMedio.loop = SND.motorAlto.loop = true;
   // Las 3 capas del motor NO se clonan/reproducen con reproducir() como el
   // resto — son continuas, no un golpe suelto (ver el comentario grande
   // donde se definen, arriba).
