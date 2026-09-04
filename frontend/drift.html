@@ -1286,28 +1286,22 @@
   // cuadro en update() según qué tan rápido vas (playbackRate del <audio>,
   // soportado igual en el navegador del celular que en la compu — no hace
   // falta Web Audio API para esto).
-  // El archivo de motor_loop.mp3 viene grabado bajito — con .volume solo
-  // (tope 1.0 de por sí) no alcanzaba a notarse arriba del resto de la
-  // mezcla. Lo pasamos UNA sola vez por un GainNode de Web Audio con
-  // ganancia > 1 para poder subirlo de verdad más allá de ese tope
-  // (conectarGananciaMotor) — createMediaElementSource solo se puede
-  // llamar una vez por <audio> en toda su vida, por eso el guard.
-  let motorGainNode = null;
-  function conectarGananciaMotor(){
-    if(motorGainNode) return;
-    const ac = getAudio(); if(!ac) return;
-    try{
-      const fuente = ac.createMediaElementSource(SND.motor);
-      motorGainNode = ac.createGain();
-      motorGainNode.gain.value = 2.6;
-      fuente.connect(motorGainNode).connect(ac.destination);
-    }catch(e){ /* ya estaba conectado, o el navegador no dejó — sigue sonando con .volume nomás */ }
-  }
+  // OJO: se probó pasar el motor por un GainNode de Web Audio
+  // (createMediaElementSource) para subirlo más allá del tope de 1.0 de
+  // .volume, pero eso lo dejó MUDO del todo en la práctica — apenas se
+  // conecta un <audio> a un GainNode, TODO su sonido pasa a depender de
+  // que el AudioContext esté "running" (no "suspended"); si eso no
+  // termina de pasar a tiempo (nada raro en un iframe / con la política
+  // de autoplay del navegador), no suena nada, ni siquiera bajito, y ya
+  // no hay forma de volver al <audio> normal sin recargar la página. Se
+  // volvió al camino simple de siempre: solo .volume (tope real 1.0, no
+  // se puede pasar de la fuerza con la que está grabado el mp3 sin ese
+  // riesgo) — si hace falta más fuerte de verdad, la forma segura es
+  // resubir motor_loop.mp3 ya masterizado más alto, no forzarlo por acá.
   function iniciarMotor(){
-    conectarGananciaMotor();
     try{
       SND.motor.currentTime = 0;
-      SND.motor.volume = 0.4;
+      SND.motor.volume = 0.55;
       SND.motor.playbackRate = 0.65;
       SND.motor.play().catch(()=>{});
     }catch(e){}
@@ -1320,7 +1314,7 @@
   }
   function actualizarMotor(speedPercent, boostIntensidad){
     SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
-    SND.motor.volume       = Util.limit(0.35 + speedPercent*0.5 + boostIntensidad*0.2, 0, 1);
+    SND.motor.volume       = Util.limit(0.55 + speedPercent*0.45 + boostIntensidad*0.2, 0, 1);
   }
 
   function flashMessage(text, color){
