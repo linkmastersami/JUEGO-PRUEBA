@@ -1017,7 +1017,7 @@
     }
     derrapandoAntes = derrapando;
 
-    const anguloObjetivo = derrapando ? (keyLeft ? 26 : keyRight ? -26 : 0) : (keyLeft ? 7 : keyRight ? -7 : 0);
+    const anguloObjetivo = derrapando ? (keyLeft ? -26 : keyRight ? 26 : 0) : (keyLeft ? -7 : keyRight ? 7 : 0);
     driftAngle += (anguloObjetivo - driftAngle) * Math.min(1, dt*8);
 
     if(boostDuracionRestante > 0){
