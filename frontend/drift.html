@@ -184,6 +184,24 @@
     border-radius:50%; font-size:16px; font-weight:800; touch-action:manipulation;
   }
   #closeBtn:active { background:rgba(0,0,0,0.75); }
+
+  /* Confirmación de salida: SIN pausar nada — el juego (canvas, motor,
+     tráfico, físicas) sigue corriendo atrás mientras esto está arriba, a
+     propósito (es un juego en línea, "seguir corriendo mientras decidís"
+     es justamente el pedido). z-index más alto que todo lo demás del
+     archivo, incluido #rotateHint. */
+  #confirmSalida {
+    position:fixed; inset:0; z-index:60; background:rgba(0,0,0,0.72);
+    display:flex; align-items:center; justify-content:center; padding:22px;
+  }
+  #confirmSalida.hidden { display:none; }
+  #confirmSalidaCard {
+    background:#1a1008; border:2px solid #ff9d3d; border-radius:16px;
+    padding:26px 22px; max-width:320px; width:100%; text-align:center;
+    box-shadow:0 10px 40px rgba(0,0,0,0.6);
+  }
+  #confirmSalidaCard .btn { width:100%; }
+  #confirmSalidaNoBtn { background:linear-gradient(180deg,#5a5a5a,#2e2e2e); box-shadow:0 6px 0 #1a1a1a, 0 8px 20px rgba(0,0,0,0.3); margin-top:10px; }
 </style>
 </head>
 <body>
@@ -220,6 +238,18 @@
 <div id="rotateHint">
   <div class="icono">📱↻</div>
   <div class="subtitle">Girá el teléfono — este juego se juega apaisado (horizontal).</div>
+</div>
+
+<!-- Ni el botón ✕ ni "atrás" del teléfono salen directo — muestran esto
+     encima sin tocar el juego de abajo (sigue corriendo). Ver
+     mostrarConfirmSalida/ejecutarSalida y el interceptor de popstate. -->
+<div id="confirmSalida" class="hidden">
+  <div id="confirmSalidaCard">
+    <div class="title" style="font-size:20px; margin-bottom:6px;">¿Seguro que querés salir?</div>
+    <div class="subtitle" style="margin-bottom:18px; font-size:13px;">La carrera sigue corriendo mientras decidís.</div>
+    <button class="btn" id="confirmSalidaSiBtn">Sí, salir</button>
+    <button class="btn" id="confirmSalidaNoBtn">Seguir jugando</button>
+  </div>
 </div>
 
 <div class="overlay" id="startScreen">
@@ -346,15 +376,37 @@
   document.addEventListener('touchend', bloquearOrientacion, { once:true, passive:true });
   document.addEventListener('click', bloquearOrientacion, { once:true });
 
-  document.getElementById('closeBtn').addEventListener('click', ()=>{
-    detenerMotor();
-    cuentaRegresivaId++; // corta cualquier cuenta regresiva que haya quedado corriendo de fondo
-    document.getElementById('countdown').classList.add('hidden');
-    document.getElementById('resultScreen').classList.add('hidden');
-    document.getElementById('copaScreen').classList.add('hidden');
-    document.getElementById('startScreen').classList.remove('hidden');
-    copaActiva = false;
-    state = 'idle';
+  // ---------- Confirmación de salida ---------------------------------------
+  // Ni el botón ✕ ni "atrás" del teléfono salen directo (antes el ✕ tiraba
+  // al jugador de una a la pantalla de inicio en solitario, aunque
+  // estuviera en una sala multijugador de verdad — quedaba "trabado" ahí
+  // adentro sin forma de volver a index.html). Ahora los dos solo abren
+  // esta ventana ARRIBA del juego, sin pausar nada de lo de abajo (a
+  // propósito: es un juego en línea, tiene que poder seguir corriendo
+  // mientras el jugador decide). Si confirma, se recarga toda la pestaña
+  // (no solo drift.html) — así no hay que andar limpiando a mano estado
+  // de sala/WebSocket/motor por todos lados, la recarga sola ya deja todo
+  // limpio, sin errores, aunque estuviera a mitad de una carrera.
+  function mostrarConfirmSalida(){ document.getElementById('confirmSalida').classList.remove('hidden'); }
+  function ocultarConfirmSalida(){ document.getElementById('confirmSalida').classList.add('hidden'); }
+  function ejecutarSalida(){
+    if(wsSala && wsSala.readyState === 1){ try{ wsSala.send(JSON.stringify({type:'leave'})); }catch(e){} }
+    if(window.parent !== window) window.parent.postMessage({type:'driftExit'}, '*');
+    else location.reload();
+  }
+  document.getElementById('closeBtn').addEventListener('click', mostrarConfirmSalida);
+  document.getElementById('confirmSalidaSiBtn').addEventListener('click', ejecutarSalida);
+  document.getElementById('confirmSalidaNoBtn').addEventListener('click', ocultarConfirmSalida);
+
+  // Botón/gesto "atrás" del navegador o del teléfono: se planta un estado
+  // de historial de más al entrar, así que apretar atrás dispara
+  // 'popstate' EN VEZ DE navegar de verdad — se lo vuelve a plantar al
+  // toque (para seguir "atrapándolo" la próxima vez) y se muestra la
+  // misma ventana de arriba, en vez de sacar al jugador en silencio.
+  history.pushState({ driftGuard:true }, document.title);
+  window.addEventListener('popstate', ()=>{
+    history.pushState({ driftGuard:true }, document.title);
+    mostrarConfirmSalida();
   });
 
   // ---------- Util (matemática pura, adaptada del tutorial) -------------
@@ -1217,10 +1269,28 @@
   // cuadro en update() según qué tan rápido vas (playbackRate del <audio>,
   // soportado igual en el navegador del celular que en la compu — no hace
   // falta Web Audio API para esto).
+  // El archivo de motor_loop.mp3 viene grabado bajito — con .volume solo
+  // (tope 1.0 de por sí) no alcanzaba a notarse arriba del resto de la
+  // mezcla. Lo pasamos UNA sola vez por un GainNode de Web Audio con
+  // ganancia > 1 para poder subirlo de verdad más allá de ese tope
+  // (conectarGananciaMotor) — createMediaElementSource solo se puede
+  // llamar una vez por <audio> en toda su vida, por eso el guard.
+  let motorGainNode = null;
+  function conectarGananciaMotor(){
+    if(motorGainNode) return;
+    const ac = getAudio(); if(!ac) return;
+    try{
+      const fuente = ac.createMediaElementSource(SND.motor);
+      motorGainNode = ac.createGain();
+      motorGainNode.gain.value = 2.6;
+      fuente.connect(motorGainNode).connect(ac.destination);
+    }catch(e){ /* ya estaba conectado, o el navegador no dejó — sigue sonando con .volume nomás */ }
+  }
   function iniciarMotor(){
+    conectarGananciaMotor();
     try{
       SND.motor.currentTime = 0;
-      SND.motor.volume = 0.15;
+      SND.motor.volume = 0.4;
       SND.motor.playbackRate = 0.65;
       SND.motor.play().catch(()=>{});
     }catch(e){}
@@ -1233,7 +1303,7 @@
   }
   function actualizarMotor(speedPercent, boostIntensidad){
     SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
-    SND.motor.volume       = Util.limit(0.12 + speedPercent*0.35 + boostIntensidad*0.15, 0, 0.75);
+    SND.motor.volume       = Util.limit(0.35 + speedPercent*0.5 + boostIntensidad*0.2, 0, 1);
   }
 
   function flashMessage(text, color){
@@ -2119,17 +2189,10 @@
   document.getElementById('copaVolverBtn').addEventListener('click', volverAlMenu);
 
   // ---------- Controles de la sala multijugador ---------------------------
-  function salirDeLaSala(){
-    if(wsSala && wsSala.readyState === 1){
-      try{ wsSala.send(JSON.stringify({type:'leave'})); }catch(e){}
-    }
-    // drift.html vive embebido en un iframe cuando llega por sala (ver
-    // index.html, igual que Monster Crazy) — le avisa al padre para que
-    // cierre el iframe y vuelva al menú de juegos. Si por lo que sea se
-    // abrió suelto (probando directo la URL con ?sala=...), no hay padre
-    // que escuche y no pasa nada más.
-    if(window.parent !== window) window.parent.postMessage({type:'driftExit'}, '*');
-  }
+  // Botón "SALIR DE LA SALA" del resultado multijugador: la carrera ya
+  // terminó, no hay nada que confirmar — sale directo (ver ejecutarSalida,
+  // definida más arriba junto con la ventana de confirmación de ✕/atrás).
+  function salirDeLaSala(){ ejecutarSalida(); }
   document.getElementById('salaSalirBtn').addEventListener('click', salirDeLaSala);
   document.getElementById('salaPantallaBtn').addEventListener('click', (e)=>{
     bloquearOrientacion();

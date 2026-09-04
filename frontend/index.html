@@ -1957,7 +1957,7 @@
   <div class="card" id="drift-menu-card">
     <div class="board-title" style="justify-content:center; text-align:center;">🏁 Drift</div>
     <div class="hero-hint" style="margin-bottom:16px;">Elegí cómo jugar</div>
-    <button class="full" id="btn-drift-rapida" style="margin-bottom:12px; font-size:1.05rem;">🔍 Partida Rápida</button>
+    <button class="full" id="btn-drift-solo" style="margin-bottom:12px; font-size:1.05rem;">🎯 Juego en Solitario</button>
     <div style="text-align:center; margin-bottom:12px; color:var(--muted); font-size:0.8rem;">— o crea una sala privada para jugar con amigos —</div>
     <button class="full secondary" id="btn-drift-crear-sala">🔑 Crear sala privada</button>
     <button class="full ghost" id="btn-drift-menu-cerrar" style="margin-top:16px; font-size:0.85rem;">← Volver</button>
@@ -7551,22 +7551,16 @@ function lanzarDrift(roomCode) {
   pausarMusicaPorPartida();
 }
 
-function cerrarDrift() {
-  document.getElementById('overlay-drift').classList.remove('activo');
-  document.getElementById('drift-iframe').src = 'about:blank';
-  reanudarMusicaTrasPartida();
-}
 
-document.getElementById('btn-drift-rapida').onclick = async () => {
+// Juego en Solitario: ni siquiera pide sala al backend — abre drift.html
+// directo, sin ?sala=, así arranca en su propia pantalla de siempre (elegir
+// cualquiera de las 4 pistas sueltas, o la Copa).
+document.getElementById('btn-drift-solo').onclick = () => {
   reproducirSonido(soundUiBoton);
-  try {
-    const resp = await fetch('/matchmake?game=drift');
-    const data = await resp.json();
-    if (resp.ok && data.room) lanzarDrift(data.room);
-    else alert('No se pudo encontrar partida de Drift. Intenta de nuevo.');
-  } catch (e) {
-    alert('Error de conexión con el servidor.');
-  }
+  cerrarMenuDrift();
+  document.getElementById('overlay-drift').classList.add('activo');
+  document.getElementById('drift-iframe').src = 'drift.html?t=' + Date.now();
+  pausarMusicaPorPartida();
 };
 document.getElementById('btn-drift-crear-sala').onclick = async () => {
   reproducirSonido(soundUiBoton);
@@ -7584,7 +7578,14 @@ document.getElementById('btn-drift-crear-sala').onclick = async () => {
 // ✕ o "SALIR DE LA SALA" — ver salirDeLaSala en drift.html), igual que
 // Monster Crazy con "monsterExit".
 window.addEventListener('message', (ev) => {
-  if ((ev.data || {}).type === 'driftExit') cerrarDrift();
+  // Recarga toda la pestaña en vez de solo cerrar el iframe (a diferencia
+  // de Monster Crazy): Drift puede dejar atrás una conexión de sala/
+  // WebSocket a mitad de carrera, y recargar de una es la forma más
+  // simple y segura de garantizar que no quede ningún resto de eso
+  // colgando — el jugador ya confirmó adentro de drift.html que quiere
+  // salir (ver la ventana de "¿Seguro que querés salir?"), así que no
+  // hace falta preguntar de nuevo acá.
+  if ((ev.data || {}).type === 'driftExit') location.reload();
 });
 
 document.getElementById('btn-cambiar-juego').onclick = () => {
