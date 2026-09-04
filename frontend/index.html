@@ -1329,6 +1329,33 @@
   .juego-card-texto b { font-size: 1.05rem; }
   .juego-card-texto span { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
   #btn-elegir-codigos:hover, #btn-elegir-codigos:focus-visible { border-color: var(--accent); }
+
+  /* Botón de Drift: amarillo con marco a cuadros blanco/negro, como una
+     bandera de largada — el "marco" es un div de afuera con un tablero de
+     ajedrez de fondo (conic-gradient) y padding, la tarjeta amarilla va
+     encima tapándolo menos ese borde de 4px. */
+  .juego-card-marco-cuadros {
+    background-image: conic-gradient(#000 0% 25%, #fff 0% 50%) 0 0/14px 14px;
+    padding: 4px; border-radius: 12px;
+  }
+  .juego-card-marco-cuadros .juego-card {
+    background: linear-gradient(180deg, #ffe066, #f2c200);
+    border: none; border-radius: 8px; color: #1a1208; margin-bottom: 0 !important;
+  }
+  .juego-card-marco-cuadros .juego-card-texto span { color: #5c4700; }
+  #overlay-drift-menu {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 10450;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease; padding: 20px;
+  }
+  #overlay-drift-menu.activo { opacity: 1; pointer-events: auto; }
+  #drift-menu-card { max-width: 360px; width: 100%; text-align: center; }
+  #overlay-drift {
+    position: fixed; inset: 0; background: #000; z-index: 10500;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  #overlay-drift.activo { opacity: 1; pointer-events: auto; }
+  #drift-iframe { position:absolute; inset:0; width:100%; height:100%; border:none; }
   #btn-elegir-batalla:hover, #btn-elegir-batalla:focus-visible { border-color: var(--bad); }
 
   /* --- Transición al elegir juego: el icono que tocaste "vuela" desde el
@@ -1919,6 +1946,28 @@
   <iframe id="monster-iframe" src="about:blank" allow="fullscreen" title="Monster Crazy"></iframe>
 </div>
 
+<!-- Menú chico de Drift: Partida Rápida (con bot a los 10s) o Crear sala
+     privada (con link para invitar) — mismo par de opciones que Estratega
+     de Códigos/Batalla de Avatares, pero acá alcanza con estos dos
+     botones (no hay tutorial ni solitario para Drift). Elegir cualquiera
+     de los dos pide la sala al backend y abre drift.html en su iframe con
+     ?sala=CODIGO&jugador=NOMBRE — la sala en sí (lista de jugadores, host,
+     elegir pista, cuenta de bot) la maneja el propio drift.html. -->
+<div id="overlay-drift-menu">
+  <div class="card" id="drift-menu-card">
+    <div class="board-title" style="justify-content:center; text-align:center;">🏁 Drift</div>
+    <div class="hero-hint" style="margin-bottom:16px;">Elegí cómo jugar</div>
+    <button class="full" id="btn-drift-rapida" style="margin-bottom:12px; font-size:1.05rem;">🔍 Partida Rápida</button>
+    <div style="text-align:center; margin-bottom:12px; color:var(--muted); font-size:0.8rem;">— o crea una sala privada para jugar con amigos —</div>
+    <button class="full secondary" id="btn-drift-crear-sala">🔑 Crear sala privada</button>
+    <button class="full ghost" id="btn-drift-menu-cerrar" style="margin-top:16px; font-size:0.85rem;">← Volver</button>
+  </div>
+</div>
+
+<div id="overlay-drift">
+  <iframe id="drift-iframe" src="about:blank" allow="fullscreen" title="Drift"></iframe>
+</div>
+
 <div id="overlay-desconexion">
     <div id="dc-nombre"></div>
     <!-- El texto "en su turno" solo aplica a Estratega de Códigos (donde
@@ -2127,6 +2176,22 @@
           <span>Desliza rápido y noquea al monstruo · récord personal</span>
         </span>
       </button>
+
+      <!-- Drift: minijuego aparte (frontend/drift.html), con marco a
+           cuadros de bandera de largada. Tiene sala/host/bot como los
+           otros dos, pero la maneja el propio drift.html adentro del
+           iframe (ver abrirDriftMenu/lanzarDrift) en vez de pasar por
+           join-step-modo — así no hay que mezclar su física/pista (que
+           vive 100% del lado del cliente) con el resto de este archivo. -->
+      <div class="juego-card-marco-cuadros" style="margin-bottom: 12px;">
+        <button class="full juego-card" id="btn-elegir-drift">
+          <span class="juego-card-emoji">🏁</span>
+          <span class="juego-card-texto">
+            <b>Drift</b>
+            <span>Carreras con derrape y turbo · hasta 4 jugadores</span>
+          </span>
+        </button>
+      </div>
 
       <button class="full juego-card" id="btn-elegir-codigos" style="margin-bottom: 12px;">
         <span class="juego-card-emoji">🎯</span>
@@ -7369,6 +7434,10 @@ document.getElementById('btn-elegir-batalla').onclick = (e) => {
 document.getElementById('btn-elegir-monster').onclick = (e) => {
   animarTransicionJuego(e.currentTarget.querySelector('.juego-card-emoji'), '🧟', () => abrirMonsterCrazy());
 };
+document.getElementById('btn-elegir-drift').onclick = () => {
+  reproducirSonido(soundUiBoton);
+  document.getElementById('overlay-drift-menu').classList.add('activo');
+};
 document.getElementById('btn-cambiar-nombre-juego').onclick = () => cerrarSesion();
 
 // ---------------------------------------------------------------------------
@@ -7457,6 +7526,67 @@ window.addEventListener('message', async (ev) => {
     responderAlJuego({ type: 'monsterResult', ok: false });
   }
 });
+// ---------------------------------------------------------------------------
+// Drift: minijuego aparte con salas de verdad (frontend/drift.html en un
+// iframe, mismo patrón que Monster Crazy) — a diferencia de Monster Crazy,
+// antes de abrir el iframe hace falta conseguir una sala del backend
+// (/matchmake o /sala-privada/crear, ?game=drift) y pasársela por la URL.
+// Toda la lógica de sala/host/bot/carrera vive DENTRO de drift.html (ver
+// DriftRoom en main.py) — acá solo se abre y cierra el iframe.
+// ---------------------------------------------------------------------------
+function cerrarMenuDrift() {
+  document.getElementById('overlay-drift-menu').classList.remove('activo');
+}
+document.getElementById('btn-drift-menu-cerrar').onclick = () => {
+  reproducirSonido(soundUiBoton);
+  cerrarMenuDrift();
+};
+
+function lanzarDrift(roomCode) {
+  cerrarMenuDrift();
+  const nombre = document.getElementById('name-input').value.trim() || 'Piloto';
+  document.getElementById('overlay-drift').classList.add('activo');
+  document.getElementById('drift-iframe').src =
+    'drift.html?sala=' + encodeURIComponent(roomCode) + '&jugador=' + encodeURIComponent(nombre) + '&t=' + Date.now();
+  pausarMusicaPorPartida();
+}
+
+function cerrarDrift() {
+  document.getElementById('overlay-drift').classList.remove('activo');
+  document.getElementById('drift-iframe').src = 'about:blank';
+  reanudarMusicaTrasPartida();
+}
+
+document.getElementById('btn-drift-rapida').onclick = async () => {
+  reproducirSonido(soundUiBoton);
+  try {
+    const resp = await fetch('/matchmake?game=drift');
+    const data = await resp.json();
+    if (resp.ok && data.room) lanzarDrift(data.room);
+    else alert('No se pudo encontrar partida de Drift. Intenta de nuevo.');
+  } catch (e) {
+    alert('Error de conexión con el servidor.');
+  }
+};
+document.getElementById('btn-drift-crear-sala').onclick = async () => {
+  reproducirSonido(soundUiBoton);
+  try {
+    const resp = await fetch('/sala-privada/crear?game=drift');
+    const data = await resp.json();
+    if (resp.ok && data.room) lanzarDrift(data.room);
+    else alert('No se pudo crear la sala de Drift. Intenta de nuevo.');
+  } catch (e) {
+    alert('Error de conexión con el servidor.');
+  }
+};
+
+// drift.html avisa por postMessage cuando el jugador quiere salir (botón
+// ✕ o "SALIR DE LA SALA" — ver salirDeLaSala en drift.html), igual que
+// Monster Crazy con "monsterExit".
+window.addEventListener('message', (ev) => {
+  if ((ev.data || {}).type === 'driftExit') cerrarDrift();
+});
+
 document.getElementById('btn-cambiar-juego').onclick = () => {
   reproducirSonido(soundUiBoton);
   document.getElementById('join-step-modo').classList.add('hidden');

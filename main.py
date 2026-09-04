@@ -9,6 +9,7 @@ usa el mismo código de sala y nombres diferentes.
 """
 
 import json
+import math
 import os
 import random
 import asyncio
@@ -2772,15 +2773,255 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
         rooms.pop(room_code, None)
 
 
+# =============================================================================
+# DRIFT — tercer juego. A diferencia de Estratega de Códigos y Batalla de
+# Avatares (turnos, todo decidido acá adentro), acá la física/curvas/pista
+# entera vive SOLO en el cliente (frontend/drift.html) — el servidor nunca
+# construye el trazado ni corre ninguna física. Cada jugador manda su
+# PROGRESO como una fracción 0..1 de la carrera completa (todas las vueltas)
+# y el resto de la sala lo recibe y lo convierte a una posición local en SU
+# propia copia (determinística) de la pista — así no hace falta portar nada
+# del motor pseudo-3D a Python. El bot no "maneja" de verdad: su progreso se
+# calcula solo, en base al tiempo transcurrido desde la largada contra una
+# duración estimada por pista (DRIFT_DURACION_PISTA), con un poco de
+# variación aleatoria propia para no sentirse siempre igual de rápido.
+# Sin salas de espectador, chat, ranking ni monedas por ahora — solo la
+# carrera: sala, host, bot de relleno a los 10s, y ver a los rivales de
+# verdad moviéndose en la pista.
+# =============================================================================
+DRIFT_MAX_PLAYERS = 4
+DRIFT_MATCHMAKE_TIMEOUT = 10  # segundos de espera antes de completar con un bot
+DRIFT_TOTAL_VUELTAS = 3  # tiene que coincidir con TOTAL_VUELTAS en drift.html
+# Segundos estimados para completar las DRIFT_TOTAL_VUELTAS vueltas en cada
+# pista (índice == TRACKS[] en drift.html) — salieron de simular
+# resetPista() en Node al armar cada trazado (ver conversación), a un ritmo
+# de crucero del 65% de la velocidad máxima. Solo se usan para marcarle el
+# paso al bot; no afectan nada del lado del jugador real.
+DRIFT_DURACION_PISTA = {0: 205.0, 1: 158.0, 2: 177.0, 3: 149.0}
+DRIFT_NOMBRES_BOT = [
+    "Turbo Tuki", "Relámpago Sam", "Derrape Nino", "Piloto Fantasma",
+    "Chispas Rulo", "Volante Loco", "Nitro Cata", "Freno de Mano",
+]
+
+
+class DriftPlayer:
+    def __init__(self, pid: str, name: str, ws: Optional[WebSocket], color_idx: int, is_bot: bool = False):
+        self.id = pid
+        self.name = name
+        self.ws = ws
+        self.is_bot = is_bot
+        self.connected = True
+        self.color_idx = color_idx
+        self.progreso = 0.0          # 0..1, fracción de la carrera completa (todas las vueltas)
+        self.player_x = 0.0
+        self.tiempo_total = 0.0
+        self.mejor_vuelta: Optional[float] = None
+        self.terminado = False
+        self.lugar: Optional[int] = None
+        # Solo bots: cuántos segundos le lleva a ESTE bot terminar la
+        # carrera (con jitter propio, se fija una vez al arrancar — ver
+        # DriftRoom.start).
+        self.bot_duracion: Optional[float] = None
+
+    def _progreso_bot(self, race_start_time: Optional[float]) -> float:
+        if race_start_time is None or not self.bot_duracion:
+            return 0.0
+        elapsed = time.time() - race_start_time
+        return max(0.0, min(1.0, elapsed / self.bot_duracion))
+
+    def to_dict(self, race_start_time: Optional[float]) -> dict:
+        if self.is_bot and not self.terminado:
+            progreso = self._progreso_bot(race_start_time)
+            tiempo_total = max(0.0, time.time() - race_start_time) if race_start_time else 0.0
+            player_x = math.sin(tiempo_total * 0.6) * 0.35 if race_start_time else 0.0
+        else:
+            progreso, tiempo_total, player_x = self.progreso, self.tiempo_total, self.player_x
+        return {
+            "id": self.id, "name": self.name, "is_bot": self.is_bot,
+            "connected": self.connected, "color_idx": self.color_idx,
+            "progreso": round(progreso, 4), "player_x": round(player_x, 3),
+            "tiempo_total": round(tiempo_total, 1),
+            "mejor_vuelta": self.mejor_vuelta,
+            "terminado": self.terminado, "lugar": self.lugar,
+        }
+
+
+class DriftRoom:
+    def __init__(self, code: str):
+        self.code = code
+        self.game = "drift"
+        self.mode = "drift"
+        self.players: List[DriftPlayer] = []
+        self.spectators: Dict[str, WebSocket] = {}  # broadcast() lo pide, pero no hay espectadores de Drift todavía
+        self.status = "waiting"  # waiting | playing | finished
+        self.host_id: Optional[str] = None
+        self.pista = 0
+        self.race_start_time: Optional[float] = None
+        self.matchmaking_deadline: Optional[float] = None
+        self.log: List[str] = []
+
+    def get_player(self, pid: str) -> Optional[DriftPlayer]:
+        return next((p for p in self.players if p.id == pid), None)
+
+    def _siguiente_color(self) -> int:
+        usados = {p.color_idx for p in self.players}
+        for i in range(8):
+            if i not in usados:
+                return i
+        return len(self.players)
+
+    def agregar_bot(self) -> None:
+        nombre = random.choice(DRIFT_NOMBRES_BOT)
+        pid = f"bot-{random.randint(100000, 999999)}"
+        bot = DriftPlayer(pid, nombre, None, self._siguiente_color(), is_bot=True)
+        self.players.append(bot)
+        self.log.append(f"{nombre} (bot) se unió a la sala.")
+
+    def elegir_pista(self, pid: str, pista: int) -> bool:
+        if self.status != "waiting" or pid != self.host_id or pista not in DRIFT_DURACION_PISTA:
+            return False
+        self.pista = pista
+        return True
+
+    def start(self) -> bool:
+        if self.status != "waiting" or not self.players:
+            return False
+        self.status = "playing"
+        # +3s: le da tiempo a cada cliente a correr SU cuenta regresiva
+        # local (3-2-1-YA, ~2.9s — ver arrancarCuentaRegresiva en
+        # drift.html) antes de que el progreso del bot empiece a avanzar
+        # de verdad (_progreso_bot lo deja en 0 mientras time.time() no
+        # llegue a race_start_time) — si no, el bot le sacaría esos ~3
+        # segundos de ventaja a cualquier humano.
+        self.race_start_time = time.time() + 3.0
+        self.matchmaking_deadline = None
+        duracion_base = DRIFT_DURACION_PISTA.get(self.pista, 180.0)
+        for p in self.players:
+            p.progreso = 0.0; p.player_x = 0.0; p.tiempo_total = 0.0
+            p.mejor_vuelta = None; p.terminado = False; p.lugar = None
+            if p.is_bot:
+                # +/-18% de variación propia para que no todos los bots
+                # (ni el mismo bot en dos carreras) corran siempre parejo.
+                p.bot_duracion = duracion_base * random.uniform(0.82, 1.18)
+        self.log.append("¡Carrera en marcha!")
+        return True
+
+    def _siguiente_lugar(self) -> int:
+        ocupados = [p.lugar for p in self.players if p.lugar]
+        return (max(ocupados) + 1) if ocupados else 1
+
+    def registrar_estado(self, pid: str, progreso: float, player_x: float, tiempo_total: float,
+                          mejor_vuelta: Optional[float]) -> None:
+        p = self.get_player(pid)
+        if p is None or p.is_bot or self.status != "playing" or p.terminado:
+            return
+        p.progreso = max(0.0, min(1.0, progreso))
+        p.player_x = player_x
+        p.tiempo_total = max(0.0, tiempo_total)
+        if mejor_vuelta is not None:
+            p.mejor_vuelta = mejor_vuelta
+
+    def registrar_llegada(self, pid: str, tiempo_total: float, mejor_vuelta: Optional[float]) -> None:
+        p = self.get_player(pid)
+        if p is None or p.is_bot or p.terminado or self.status != "playing":
+            return
+        p.progreso = 1.0
+        p.terminado = True
+        p.tiempo_total = max(0.0, tiempo_total)
+        p.mejor_vuelta = mejor_vuelta
+        p.lugar = self._siguiente_lugar()
+        self._revisar_fin_de_carrera()
+
+    def _revisar_fin_de_carrera(self) -> None:
+        # Termina cuando ya no queda NINGÚN jugador humano corriendo (a los
+        # bots no hace falta esperarlos: si alguien se queda solo contra
+        # bots y termina, no tiene sentido tenerlo mirando la pantalla de
+        # espera hasta que los bots "terminen" solos).
+        humanos = [p for p in self.players if not p.is_bot]
+        if humanos and all(p.terminado for p in humanos):
+            for p in self.players:
+                if p.is_bot and not p.terminado and self.race_start_time:
+                    if p._progreso_bot(self.race_start_time) >= 1.0:
+                        p.terminado = True
+                        p.progreso = 1.0  # si no, to_dict() lo reporta en 0.0 de nuevo al dejar de calcularlo en vivo
+                        p.tiempo_total = p.bot_duracion or 0.0
+                        p.lugar = self._siguiente_lugar()
+            self.status = "finished"
+
+    def leave_game(self, player: "DriftPlayer") -> None:
+        self.players = [p for p in self.players if p.id != player.id]
+        if self.host_id == player.id:
+            siguiente = next((p for p in self.players if not p.is_bot and p.connected), None)
+            self.host_id = siguiente.id if siguiente else (self.players[0].id if self.players else None)
+        if self.status == "playing":
+            self._revisar_fin_de_carrera()
+
+    def state_for(self, viewer_id: str) -> dict:
+        return {
+            "type": "state", "game": "drift", "status": self.status, "room": self.code,
+            "mode": self.mode, "host_id": self.host_id, "pista": self.pista,
+            "your_id": viewer_id, "min_players": 1, "max_players": DRIFT_MAX_PLAYERS,
+            "matchmaking_deadline_ms": int(self.matchmaking_deadline * 1000) if self.matchmaking_deadline else None,
+            "race_start_ms": int(self.race_start_time * 1000) if self.race_start_time else None,
+            "players": [p.to_dict(self.race_start_time) for p in self.players],
+        }
+
+    def spectator_state_for(self) -> dict:
+        base = self.state_for("__espectador__")
+        base["is_spectator"] = True
+        return base
+
+
+async def _watch_drift_matchmake(room_code: str) -> None:
+    """Cuenta regresiva de Partida Rápida (Drift): si nadie más entró a los
+    DRIFT_MATCHMAKE_TIMEOUT segundos, se suma un bot. Igual que Estratega de
+    Códigos (y a diferencia de Batalla), no arranca sola con el primer bot —
+    el host puede tocar "Iniciar" en cualquier momento; recién si la sala
+    queda llena de verdad se re-arma la cuenta para otro bot más."""
+    await asyncio.sleep(DRIFT_MATCHMAKE_TIMEOUT)
+    room = rooms.get(room_code)
+    if not isinstance(room, DriftRoom):
+        return
+    if room.status != "waiting" or len(room.players) >= DRIFT_MAX_PLAYERS:
+        return
+    room.agregar_bot()
+    if len(room.players) >= DRIFT_MAX_PLAYERS:
+        room.start()
+        try:
+            await broadcast(room)
+        except Exception:
+            pass
+        return
+    room.matchmaking_deadline = time.time() + DRIFT_MATCHMAKE_TIMEOUT
+    try:
+        await broadcast(room)
+    except Exception:
+        pass
+    asyncio.create_task(_watch_drift_matchmake(room_code))
+
+
 # ---------------------------------------------------------------------------
 # ENDPOINT DE MATCHMAKING
 # ---------------------------------------------------------------------------
+def _nueva_room(game: str, code: str):
+    if game == "batalla":
+        return BatallaRoom(code)
+    if game == "drift":
+        return DriftRoom(code)
+    return Room(code)
+
+
 @app.get("/matchmake")
 async def matchmake(game: str = "codigos"):
-    """game="codigos" (Estratega, por defecto) o "batalla" (Batalla de
-    Avatares) — cada uno busca/crea salas MM- de SU propio juego nada más,
-    nunca mezcla jugadores de un juego con el otro."""
-    max_jugadores = 2 if game == "batalla" else MAX_PLAYERS
+    """game="codigos" (Estratega, por defecto), "batalla" (Batalla de
+    Avatares) o "drift" — cada uno busca/crea salas MM- de SU propio juego
+    nada más, nunca mezcla jugadores de un juego con el otro."""
+    if game == "batalla":
+        max_jugadores = 2
+    elif game == "drift":
+        max_jugadores = DRIFT_MAX_PLAYERS
+    else:
+        max_jugadores = MAX_PLAYERS
 
     # 1. Buscar una sala existente del mismo juego que esté "waiting" y
     # tenga espacio.
@@ -2796,7 +3037,7 @@ async def matchmake(game: str = "codigos"):
     while new_room_id in rooms:
         new_room_id = MATCHMAKE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    rooms[new_room_id] = BatallaRoom(new_room_id) if game == "batalla" else Room(new_room_id)
+    rooms[new_room_id] = _nueva_room(game, new_room_id)
     return {"room": new_room_id, "game": game}
 
 
@@ -2806,13 +3047,13 @@ async def crear_sala_privada(game: str = "codigos"):
     jugar con quien uno invite — reemplaza el viejo flujo de escribir un
     código a mano. A diferencia de /matchmake, siempre crea una sala nueva
     (nunca busca una existente para unirse: eso es justo lo que la hacía
-    "adivinable"). Sin bots de relleno, y en Estratega de Códigos quien la
-    crea queda de host de esa sala (ver Room.host_id)."""
+    "adivinable"). Sin bots de relleno, y en Estratega de Códigos/Drift quien
+    la crea queda de host de esa sala (ver Room.host_id/DriftRoom.host_id)."""
     new_room_id = PRIVATE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     while new_room_id in rooms:
         new_room_id = PRIVATE_PREFIX + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
-    rooms[new_room_id] = BatallaRoom(new_room_id) if game == "batalla" else Room(new_room_id)
+    rooms[new_room_id] = _nueva_room(game, new_room_id)
     return {"room": new_room_id, "game": game}
 
 
@@ -3429,6 +3670,132 @@ async def ws_batalla_endpoint(websocket: WebSocket, room_code: str, player_name:
         print(f"❌ Error inesperado en la conexión de {player.name} en sala batalla {room.code}: {e}")
         try:
             await _cleanup_batalla()
+        except Exception:
+            pass
+
+
+@app.websocket("/ws/drift/{room_code}/{player_name}")
+async def ws_drift_endpoint(websocket: WebSocket, room_code: str, player_name: str):
+    """Jugador de Drift. Más simple que ws_endpoint/ws_batalla_endpoint: no
+    hay turnos ni verificación de token (no toca ranking/monedas todavía),
+    la sala es solo lista de jugadores + progreso de carrera — ver
+    DriftRoom más arriba."""
+    await websocket.accept()
+    clean_name = player_name.strip()[:20] or "Piloto"
+
+    existente = rooms.get(room_code)
+    if existente is not None and not isinstance(existente, DriftRoom):
+        await websocket.send_text(json.dumps({"type": "error", "message": "Ese código de sala no es de Drift."}))
+        await websocket.close()
+        return
+
+    room: DriftRoom = rooms.setdefault(room_code, DriftRoom(room_code))
+
+    player = next((p for p in room.players if p.name.strip().lower() == clean_name.lower() and not p.is_bot), None)
+
+    if player is not None:
+        player.ws = websocket
+        player.connected = True
+        room.log.append(f"{player.name} se reconectó a la sala.")
+        await broadcast(room)
+    else:
+        if room.status != "waiting" or len(room.players) >= DRIFT_MAX_PLAYERS:
+            await websocket.send_text(json.dumps(
+                {"type": "error", "message": "La sala ya está llena o la carrera ya empezó."}
+            ))
+            await websocket.close()
+            return
+
+        pid = f"{clean_name}-{random.randint(1000, 9999)}"
+        player = DriftPlayer(pid, clean_name, websocket, room._siguiente_color())
+        room.players.append(player)
+        if room.host_id is None:
+            room.host_id = pid  # el primero en entrar queda de host, igual que Estratega de Códigos
+        room.log.append(f"{clean_name} se unió a la sala.")
+
+        if room_code.upper().startswith(MATCHMAKE_PREFIX) and len(room.players) == 1:
+            room.matchmaking_deadline = time.time() + DRIFT_MATCHMAKE_TIMEOUT
+            asyncio.create_task(_watch_drift_matchmake(room_code))
+
+        await broadcast(room)
+
+    async def _cleanup_drift():
+        if player.ws is not websocket:
+            return  # esta conexión ya fue reemplazada por una más nueva (ver comentario equivalente en batalla)
+        player.connected = False
+        if room.status == "waiting":
+            room.leave_game(player)
+        try:
+            await broadcast(room)
+        except Exception:
+            pass
+        if not any(p.connected for p in room.players if not p.is_bot):
+            rooms.pop(room.code, None)
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+                mtype = msg.get("type")
+            except Exception as e:
+                print(f"⚠️  Mensaje ilegible de {player.name} en sala drift {room.code}: {e}")
+                continue
+
+            if mtype == "ping":
+                try:
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+                except Exception:
+                    pass
+                continue
+
+            elif mtype == "elegir_pista":
+                if room.elegir_pista(player.id, msg.get("pista")):
+                    await broadcast(room)
+
+            elif mtype == "iniciar" and player.id == room.host_id:
+                if room.start():
+                    await broadcast(room)
+
+            elif mtype == "estado" and room.status == "playing":
+                room.registrar_estado(
+                    player.id,
+                    float(msg.get("progreso") or 0),
+                    float(msg.get("player_x") or 0),
+                    float(msg.get("tiempo_total") or 0),
+                    msg.get("mejor_vuelta"),
+                )
+                await broadcast(room)
+
+            elif mtype == "terminar" and room.status == "playing":
+                room.registrar_llegada(player.id, float(msg.get("tiempo_total") or 0), msg.get("mejor_vuelta"))
+                await broadcast(room)
+
+            elif mtype == "leave":
+                room.leave_game(player)
+                player.connected = False
+                try:
+                    await broadcast(room)
+                except Exception:
+                    pass
+                if not any(p.connected for p in room.players if not p.is_bot):
+                    rooms.pop(room.code, None)
+                try:
+                    await websocket.send_text(json.dumps({"type": "left"}))
+                except Exception:
+                    pass
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+                return
+
+    except WebSocketDisconnect:
+        await _cleanup_drift()
+    except Exception as e:
+        print(f"❌ Error inesperado en la conexión de {player.name} en sala drift {room.code}: {e}")
+        try:
+            await _cleanup_drift()
         except Exception:
             pass
 

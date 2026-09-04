@@ -240,6 +240,10 @@
   <div class="stat" id="resultPista" style="opacity:0.75; font-size:14px;"></div>
   <div class="stat">Mejor vuelta: <b id="finalMejorVuelta">—</b></div>
   <div class="stat">Tiempo total: <b id="finalTiempoTotal">—</b></div>
+  <!-- Solo se llena/se ve en carreras de sala multijugador — ver
+       renderStandingsSala. Posiciones de todos (vos, rivales de verdad y
+       el bot), se va actualizando en vivo mientras los demás terminan. -->
+  <div id="resultStandings" style="width:100%; max-width:320px; margin-top:10px;"></div>
   <button class="btn" id="restartBtn" style="margin-top:20px;">CORRER DE NUEVO</button>
 </div>
 
@@ -248,6 +252,30 @@
   <div id="copaLista"></div>
   <div class="stat">Tiempo total (4 pistas): <b id="copaTotal">—</b></div>
   <button class="btn" id="copaVolverBtn" style="margin-top:18px;">VOLVER AL MENÚ</button>
+</div>
+
+<!-- Sala multijugador (llega por ?sala=CODIGO&jugador=NOMBRE desde
+     index.html, ver conectarSala): lista de jugadores en vivo, el host
+     elige pista y arranca — mismo patrón de sala/host/bot a los 10s que
+     Estratega de Códigos y Batalla de Avatares, pero acá la sala vive en
+     el propio drift.html en vez de en index.html (la física/pista es todo
+     cliente, ver la nota grande en DriftRoom del lado del servidor). -->
+<div class="overlay hidden" id="salaScreen">
+  <div class="title" style="font-size:26px;">🏁 SALA <span id="salaCodigo" style="color:#ffd93d;"></span></div>
+  <div id="salaJugadores" style="width:100%; max-width:340px; margin:10px 0;"></div>
+  <div id="salaPistaGrid" class="hidden" style="display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; max-width:320px; margin-bottom:12px;">
+    <button class="pistaCard" data-pista="0"><span class="emoji">🏁</span>Clásico</button>
+    <button class="pistaCard" data-pista="1"><span class="emoji">🏔️</span>Montaña<br>y Túnel</button>
+    <button class="pistaCard" data-pista="2"><span class="emoji">🏖️</span>Costa</button>
+    <button class="pistaCard" data-pista="3"><span class="emoji">☁️</span>Cielo<br>Extremo</button>
+  </div>
+  <div id="salaEsperaTexto" class="subtitle" style="margin:6px 0;">Conectando...</div>
+  <div id="salaBotCountdown" class="hidden" style="text-align:center; margin:4px 0 14px;">
+    <div style="font-size:0.8rem; color:#c99b73;">🤖 Si nadie se une, entra un bot en...</div>
+    <div id="salaBotCountdownNum" style="font-size:1.8rem; font-weight:900; color:#ff9d3d;">10</div>
+  </div>
+  <button class="btn hidden" id="salaIniciarBtn">🏁 INICIAR CARRERA</button>
+  <div class="instructions" id="salaSalirBtn" style="margin-top:16px; text-decoration:underline; touch-action:manipulation;">← Salir de la sala</div>
 </div>
 
 <script>
@@ -464,6 +492,26 @@
   let trackIndex = 0;
   let copaActiva = false, copaIndice = 0, copaResultados = [];
 
+  // ---------- Sala multijugador (?sala=CODIGO&jugador=NOMBRE) ------------
+  // Ver la clase DriftRoom del lado del servidor (main.py) para la nota
+  // grande sobre el diseño: el servidor NUNCA arma la pista ni corre
+  // física — cada jugador manda su PROGRESO (0..1 de la carrera completa)
+  // y acá se convierte a una posición local en esta misma pista
+  // determinística (posicionRivalDesdeProgreso). El bot tampoco "maneja"
+  // de verdad: su progreso lo calcula el servidor solo, en base al tiempo
+  // transcurrido.
+  const parametrosURL = new URLSearchParams(location.search);
+  const salaCodigo = parametrosURL.get('sala');
+  const salaJugador = parametrosURL.get('jugador');
+  const enSala = !!(salaCodigo && salaJugador);
+  let wsSala = null;
+  let salaEstado = null;       // último "state" recibido del servidor
+  let salaStatusAnterior = null;
+  let salaSoyHost = false;
+  let rivales = {};            // id -> {name, is_bot, color_idx, progreso, player_x, tiempo_total, terminado, lugar}
+  let rivalSegmentos = [];     // segmentos con algún rival dibujado este cuadro (para poder limpiarlos antes del próximo)
+  let ultimoEnvioSala = 0;
+
   function findSegment(z){ return segments[Math.floor(z/segmentLength) % segments.length]; }
   function lastY(){ return segments.length ? segments[segments.length-1].p2.world.y : 0; }
 
@@ -473,7 +521,7 @@
       index: n,
       p1: { world: { y: lastY(), z: n*segmentLength },     camera:{}, screen:{} },
       p2: { world: { y: y,       z: (n+1)*segmentLength }, camera:{}, screen:{} },
-      curve, sprites: [], cars: [], color: Math.floor(n/rumbleLength)%2 ? COLORS.DARK : COLORS.LIGHT,
+      curve, sprites: [], cars: [], rivales: [], color: Math.floor(n/rumbleLength)%2 ? COLORS.DARK : COLORS.LIGHT,
     });
   }
   function addSprite(n, tipo, offset){ segments[n % segments.length].sprites.push({ tipo, offset }); }
@@ -903,6 +951,116 @@
     });
   }
 
+  // ---------- Red: sala multijugador ---------------------------------------
+  function conectarSala(){
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    wsSala = new WebSocket(`${proto}://${location.host}/ws/drift/${encodeURIComponent(salaCodigo)}/${encodeURIComponent(salaJugador)}`);
+    wsSala.onopen = ()=>{ document.getElementById('salaEsperaTexto').textContent = 'Conectado. Esperando jugadores...'; };
+    wsSala.onclose = ()=>{ if(salaEstado && salaEstado.status !== 'finished') document.getElementById('salaEsperaTexto').textContent = 'Se cortó la conexión con la sala.'; };
+    wsSala.onerror = ()=>{};
+    wsSala.onmessage = (ev)=>{
+      let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+      if(msg.type === 'state') procesarEstadoSala(msg);
+      else if(msg.type === 'error') document.getElementById('salaEsperaTexto').textContent = msg.message || 'Error de sala.';
+    };
+    // Mismo keepalive que index.html: sin esto el navegador (sobre todo en
+    // celular, con la pantalla apagada un rato) puede cortar la conexión
+    // en silencio y no enterarnos hasta que se manda algo y falla.
+    setInterval(()=>{ if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'ping'})); }, 20000);
+  }
+
+  function procesarEstadoSala(estado){
+    salaEstado = estado;
+    salaSoyHost = estado.host_id === estado.your_id;
+    rivales = {};
+    estado.players.forEach(p=>{ if(p.id !== estado.your_id) rivales[p.id] = p; });
+
+    // waiting -> playing: acá es donde arranca la carrera de verdad (una
+    // sola vez, comparando contra el status del broadcast anterior — los
+    // broadcasts de "estado" siguen llegando ~10 veces por segundo mientras
+    // se corre, no queremos re-arrancar la cuenta regresiva cada vez).
+    if(estado.status === 'playing' && salaStatusAnterior !== 'playing'){
+      trackIndex = estado.pista;
+      copaActiva = false;
+      document.getElementById('salaScreen').classList.add('hidden');
+      iniciarCarrera();
+    }
+    salaStatusAnterior = estado.status;
+
+    if(estado.status === 'waiting') renderSala(estado);
+    if(state === 'finished') renderStandingsSala(estado);
+  }
+
+  function renderSala(estado){
+    document.getElementById('salaCodigo').textContent = salaCodigo;
+    const lista = document.getElementById('salaJugadores');
+    lista.innerHTML = estado.players.map(p=>{
+      const esHost = p.id === estado.host_id;
+      const vos = p.id === estado.your_id ? ' (vos)' : '';
+      return `<div class="stat">${esHost ? '👑' : (p.is_bot ? '🤖' : '🏎️')} ${p.name}${vos}</div>`;
+    }).join('') || '<div class="stat">Nadie más todavía...</div>';
+
+    const grid = document.getElementById('salaPistaGrid');
+    grid.classList.toggle('hidden', !salaSoyHost);
+    grid.querySelectorAll('.pistaCard').forEach(btn=>{
+      btn.classList.toggle('activo', Number(btn.dataset.pista) === estado.pista);
+      btn.style.borderColor = Number(btn.dataset.pista) === estado.pista ? '#ff9d3d' : '';
+    });
+
+    document.getElementById('salaEsperaTexto').textContent = salaSoyHost
+      ? 'Elegí la pista y arrancá cuando quieras (o esperá a que se sumen más).'
+      : 'Esperando a que el host elija pista y arranque...';
+
+    document.getElementById('salaBotCountdown').classList.toggle('hidden', !estado.matchmaking_deadline_ms);
+
+    document.getElementById('salaIniciarBtn').classList.toggle('hidden', !salaSoyHost);
+  }
+
+  function renderStandingsSala(estado){
+    const ordenados = [...estado.players].sort((a,b)=>{
+      if(a.terminado !== b.terminado) return a.terminado ? -1 : 1;
+      if(a.terminado) return (a.lugar||99) - (b.lugar||99);
+      return b.progreso - a.progreso;
+    });
+    const el = document.getElementById('resultStandings');
+    if(!el) return;
+    el.innerHTML = ordenados.map((p,i)=>{
+      const pos = p.terminado ? (p.lugar||i+1) : '—';
+      const vos = p.id === estado.your_id ? ' <b>(vos)</b>' : '';
+      const tiempo = p.terminado ? p.tiempo_total.toFixed(1)+'s' : 'en carrera...';
+      return `<div class="stat">${pos}. ${p.is_bot?'🤖 ':''}${p.name}${vos} — ${tiempo}</div>`;
+    }).join('');
+  }
+
+  // progreso (0..1, ver DriftRoom) -> posición local en ESTA copia
+  // determinística de la pista. distanciaTotal es cuánto mundo recorrió en
+  // TODA la carrera (todas las vueltas); % trackLength la vuelve a la
+  // posición dentro de la vuelta actual, igual que hace Util.increase con
+  // la posición del jugador real.
+  function posicionRivalDesdeProgreso(progreso){
+    const distanciaTotal = Util.limit(progreso, 0, 1) * TOTAL_VUELTAS * trackLength;
+    return distanciaTotal % trackLength;
+  }
+
+  // Recalcula en qué segmento cae cada rival (todos los cuadros, no
+  // incremental como updateCars — son pocos rivales y así no hay que
+  // andar rastreando cruces de segmento a mano) y los deja anotados en
+  // segment.rivales para que render() los dibuje en su pasada de
+  // atrás-hacia-adelante, igual que el tráfico pero en un array aparte
+  // (así no entran nunca en la detección de choque contra tráfico).
+  function actualizarRivalesEnSegmentos(){
+    rivalSegmentos.forEach(seg => { seg.rivales.length = 0; });
+    rivalSegmentos = [];
+    if(!trackLength) return;
+    Object.values(rivales).forEach(riv=>{
+      if(riv.terminado) return; // ya cruzó la meta, no lo seguimos mostrando dando vueltas de más
+      const pos = posicionRivalDesdeProgreso(riv.progreso);
+      const seg = findSegment(pos);
+      seg.rivales.push({ nombre: riv.name, colorIdx: riv.color_idx, offset: riv.player_x, percent: Util.percentRemaining(pos, segmentLength) });
+      rivalSegmentos.push(seg);
+    });
+  }
+
   // ---------- Sonido / feedback ----------
   function vibrate(pattern){ if(navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
   let audioCtx;
@@ -1237,6 +1395,23 @@
 
     document.getElementById('vel').textContent = Math.round((speed/maxSpeed)*120) + ' km/h';
     document.getElementById('tiempoActual').textContent = tiempoVuelta.toFixed(1) + 's';
+
+    // Sala multijugador: le manda al servidor el progreso propio ~10
+    // veces por segundo (no en cada cuadro de física — 60/seg sería
+    // spamear la conexión para nada) y recalcula dónde va cada rival en
+    // ESTA pista local con lo último que llegó por WebSocket.
+    if(enSala){
+      const ahoraEnvio = performance.now();
+      if(wsSala && wsSala.readyState === 1 && ahoraEnvio - ultimoEnvioSala > 100){
+        ultimoEnvioSala = ahoraEnvio;
+        const progresoLocal = Util.limit(((vuelta-1) + position/trackLength) / TOTAL_VUELTAS, 0, 1);
+        wsSala.send(JSON.stringify({
+          type: 'estado', progreso: progresoLocal, player_x: playerX,
+          tiempo_total: tiempoTotal, mejor_vuelta: mejorVuelta,
+        }));
+      }
+      actualizarRivalesEnSegmentos();
+    }
   }
 
   function finalizarCarrera(){
@@ -1247,7 +1422,17 @@
     document.getElementById('finalTiempoTotal').textContent = tiempoTotal.toFixed(1)+'s';
     const btn = document.getElementById('restartBtn');
     const resultPista = document.getElementById('resultPista');
-    if(copaActiva){
+    if(enSala){
+      // Carrera de sala: le avisa al servidor que llegaste (para el
+      // orden de llegada de todos — ver DriftRoom.registrar_llegada) y
+      // muestra las posiciones en vez del flujo de Copa/reinicio solo.
+      if(wsSala && wsSala.readyState === 1){
+        wsSala.send(JSON.stringify({ type:'terminar', tiempo_total: tiempoTotal, mejor_vuelta: mejorVuelta }));
+      }
+      resultPista.textContent = TRACKS[trackIndex].nombre + ' — sala ' + salaCodigo;
+      btn.textContent = '🚪 SALIR DE LA SALA';
+      if(salaEstado) renderStandingsSala(salaEstado);
+    } else if(copaActiva){
       copaResultados.push({ nombre: TRACKS[trackIndex].nombre, tiempo: tiempoTotal, mejor: mejorVuelta });
       resultPista.textContent = 'Copa — pista ' + (copaIndice+1) + ' de ' + TRACKS.length + ': ' + TRACKS[trackIndex].nombre;
       btn.textContent = (copaIndice < TRACKS.length-1) ? 'SIGUIENTE PISTA ▶' : '🏆 VER RESULTADOS DE LA COPA';
@@ -1262,7 +1447,9 @@
   // pista suelta, o — en modo Copa — pasa a la próxima pista / muestra el
   // resumen final si ya corrió las 4.
   function accionBotonResultado(){
-    if(copaActiva){
+    if(enSala){
+      salirDeLaSala();
+    } else if(copaActiva){
       if(copaIndice < TRACKS.length-1){
         copaIndice++;
         trackIndex = copaIndice;
@@ -1523,6 +1710,25 @@
     ctx.restore();
   }
 
+  // Auto de un rival de sala multijugador (jugador real o bot) — mismo
+  // tamaño/dibujo que el tráfico, un color propio (color_idx que asignó
+  // DriftRoom, igual para todos los que lo ven) y el nombre flotando
+  // arriba para distinguirlo de un auto de tráfico cualquiera.
+  function drawCocheRival(x, y, scale, colorIdx, nombre){
+    const w = ANCHO_MUNDO_AUTO_TRAFICO*scale*width/2, h = w*0.82;
+    const colorPar = CAR_COLORS[colorIdx % CAR_COLORS.length];
+    ctx.save();
+    ctx.translate(x, y);
+    dibujarCocheDetallado(w, h, colorPar.a, colorPar.b, colorPar.a, 10, false);
+    ctx.restore();
+    if(w > 14){ // muy lejos, ni vale la pena escribir (y el texto quedaría gigante o ilegible)
+      ctx.font = `900 ${Math.max(10, Math.round(w*0.16))}px Arial`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillText(nombre, x+1, y-h*0.62+1);
+      ctx.fillStyle = '#fff'; ctx.fillText(nombre, x, y-h*0.62);
+    }
+  }
+
   function drawCielo(){
     const grad = ctx.createLinearGradient(0,0,0,height*0.55);
     grad.addColorStop(0, cieloColores[0]); grad.addColorStop(1, cieloColores[1]);
@@ -1667,6 +1873,17 @@
         const sy    = Util.interpolate(segment.p1.screen.y,     segment.p2.screen.y,     car.percent);
         if(scale > 0) drawCocheTrafico(sx, sy, scale, 0, car.color);
       }
+
+      // Rivales de sala multijugador — mismo cálculo que el tráfico de
+      // arriba, en un array aparte (segment.rivales) para que nunca entren
+      // en la detección de choque contra tráfico de update().
+      for(let i=0;i<segment.rivales.length;i++){
+        const riv = segment.rivales[i];
+        const scale = Util.interpolate(segment.p1.screen.scale, segment.p2.screen.scale, riv.percent);
+        const sx    = Util.interpolate(segment.p1.screen.x,     segment.p2.screen.x,     riv.percent) + (scale*riv.offset*roadWidth*width/2);
+        const sy    = Util.interpolate(segment.p1.screen.y,     segment.p2.screen.y,     riv.percent);
+        if(scale > 0) drawCocheRival(sx, sy, scale, riv.colorIdx, riv.nombre);
+      }
     }
 
     drawAuto();
@@ -1809,7 +2026,7 @@
   }
 
   // Tarjetas de pista suelta: cada una arranca directo esa pista (sin Copa).
-  document.querySelectorAll('.pistaCard').forEach(btn=>{
+  document.querySelectorAll('#pistaGrid .pistaCard').forEach(btn=>{
     const elegir = ()=>{ getAudio(); desbloquearSonidos(); reproducir(SND.click); trackIndex = Number(btn.dataset.track); copaActiva = false; mejorVuelta = null; iniciarCarrera(); };
     btn.addEventListener('touchend', e=>{ e.preventDefault(); elegir(); });
     btn.addEventListener('click', elegir);
@@ -1823,20 +2040,44 @@
   document.getElementById('copaVolverBtn').addEventListener('touchend', e=>{ e.preventDefault(); volverAlMenu(); });
   document.getElementById('copaVolverBtn').addEventListener('click', volverAlMenu);
 
-  /* ---------- MULTIJUGADOR (próximo paso, todavía no implementado) -----
-     Mismo plan que dejamos en carrera.html: nueva sala de WebSocket en
-     main.py con el mismo patrón de código-al-azar/host que ya tiene
-     Estratega de Códigos. resetPista() es determinística (no usa
-     Math.random en ningún lado de la generación de la pista), así que el
-     circuito ya sale IGUAL para cualquiera que la corra — no hace falta
-     ni mandar una semilla. Cada cliente le manda al server, ~12 veces por
-     segundo, su {position, playerX, vuelta} — el server solo reenvía esos
-     paquetes al resto de la sala (los derrapes/choques contra el borde
-     son locales, no hay choque auto-contra-auto en este modo) y anota el
-     orden de llegada a las 3 vueltas para repartir monedas al final. Los
-     rivales se dibujan interpolando entre el último paquete y el
-     anterior, ubicados en la pista con Util.project como cualquier otro
-     objeto de la escena. */
+  // ---------- Controles de la sala multijugador ---------------------------
+  function salirDeLaSala(){
+    if(wsSala && wsSala.readyState === 1){
+      try{ wsSala.send(JSON.stringify({type:'leave'})); }catch(e){}
+    }
+    // drift.html vive embebido en un iframe cuando llega por sala (ver
+    // index.html, igual que Monster Crazy) — le avisa al padre para que
+    // cierre el iframe y vuelva al menú de juegos. Si por lo que sea se
+    // abrió suelto (probando directo la URL con ?sala=...), no hay padre
+    // que escuche y no pasa nada más.
+    if(window.parent !== window) window.parent.postMessage({type:'driftExit'}, '*');
+  }
+  document.getElementById('salaSalirBtn').addEventListener('click', salirDeLaSala);
+  document.getElementById('salaIniciarBtn').addEventListener('click', ()=>{
+    if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'iniciar'}));
+  });
+  document.querySelectorAll('#salaPistaGrid .pistaCard').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'elegir_pista', pista: Number(btn.dataset.pista)}));
+    });
+  });
+
+  // ---------- Arranque: sala multijugador vs. selección normal -----------
+  if(enSala){
+    document.getElementById('startScreen').classList.add('hidden');
+    document.getElementById('salaScreen').classList.remove('hidden');
+    getAudio(); desbloquearSonidos();
+    conectarSala();
+    // Tickea el número de la cuenta del bot cada segundo — renderSala()
+    // solo se llama de nuevo cuando llega un mensaje de estado nuevo del
+    // servidor (join/leave/elegir pista), no cada segundo, así que sin
+    // esto el número se quedaría fijo entre un mensaje y el siguiente.
+    setInterval(()=>{
+      if(!salaEstado || salaEstado.status !== 'waiting' || !salaEstado.matchmaking_deadline_ms) return;
+      const restante = Math.max(0, Math.ceil((salaEstado.matchmaking_deadline_ms - Date.now())/1000));
+      document.getElementById('salaBotCountdownNum').textContent = restante;
+    }, 1000);
+  }
 
 })();
 </script>
