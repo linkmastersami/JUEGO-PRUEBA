@@ -1248,21 +1248,28 @@
     choque:         sonido('choque.mp3'),
     contencion:     sonido('contencion.mp3'),
     click:          sonido('click_menu.mp3'),
-    motor:          sonido('motor_loop.mp3'),
+    // 3 recortes de 4s del mismo motor_loop.mp3 original (que es una
+    // rampa de "arranca en 1ra, mete 2da, mete 3ra..." de punta a punta,
+    // no un ronroneo pensado para repetirse) — uno del principio, uno
+    // del medio y uno del final, cada uno con un fundido cortito en las
+    // puntas (para que el propio loop de CADA capa no se note tanto) y
+    // los tres sonando SIEMPRE los tres juntos en loop durante toda la
+    // carrera, mezclando solo el VOLUMEN entre ellos según la velocidad
+    // (ver actualizarMotor) — así el cambio de tono se siente como
+    // cambiar de marcha de verdad, y nunca hace falta re-ubicar (pisar
+    // currentTime) ningún <audio>, que era lo que sonaba trabado.
+    motorBajo:  sonido('motor_bajo.mp3'),
+    motorMedio: sonido('motor_medio.mp3'),
+    motorAlto:  sonido('motor_alto.mp3'),
     derrape:        sonido('derrape.mp3'),
     // Misma fanfarria de "ganaste la partida" que usa Estratega de
     // Códigos (frontend/index.html, soundVictoriaPartida) — vive al lado
     // de drift.html (frontend/victoria-partida.mp3), no en sonidos/.
     carreraGanada:  new Audio('victoria-partida.mp3'),
   };
-  // Este NO se clona/reproduce con reproducir() como el resto — es
-  // continuo, no un golpe suelto, y va "escrubbeado" (ver actualizarMotor)
-  // en vez de loopeado: motor_loop.mp3 es una rampa de aceleración de
-  // punta a punta (no un ronroneo diseñado para repetirse), así que
-  // dejarlo en loop=true sonaba raro cada vez que volvía de golpe al
-  // principio. Sin loop, currentTime se pisa cuadro a cuadro según qué
-  // tan rápido vas — el punto del audio ES la velocidad, nunca "se
-  // termina" ni hace falta que vuelva a arrancar solo.
+  // Las 3 capas del motor NO se clonan/reproducen con reproducir() como el
+  // resto — son continuas, no un golpe suelto (ver el comentario grande
+  // donde se definen, arriba).
   // SND.derrape TAMPOCO se clona/loopea: es un chirrido de 9.58s (mucho más
   // largo que cualquier derrape posible — el medidor se llena del todo en
   // ~1s, ver DRIFT_CARGA_POR_SEG), así que alcanza con arrancarlo una sola
@@ -1279,7 +1286,7 @@
     }catch(e){ return null; }
   }
   let sonidosDesbloqueados = false;
-  // OJO — SND.motor y SND.derrape quedan AFUERA a propósito: a los dos se
+  // OJO — las 3 capas del motor y SND.derrape quedan AFUERA a propósito: a todos se
   // los play()/pause() directo desde otro lado (iniciarMotor/
   // actualizarDrift), no se clonan como el resto. Si además se los
   // "desbloqueaba" acá con un play()+pause(), el pause() de ACÁ podía
@@ -1300,70 +1307,69 @@
     });
   }
 
-  // Motor: un solo <audio> en loop (no se clona como el resto — es
-  // continuo, no un golpe suelto) cuyo tono/volumen se recalculan cuadro a
-  // cuadro en update() según qué tan rápido vas (playbackRate del <audio>,
-  // soportado igual en el navegador del celular que en la compu — no hace
-  // falta Web Audio API para esto).
-  // OJO: se probó pasar el motor por un GainNode de Web Audio
-  // (createMediaElementSource) para subirlo más allá del tope de 1.0 de
-  // .volume, pero eso lo dejó MUDO del todo en la práctica — apenas se
-  // conecta un <audio> a un GainNode, TODO su sonido pasa a depender de
-  // que el AudioContext esté "running" (no "suspended"); si eso no
-  // termina de pasar a tiempo (nada raro en un iframe / con la política
-  // de autoplay del navegador), no suena nada, ni siquiera bajito, y ya
-  // no hay forma de volver al <audio> normal sin recargar la página. Se
-  // volvió al camino simple de siempre: solo .volume (tope real 1.0, no
-  // se puede pasar de la fuerza con la que está grabado el mp3 sin ese
-  // riesgo) — si hace falta más fuerte de verdad, la forma segura es
-  // resubir motor_loop.mp3 ya masterizado más alto, no forzarlo por acá.
-  // OJO #2: también se probó "escrubbear" el motor (pisarle currentTime
-  // cuadro a cuadro para que la posición del audio representara la
-  // velocidad, en vez de loopear) — sonaba trabado/feo, y la pista fue
-  // clarísima: al mandar la app a segundo plano el navegador PAUSA el
-  // requestAnimationFrame (así que update() deja de pisar currentTime) y
-  // ahí sí sonaba perfecto; volviendo a primer plano, trabado de nuevo.
-  // O sea que el problema era justo ESO — reposicionar un <audio>
-  // comprimido muchas veces por segundo se escucha mal (se nota el
-  // salto/re-sincronizado del decoder), por más que se lo intente hacer
-  // pocas veces por segundo. Vuelta al camino de siempre: loop + solo
-  // playbackRate/volume (ninguno de los dos necesita re-ubicar el audio
-  // en ningún punto, así que no hay nada que saltar ni que pueda sonar
-  // trabado). El precio es el que ya se sabía: como motor_loop.mp3 es una
-  // rampa de aceleración y no un ronroneo diseñado para repetirse, se va
-  // a notar un saltito cada vez que el loop vuelve al principio — pero
-  // eso pasa una vez cada ~25s, nada comparado con sonar mal todo el
-  // tiempo.
-  SND.motor.loop = true;
+  // ---------- Motor: 3 capas en loop, mezcladas por volumen ---------------
+  // Historial (para no repetir los mismos dos intentos fallidos):
+  //  1) Un solo <audio> con .currentTime pisado cuadro a cuadro para que la
+  //     posición representara la velocidad ("escrubbeo") — sonaba
+  //     trabado/feo. Se notó clarísimo mandando la app a segundo plano: ahí
+  //     el navegador pausa requestAnimationFrame (nada pisa currentTime) y
+  //     sonaba perfecto: reposicionar un <audio> comprimido muchas veces
+  //     por segundo se escucha mal, así se lo haga pocas veces.
+  //  2) Un GainNode de Web Audio para subir el volumen más allá de 1.0 —
+  //     dejaba el motor mudo del todo si el AudioContext no llegaba a
+  //     "running" a tiempo (frecuente en un iframe).
+  // La solución de acá evita los dos problemas de raíz: nunca se re-ubica
+  // NINGÚN <audio> (ni currentTime ni Web Audio) — las 3 capas suenan
+  // SIEMPRE las tres en loop desde que arranca la carrera hasta que
+  // termina, y lo único que cambia cuadro a cuadro es el VOLUMEN de cada
+  // una (barato y sin ningún riesgo de trabarse). Como las 3 vienen de
+  // puntos distintos del mismo motor_loop.mp3 (una rampa real de "arranca,
+  // mete 2da, mete 3ra..."), pasar el peso de una a otra según la
+  // velocidad se siente como iría cambiando de marcha de verdad — no como
+  // un loop mudo repitiéndose.
+  function pesosMotor(x){
+    // x: 0 (motorBajo puro) .. 0.5 (motorMedio puro) .. 1 (motorAlto puro),
+    // reparto triangular — los tres pesos siempre suman 1.
+    return {
+      bajo:  Util.limit(1 - x*2, 0, 1),
+      medio: Util.limit(1 - Math.abs(x*2 - 1), 0, 1),
+      alto:  Util.limit(x*2 - 1, 0, 1),
+    };
+  }
+  let motorIntensidadSuave = 0; // suavizada cuadro a cuadro para que no "zumbe" al cambiar de golpe
   // Se llama recién en el "¡YA!" de la cuenta regresiva (ver
-  // arrancarCuentaRegresiva), no al entrar a la pista — antes sonaba
-  // desde que aparecía el 3-2-1, y tenía que arrancar recién cuando
-  // arranca la carrera de verdad.
+  // arrancarCuentaRegresiva), no al entrar a la pista.
   function iniciarMotor(){
-    try{
-      SND.motor.currentTime = 0;
-      SND.motor.volume = 0.55;
-      SND.motor.playbackRate = 0.75;
-      SND.motor.play().catch(()=>{});
-    }catch(e){}
+    motorIntensidadSuave = 0;
+    [SND.motorBajo, SND.motorMedio, SND.motorAlto].forEach(a=>{
+      try{ a.currentTime = 0; a.volume = 0; a.play().catch(()=>{}); }catch(e){}
+    });
   }
   function detenerMotor(){
     try{
-      SND.motor.pause(); SND.derrape.pause(); derrapandoAntes = false;
+      [SND.motorBajo, SND.motorMedio, SND.motorAlto].forEach(a=>a.pause());
+      SND.derrape.pause(); derrapandoAntes = false;
       if(clonFanfarria){ clonFanfarria.pause(); clonFanfarria = null; } // corta la fanfarria si quedó sonando de la carrera anterior
     }catch(e){}
   }
   // derrapando: mientras se escucha el chirrido del derrape (SND.derrape)
   // el motor se silencia del todo — se lo tapaba igual, mejor cortarlo
   // limpio. El "volver al inicio" cuando termina el derrape lo hace
-  // actualizarDrift() (ver ahí abajo) pisando currentTime a 0 UNA sola
-  // vez justo al cortarse el chirrido (no en cada cuadro como se probó
-  // antes) — eso sí es seguro, es un solo salto puntual, no uno detrás
-  // de otro sin parar.
+  // actualizarDrift() (ver ahí abajo) reseteando la intensidad a 0 UNA
+  // sola vez justo al cortarse el chirrido (no currentTime — acá nunca
+  // hace falta tocarlo, las 3 capas jamás se re-ubican).
   function actualizarMotor(speedPercent, boostIntensidad, derrapando){
-    if(derrapando){ SND.motor.volume = 0; return; }
-    SND.motor.playbackRate = Util.limit(0.75 + speedPercent*0.75 + boostIntensidad*0.35, 0.5, 2);
-    SND.motor.volume       = Util.limit(0.55 + speedPercent*0.45 + boostIntensidad*0.2, 0, 1);
+    if(derrapando){
+      [SND.motorBajo, SND.motorMedio, SND.motorAlto].forEach(a=>a.volume=0);
+      return;
+    }
+    const intensidadObjetivo = Util.limit(speedPercent + boostIntensidad*0.4, 0, 1);
+    motorIntensidadSuave += (intensidadObjetivo - motorIntensidadSuave) * Math.min(1, step*4);
+    const pesos = pesosMotor(motorIntensidadSuave);
+    const volumenBase = Util.limit(0.6 + speedPercent*0.25 + boostIntensidad*0.2, 0, 1);
+    SND.motorBajo.volume  = pesos.bajo  * volumenBase;
+    SND.motorMedio.volume = pesos.medio * volumenBase;
+    SND.motorAlto.volume  = pesos.alto  * volumenBase;
   }
 
   function flashMessage(text, color){
@@ -1392,7 +1398,7 @@
     } else if(!derrapando && derrapandoAntes){
       try{
         SND.derrape.pause();
-        SND.motor.currentTime = 0; // "vuelve al inicio" el motor al dejar de escucharse el derrape — ver actualizarMotor
+        motorIntensidadSuave = 0; // "vuelve al inicio" el motor al dejar de escucharse el derrape — ver actualizarMotor
       }catch(e){}
     }
     derrapandoAntes = derrapando;
