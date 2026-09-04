@@ -258,6 +258,7 @@
   resize();
 
   document.getElementById('closeBtn').addEventListener('click', ()=>{
+    detenerMotor();
     document.getElementById('resultScreen').classList.add('hidden');
     document.getElementById('copaScreen').classList.add('hidden');
     document.getElementById('startScreen').classList.remove('hidden');
@@ -913,7 +914,9 @@
     choque:         sonido('choque.mp3'),
     contencion:     sonido('contencion.mp3'),
     click:          sonido('click_menu.mp3'),
+    motor:          sonido('motor_loop.mp3'),
   };
+  SND.motor.loop = true; // este NO se clona/reproduce con reproducir() — suena solo mientras dura la carrera, ver iniciarMotor/detenerMotor/actualizarMotor
   function reproducir(audioEl, vol){
     if(!audioEl) return;
     try{
@@ -926,10 +929,29 @@
   function desbloquearSonidos(){
     if(sonidosDesbloqueados) return;
     sonidosDesbloqueados = true;
-    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click]).forEach(a=>{
+    [].concat(SND.capsula, SND.turbo, [SND.capsulasLlenas, SND.choque, SND.contencion, SND.click, SND.motor]).forEach(a=>{
       if(!a) return;
       a.play().then(()=>{ a.pause(); a.currentTime = 0; }).catch(()=>{});
     });
+  }
+
+  // Motor: un solo <audio> en loop (no se clona como el resto — es
+  // continuo, no un golpe suelto) cuyo tono/volumen se recalculan cuadro a
+  // cuadro en update() según qué tan rápido vas (playbackRate del <audio>,
+  // soportado igual en el navegador del celular que en la compu — no hace
+  // falta Web Audio API para esto).
+  function iniciarMotor(){
+    try{
+      SND.motor.currentTime = 0;
+      SND.motor.volume = 0.15;
+      SND.motor.playbackRate = 0.65;
+      SND.motor.play().catch(()=>{});
+    }catch(e){}
+  }
+  function detenerMotor(){ try{ SND.motor.pause(); }catch(e){} }
+  function actualizarMotor(speedPercent, boostIntensidad){
+    SND.motor.playbackRate = Util.limit(0.65 + speedPercent*0.85 + boostIntensidad*0.4, 0.5, 2.2);
+    SND.motor.volume       = Util.limit(0.12 + speedPercent*0.35 + boostIntensidad*0.15, 0, 0.75);
   }
 
   function flashMessage(text, color){
@@ -1084,6 +1106,7 @@
       ? boostFuerza * Math.min(1, boostDuracionRestante/BOOST_APAGADO_MS)
       : 0;
     speed = Util.limit(speed, 0, maxSpeed*(1+boostActivo));
+    actualizarMotor(speedPercent, boostActivo);
 
     updateCars(dt);
     // Chocar contra el tráfico: si vas más rápido que el auto de adelante
@@ -1161,6 +1184,7 @@
 
   function finalizarCarrera(){
     state = 'finished';
+    detenerMotor();
     document.getElementById('finalMejorVuelta').textContent = (mejorVuelta!==null ? mejorVuelta.toFixed(1)+'s' : '—');
     document.getElementById('finalTiempoTotal').textContent = tiempoTotal.toFixed(1)+'s';
     const btn = document.getElementById('restartBtn');
@@ -1663,6 +1687,7 @@
   function iniciarCarrera(){
     state = 'playing';
     resetPista();
+    iniciarMotor();
     position = 0; speed = 0; playerX = 0;
     boostFuerza = 0; boostDuracionRestante = 0; driftHeld = false; driftCharge = 0; driftAngle = 0;
     capsulas = [0,0,0]; actualizarHudCapsulas();
