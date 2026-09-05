@@ -6151,19 +6151,23 @@ async function cargarSalasEnCurso() {
     }
     cont.innerHTML = salas.map(s => {
       // Ícono grande y aparte (no solo metido en el texto): antes costaba
-      // distinguir de un vistazo si una fila era de Estratega o de Batalla.
+      // distinguir de un vistazo si una fila era de Estratega, Batalla o
+      // Drift.
       const esBatalla = s.game === 'batalla';
-      const icono = esBatalla ? '⚔️' : '🎯';
-      const juegoTxt = esBatalla ? 'Batalla de Avatares' : (s.mode === 'solo' ? 'Estratega · Solitario' : 'Estratega de Códigos');
+      const esDrift = s.game === 'drift';
+      const icono = esBatalla ? '⚔️' : esDrift ? '🏁' : '🎯';
+      const juegoTxt = esBatalla ? 'Batalla de Avatares' : esDrift ? 'Drift' : (s.mode === 'solo' ? 'Estratega · Solitario' : 'Estratega de Códigos');
       const estadoTxt = s.status === 'playing' ? 'en juego' : 'esperando';
       const codeAttr = escaparHtml(s.code);
       const gameAttr = escaparHtml(s.game || 'codigos');
       // "Unirse" (entrar como jugador de verdad) solo tiene sentido si la
       // partida todavía no arrancó — una vez en curso, lo único que se
-      // puede hacer desde acá es mirarla como espectador.
+      // puede hacer desde acá es mirarla como espectador (Drift todavía no
+      // tiene modo espectador, así que ahí directamente no se ofrece "Ver").
       const botonUnirse = s.status === 'waiting'
         ? `<button class="secondary btn-unirse-sala" data-code="${codeAttr}" data-game="${gameAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">➕ Unirse</button>`
         : '';
+      const botonVer = esDrift ? '' : `<button class="ghost btn-ver-espectador" data-code="${codeAttr}" data-game="${gameAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>`;
       return `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #2a2e3d;">
         <span style="display:flex; align-items:center; gap:8px; min-width:0;">
           <span style="font-size:1.3rem; flex-shrink:0;" title="${escaparHtml(juegoTxt)}">${icono}</span>
@@ -6171,7 +6175,7 @@ async function cargarSalasEnCurso() {
         </span>
         <span style="display:flex; gap:6px; flex-shrink:0;">
           ${botonUnirse}
-          <button class="ghost btn-ver-espectador" data-code="${codeAttr}" data-game="${gameAttr}" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap;">👁️ Ver</button>
+          ${botonVer}
         </span>
       </div>`;
     }).join('');
@@ -6218,6 +6222,8 @@ function unirseASala(code, juego) {
   reproducirSonido(soundUiBoton);
   if (juego === 'batalla') {
     conectarSalaBatalla(code, nombre);
+  } else if (juego === 'drift') {
+    lanzarDrift(code);
   } else {
     conectarSala(code, nombre);
   }

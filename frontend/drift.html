@@ -485,6 +485,7 @@
   function mostrarConfirmSalida(){ document.getElementById('confirmSalida').classList.remove('hidden'); }
   function ocultarConfirmSalida(){ document.getElementById('confirmSalida').classList.add('hidden'); }
   function ejecutarSalida(){
+    salidaIntencionalSala = true; // que el onclose de la sala no intente reconectarse solo
     if(wsSala && wsSala.readyState === 1){ try{ wsSala.send(JSON.stringify({type:'leave'})); }catch(e){} }
     if(window.parent !== window) window.parent.postMessage({type:'driftExit'}, '*');
     else location.reload();
@@ -1116,6 +1117,7 @@
     { a:'#7ee787', b:'#155023' },
     { a:'#ffd93d', b:'#8a5c00' },
     { a:'#c977ff', b:'#4a1470' },
+    { a:'#4de6c8', b:'#0d6b57' }, // 6ta — hasta DRIFT_MAX_PLAYERS=6 en sala, cada uno con su propio color sin repetir
   ];
   function resetCars(){
     cars = [];
@@ -1145,22 +1147,47 @@
   }
 
   // ---------- Red: sala multijugador ---------------------------------------
+  // Reconexión: antes, si el WebSocket se cortaba por lo que sea (típico:
+  // usar "Compartir enlace" hace que el sistema operativo abra el menú
+  // nativo y corte la conexión un instante), quedaba mostrando "se perdió
+  // la conexión" para siempre sin volver a intentar — el servidor de
+  // hecho YA soporta reconectarse con el mismo nombre sin perder el lugar
+  // (ver ws_drift_endpoint en main.py, guarda al jugador con un tiempo de
+  // gracia), pero acá nunca se lo pedíamos de nuevo.
+  let salidaIntencionalSala = false; // la pone en true ejecutarSalida() antes de cerrar a propósito
+  let intentosReconexionSala = 0;
+  const MAX_RECONEXION_SALA = 8;
+
   function conectarSala(){
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     wsSala = new WebSocket(`${proto}://${location.host}/ws/drift/${encodeURIComponent(salaCodigo)}/${encodeURIComponent(salaJugador)}`);
-    wsSala.onopen = ()=>{ document.getElementById('salaEsperaTexto').textContent = 'Conectado. Esperando jugadores...'; };
-    wsSala.onclose = ()=>{ if(salaEstado && salaEstado.status !== 'finished') document.getElementById('salaEsperaTexto').textContent = 'Se cortó la conexión con la sala.'; };
+    wsSala.onopen = ()=>{
+      intentosReconexionSala = 0;
+      document.getElementById('salaEsperaTexto').textContent = 'Conectado. Esperando jugadores...';
+    };
+    wsSala.onclose = ()=>{
+      if(salidaIntencionalSala) return;
+      if(intentosReconexionSala >= MAX_RECONEXION_SALA){
+        document.getElementById('salaEsperaTexto').textContent = 'No se pudo reconectar a la sala — volvé a intentar desde el menú.';
+        return;
+      }
+      intentosReconexionSala++;
+      document.getElementById('salaEsperaTexto').textContent = 'Se cortó la conexión — reconectando...';
+      setTimeout(conectarSala, 1500);
+    };
     wsSala.onerror = ()=>{};
     wsSala.onmessage = (ev)=>{
       let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
       if(msg.type === 'state') procesarEstadoSala(msg);
       else if(msg.type === 'error') document.getElementById('salaEsperaTexto').textContent = msg.message || 'Error de sala.';
     };
-    // Mismo keepalive que index.html: sin esto el navegador (sobre todo en
-    // celular, con la pantalla apagada un rato) puede cortar la conexión
-    // en silencio y no enterarnos hasta que se manda algo y falla.
-    setInterval(()=>{ if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'ping'})); }, 20000);
   }
+  // Mismo keepalive que index.html, armado UNA sola vez (no adentro de
+  // conectarSala() — si no, cada reconexión sumaba otro intervalo más
+  // mandando pings de más para siempre): sin esto el navegador (sobre todo
+  // en celular, con la pantalla apagada un rato) puede cortar la conexión
+  // en silencio y no enterarnos hasta que se manda algo y falla.
+  setInterval(()=>{ if(wsSala && wsSala.readyState === 1) wsSala.send(JSON.stringify({type:'ping'})); }, 20000);
 
   function procesarEstadoSala(estado){
     salaEstado = estado;

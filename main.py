@@ -2789,8 +2789,15 @@ async def _watch_disconnect_batalla(room_code: str, pid: str, token: int) -> Non
 # carrera: sala, host, bot de relleno a los 10s, y ver a los rivales de
 # verdad moviéndose en la pista.
 # =============================================================================
-DRIFT_MAX_PLAYERS = 4
+DRIFT_MAX_PLAYERS = 6
 DRIFT_MATCHMAKE_TIMEOUT = 10  # segundos de espera antes de completar con un bot
+# Tiempo de gracia antes de tirar una sala (o dejar de esperar a alguien que
+# se desconectó) cuando ya no queda NINGÚN humano conectado — ver
+# _watch_drift_room_empty. Sin esto, un corte de conexión de un instante
+# (típico al usar "Compartir enlace": el sistema operativo corta el
+# WebSocket mientras muestra el menú nativo de compartir) tiraba la sala
+# entera para siempre.
+DRIFT_DISCONNECT_GRACE = 45
 DRIFT_TOTAL_VUELTAS = 3  # tiene que coincidir con TOTAL_VUELTAS en drift.html
 # Segundos estimados para completar las DRIFT_TOTAL_VUELTAS vueltas en cada
 # pista (índice == TRACKS[] en drift.html) — salieron de simular
@@ -2998,6 +3005,22 @@ async def _watch_drift_matchmake(room_code: str) -> None:
     except Exception:
         pass
     asyncio.create_task(_watch_drift_matchmake(room_code))
+
+
+async def _watch_drift_room_empty(room_code: str) -> None:
+    """Se dispara cuando el último humano conectado de una sala de Drift se
+    desconecta (ver _cleanup_drift). Espera DRIFT_DISCONNECT_GRACE segundos
+    por si alguno vuelve a conectarse con el mismo nombre (ver
+    ws_drift_endpoint, reconexión por nombre) antes de dar la sala por
+    muerta de verdad y borrarla — así un corte de un instante (por ejemplo,
+    "Compartir enlace" abriendo el menú nativo del teléfono) no se lleva
+    puesta la sala entera."""
+    await asyncio.sleep(DRIFT_DISCONNECT_GRACE)
+    room = rooms.get(room_code)
+    if not isinstance(room, DriftRoom):
+        return
+    if not any(p.connected for p in room.players if not p.is_bot):
+        rooms.pop(room_code, None)
 
 
 # ---------------------------------------------------------------------------
@@ -3723,14 +3746,23 @@ async def ws_drift_endpoint(websocket: WebSocket, room_code: str, player_name: s
         if player.ws is not websocket:
             return  # esta conexión ya fue reemplazada por una más nueva (ver comentario equivalente en batalla)
         player.connected = False
-        if room.status == "waiting":
-            room.leave_game(player)
+        # OJO: antes esto hacía room.leave_game(player) + tiraba la sala al
+        # toque si nadie quedaba conectado — un solo host, apenas se le
+        # cortaba la conexión un instante (típico: usa "Compartir enlace",
+        # el sistema operativo abre el menú nativo y corta el WebSocket un
+        # segundo), la sala desaparecía de una para siempre y quien
+        # intentara unirse después con el mismo código se encontraba con
+        # una sala vacía sin host. Ahora se le da un tiempo de gracia (ver
+        # _watch_drift_room_empty) antes de darla por muerta de verdad —
+        # el jugador sigue figurando en room.players (nomás "desconectado")
+        # y puede reconectarse con el mismo nombre (ver más arriba en este
+        # mismo endpoint) sin perder su lugar.
         try:
             await broadcast(room)
         except Exception:
             pass
         if not any(p.connected for p in room.players if not p.is_bot):
-            rooms.pop(room.code, None)
+            asyncio.create_task(_watch_drift_room_empty(room.code))
 
     try:
         while True:
